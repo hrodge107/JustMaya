@@ -16,13 +16,16 @@ from pathlib import Path
 
 from app.config import Settings
 from app.models.document import ExtractedDocument
+from app.models.concept import ConceptInventory
 from app.pipeline.state import PipelineState
 from app.services.pdf_extractor import extract_document
 from app.services.rag_indexer import index_document
 from app.services.concept_analyzer import analyze_document
+from app.services.curriculum_planner import plan_curriculum
 from app.services.model_provider import MetaProvider
 from app.services.token_budget import MeteredProvider
 from app.storage.documents import resolve_document_path
+from app.storage.curriculum import read_draft, save_draft
 
 
 class TransientStageError(Exception):
@@ -31,7 +34,7 @@ class TransientStageError(Exception):
 
 TRANSIENT_ERRORS = (TransientStageError, sqlite3.OperationalError)
 
-STAGE_STATUS = {"extract": "extracting", "index": "indexing", "analyze": "analyzing"}
+STAGE_STATUS = {"extract": "extracting", "index": "indexing", "analyze": "analyzing", "plan": "planning"}
 
 
 def _now() -> str:
@@ -94,4 +97,20 @@ def make_nodes(settings: Settings, data_dir: Path) -> dict:
                 temporary.unlink(missing_ok=True)
         return {"inventory_path": artifact.name}
 
-    return {"extract": extract, "index": index, "analyze": analyze}
+    def plan(state: PipelineState) -> dict:
+        mark_stage(data_dir, state["job_id"], "plan")
+        try:
+            existing, _, job_id = read_draft(data_dir, state["document_id"])
+        except LookupError:
+            existing = None
+        if existing is not None:
+            if job_id != state["job_id"]:
+                raise ValueError("Roadmap belongs to a different job")
+            return {"curriculum_id": existing.curriculum_id}
+        inventory = ConceptInventory.model_validate_json((storage_dir / state["inventory_path"]).read_text(encoding="utf-8"))
+        provider = MeteredProvider(MetaProvider(settings), settings, data_dir)
+        roadmap = asyncio.run(plan_curriculum(inventory, provider, state["job_id"], settings))
+        save_draft(data_dir, roadmap, inventory, state["job_id"])
+        return {"curriculum_id": roadmap.curriculum_id}
+
+    return {"extract": extract, "index": index, "analyze": analyze, "plan": plan}

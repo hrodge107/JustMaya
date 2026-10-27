@@ -40,9 +40,18 @@ JOB_ID = "job-1"
 def stub_analysis(monkeypatch):
     async def fake(document, provider, job_id, **kwargs):
         _, coverage = analysis_windows(document)
-        return ConceptInventory(document_id=document.document_id, concepts=[], learning_objectives=[],
+        ref = {"document_id": document.document_id, "page_start": 1, "page_end": 1, "section_id": None}
+        return ConceptInventory(document_id=document.document_id, concepts=[{"id": "c", "title": "Topic", "explanation": "Content", "evidence": [ref]}],
+                                learning_objectives=[{"id": "o", "description": "Learn", "concept_ids": ["c"], "evidence": [ref]}],
                                 prerequisite_edges=[], coverage=coverage)
     monkeypatch.setattr(pipeline_nodes, "analyze_document", fake)
+    async def fake_plan(inventory, provider, job_id, settings):
+        from app.models.curriculum import Roadmap
+        return Roadmap.model_validate({"curriculum_id": inventory.document_id + "-curriculum", "document_id": inventory.document_id,
+            "revision": 1, "episodes": [{"episode_id": inventory.document_id + "-episode", "title": "Topic",
+            "objective_ids": ["o"], "concepts": [{"concept_id": "c", "basis": "inferred", "explanation": "Suggested", "uncertainty": []}],
+            "dialogue_words": 100, "words_per_minute": 140, "interaction_minutes": 2}]})
+    monkeypatch.setattr(pipeline_nodes, "plan_curriculum", fake_plan)
 
 
 def make_settings(tmp_path):
@@ -121,6 +130,16 @@ def test_claim_atomicity(tmp_path, fixtures):
     assert results.count(False) == 1
 
 
+def test_retry_claim_clears_previous_error(tmp_path, fixtures):
+    seed_job(tmp_path, fixtures)
+    conn = connect_db(tmp_path)
+    with conn:
+        conn.execute("UPDATE jobs SET execution_state='failed', error='old error' WHERE job_id=?", (JOB_ID,))
+    assert claim_job(conn, JOB_ID, ("failed",))
+    assert get_job(conn, JOB_ID)["error"] is None
+    conn.close()
+
+
 def test_full_run_partial_complete(tmp_path, fixtures, monkeypatch):
     seed_job(tmp_path, fixtures)
     settings = make_settings(tmp_path)
@@ -131,9 +150,9 @@ def test_full_run_partial_complete(tmp_path, fixtures, monkeypatch):
 
     assert result["claimed"] is True
     job = result["job"]
-    assert job["status"] == "analyzing"
-    assert job["stage"] == "analyze"
-    assert job["execution_state"] == "partial_complete"
+    assert job["status"] == "planning"
+    assert job["stage"] == "plan"
+    assert job["execution_state"] == "awaiting_review"
     assert job["status"] != "ready"
     assert calls == [DOC_ID]
     artifact = extraction_artifact_path(tmp_path, DOC_ID)
@@ -218,8 +237,8 @@ def test_resume_skips_completed_nodes(tmp_path, fixtures, monkeypatch):
     stub_index(monkeypatch, index_calls, fail_times=-1)
     second = run_job(JOB_ID, settings, tmp_path, eligible=("failed",))
 
-    assert second["job"]["execution_state"] == "partial_complete"
-    assert second["job"]["status"] == "analyzing"
+    assert second["job"]["execution_state"] == "awaiting_review"
+    assert second["job"]["status"] == "planning"
     assert extract_calls == [1]  # extract node was not re-executed
     assert index_calls[-1] == DOC_ID
     assert extraction_artifact_path(tmp_path, DOC_ID).exists()
@@ -245,12 +264,14 @@ def test_analysis_failure_resumes_without_repeating_prior_nodes(tmp_path, fixtur
     async def succeed(document, provider, job_id, **kwargs):
         analysis_calls.append(1)
         _, coverage = analysis_windows(document)
-        return ConceptInventory(document_id=document.document_id, concepts=[], learning_objectives=[],
+        ref = {"document_id": document.document_id, "page_start": 1, "page_end": 1, "section_id": None}
+        return ConceptInventory(document_id=document.document_id, concepts=[{"id": "c", "title": "Topic", "explanation": "Content", "evidence": [ref]}],
+                                learning_objectives=[{"id": "o", "description": "Learn", "concept_ids": ["c"], "evidence": [ref]}],
                                 prerequisite_edges=[], coverage=coverage)
     monkeypatch.setattr(pipeline_nodes, "analyze_document", succeed)
     second = run_job(JOB_ID, settings, tmp_path)
-    assert second["job"]["status"] == "analyzing"
-    assert second["job"]["execution_state"] == "partial_complete"
+    assert second["job"]["status"] == "planning"
+    assert second["job"]["execution_state"] == "awaiting_review"
     assert extract_calls == [1] and index_calls == [DOC_ID] and len(analysis_calls) == 2
     assert ConceptInventory.model_validate_json(previous.read_text(encoding="utf-8")).document_id == DOC_ID
 
@@ -263,12 +284,40 @@ def test_explicitly_advance_old_partial_job(tmp_path, fixtures, monkeypatch):
     stub_index(monkeypatch, index_calls)
     monkeypatch.setattr(pipeline_graph, "STAGE_NODES", ("extract", "index"))
     assert run_job(JOB_ID, settings, tmp_path)["job"]["status"] == "indexing"
-    monkeypatch.setattr(pipeline_graph, "STAGE_NODES", ("extract", "index", "analyze"))
-    assert run_job(JOB_ID, settings, tmp_path)["claimed"] is False
-    resumed = run_job(JOB_ID, settings, tmp_path, eligible=("partial_complete",))
-    assert resumed["job"]["status"] == "analyzing"
+    conn = connect_db(tmp_path)
+    with conn:
+        conn.execute("UPDATE jobs SET execution_state = 'partial_complete' WHERE job_id = ?", (JOB_ID,))
+    conn.close()
+    monkeypatch.setattr(pipeline_graph, "STAGE_NODES", ("extract", "index", "analyze", "plan"))
+    resumed = run_job(JOB_ID, settings, tmp_path)
+    assert resumed["job"]["status"] == "planning"
+    assert resumed["job"]["execution_state"] == "awaiting_review"
     assert extract_calls == [1] and index_calls == [DOC_ID]
     assert run_job(JOB_ID, settings, tmp_path, eligible=("partial_complete",))["claimed"] is False
+
+
+def test_advance_analysis_checkpoint_without_reanalysis(tmp_path, fixtures, monkeypatch):
+    seed_job(tmp_path, fixtures)
+    settings = make_settings(tmp_path)
+    calls = []
+    stub_index(monkeypatch, calls)
+    monkeypatch.setattr(pipeline_graph, "STAGE_NODES", ("extract", "index", "analyze"))
+    assert run_job(JOB_ID, settings, tmp_path)["job"]["status"] == "analyzing"
+    conn = connect_db(tmp_path)
+    with conn:
+        conn.execute("UPDATE jobs SET execution_state = 'partial_complete' WHERE job_id = ?", (JOB_ID,))
+    conn.close()
+    def unexpected(*args, **kwargs):
+        raise AssertionError("analysis must not repeat")
+    monkeypatch.setattr(pipeline_nodes, "analyze_document", unexpected)
+    monkeypatch.setattr(pipeline_graph, "STAGE_NODES", ("extract", "index", "analyze", "plan"))
+    result = run_job(JOB_ID, settings, tmp_path)
+    assert result["job"]["execution_state"] == "awaiting_review"
+    assert calls == [DOC_ID]
+    drain(settings, tmp_path)
+    conn = connect_db(tmp_path)
+    assert get_job(conn, JOB_ID)["execution_state"] == "awaiting_review"
+    conn.close()
 
 
 def test_analysis_node_reexecution_replaces_one_artifact(tmp_path, fixtures, monkeypatch):
@@ -310,7 +359,7 @@ def test_abandoned_job_recovered(tmp_path, fixtures, monkeypatch):
     stub_index(monkeypatch, calls, fail_times=-1)
     recovered = run_job(JOB_ID, settings, tmp_path, eligible=ELIGIBLE_RECOVERY)
     assert recovered["claimed"] is True
-    assert recovered["job"]["execution_state"] == "partial_complete"
+    assert recovered["job"]["execution_state"] == "awaiting_review"
 
 
 def test_worker_drain_processes_queued(tmp_path, fixtures, monkeypatch):
@@ -325,7 +374,7 @@ def test_worker_drain_processes_queued(tmp_path, fixtures, monkeypatch):
     job = get_job(conn, JOB_ID)
     queued = next_queued_job(conn)
     conn.close()
-    assert job["execution_state"] == "partial_complete"
+    assert job["execution_state"] == "awaiting_review"
     assert queued is None
 
 
@@ -357,8 +406,8 @@ def test_run_endpoint_happy_path(client, fixtures):
     run = client.post(f"/api/jobs/{job_id}/run")
     assert run.status_code == 200
     body = run.json()
-    assert body["status"] == "analyzing"
-    assert body["execution_state"] == "partial_complete"
+    assert body["status"] == "planning"
+    assert body["execution_state"] == "awaiting_review"
 
 
 def test_run_endpoint_unknown_job(client):
@@ -423,8 +472,8 @@ def test_end_to_end_upload_to_indexed(tmp_path, fixtures):
         run = client.post(f"/api/jobs/{job_id}/run")
         assert run.status_code == 200
         body = run.json()
-        assert body["status"] == "analyzing"
-        assert body["execution_state"] == "partial_complete"
+        assert body["status"] == "planning"
+        assert body["execution_state"] == "awaiting_review"
 
         document_id = body["document_id"]
         artifact = tmp_path / "storage" / f"{document_id}.extracted.json"

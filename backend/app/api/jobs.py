@@ -64,8 +64,7 @@ async def run_job_endpoint(job_id: str, request: Request) -> JobStatusResponse:
             status_code=409,
             content=error_body(
                 "JOB_NOT_ELIGIBLE",
-                "Job is already running or complete; only queued or failed "
-                "jobs can be run.",
+                "Job is not eligible to run; it may be running, awaiting review, or complete.",
             ),
         )
     job = result["job"]

@@ -132,6 +132,9 @@ class MeteredProvider:
         self._settings = settings
         self._data_dir = data_dir
 
+    async def count_input_tokens(self, *, system: str, user: str) -> int:
+        return await self._provider.count_input_tokens(system=system, user=user)
+
     async def generate_text(
         self,
         *,

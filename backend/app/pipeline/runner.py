@@ -15,6 +15,7 @@ from app.pipeline.jobs import (
     EXECUTION_FAILED,
     EXECUTION_PARTIAL,
     EXECUTION_QUEUED,
+    EXECUTION_REVIEW,
     EXECUTION_RUNNING,
     claim_job,
     connect_db,
@@ -25,7 +26,7 @@ from app.pipeline.jobs import (
     set_document_status,
 )
 
-ELIGIBLE_RUN = (EXECUTION_QUEUED, EXECUTION_FAILED)
+ELIGIBLE_RUN = (EXECUTION_QUEUED, EXECUTION_FAILED, EXECUTION_PARTIAL)
 ELIGIBLE_WORKER = (EXECUTION_QUEUED,)
 ELIGIBLE_RECOVERY = (EXECUTION_RUNNING,)
 
@@ -40,7 +41,7 @@ def run_job(
     try:
         current = get_job(conn, job_id)
         if (EXECUTION_PARTIAL in eligible and current and current["execution_state"] == EXECUTION_PARTIAL
-                and (current["status"] != "indexing" or current["stage"] != "index")):
+                and (current["status"], current["stage"]) not in (("indexing", "index"), ("analyzing", "analyze"))):
             return {"claimed": False, "job": current}
         if not claim_job(conn, job_id, eligible):
             return {"claimed": False, "job": get_job(conn, job_id)}
@@ -58,14 +59,16 @@ def run_job(
         with SqliteSaver.from_conn_string(str(settings.checkpoint_db_path)) as saver:
             graph = build_graph(saver, settings, data_dir)
             checkpoint = graph.get_state(config)
-            if EXECUTION_PARTIAL in eligible:
-                if checkpoint.next or not checkpoint.values.get("extracted_path") or checkpoint.values.get("inventory_path"):
-                    raise ValueError("Index-only checkpoint is missing or incompatible; cannot resume analysis")
-                graph.update_state(config, {}, as_node="index")
+            if current and current["execution_state"] == EXECUTION_PARTIAL:
+                if checkpoint.next or not checkpoint.values.get("extracted_path"):
+                    raise ValueError("Partial checkpoint is missing or incompatible")
+                if current["stage"] == "analyze" and not checkpoint.values.get("inventory_path"):
+                    raise ValueError("Analysis checkpoint is missing its inventory")
+                graph.update_state(config, {}, as_node=current["stage"])
                 checkpoint = graph.get_state(config)
             if checkpoint.next:
                 graph.invoke(None, config)
-            else:
+            elif not checkpoint.values.get("curriculum_id"):
                 graph.invoke(
                     {
                         "job_id": job_id,
@@ -86,7 +89,7 @@ def run_job(
 
     conn = connect_db(data_dir)
     try:
-        finish_job(conn, job_id, EXECUTION_PARTIAL)
+        finish_job(conn, job_id, EXECUTION_REVIEW)
         job = get_job(conn, job_id)
     finally:
         conn.close()

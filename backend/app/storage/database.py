@@ -69,6 +69,10 @@ EXTRA_COLUMNS = {
     "jobs": {
         "execution_state": "TEXT NOT NULL DEFAULT 'queued'",
     },
+    "roadmaps": {
+        "inventory_payload": "TEXT",
+        "job_id": "TEXT",
+    },
 }
 
 
