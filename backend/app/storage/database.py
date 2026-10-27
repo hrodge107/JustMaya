@@ -53,6 +53,11 @@ EXTRA_COLUMNS = {
         "file_size": "INTEGER",
         "storage_path": "TEXT",
     },
+    # execution_state vocabulary (queued|running|partial_complete|complete|failed)
+    # is enforced in app/pipeline/ — a CHECK can't be added via ALTER TABLE
+    "jobs": {
+        "execution_state": "TEXT NOT NULL DEFAULT 'queued'",
+    },
 }
 
 
