@@ -44,3 +44,6 @@ docs/
 .venv/
 __pycache__/
 backend/data/
+
+# Staged real PDF fixtures (seeded locally, never committed)
+backend/tests/fixtures/
