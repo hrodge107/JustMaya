@@ -1,4 +1,4 @@
-"""Pipeline A graph: START -> extract -> index -> analyze -> plan -> generate -> END.
+"""Pipeline A graph: START -> extract -> index -> analyze -> plan -> generate -> validate -> END.
 
 Errors propagate out of nodes so a failed run leaves a pending checkpoint at
 the failed node; retrying the job resumes there instead of re-running
@@ -15,7 +15,7 @@ from app.config import Settings
 from app.pipeline.nodes import TRANSIENT_ERRORS, make_nodes
 from app.pipeline.state import PipelineState
 
-STAGE_NODES = ("extract", "index", "analyze", "plan", "generate")
+STAGE_NODES = ("extract", "index", "analyze", "plan", "generate", "validate")
 
 
 def build_graph(checkpointer: BaseCheckpointSaver, settings: Settings, data_dir: Path):

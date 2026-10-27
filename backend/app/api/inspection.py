@@ -9,14 +9,14 @@ from app.errors import error_body
 from app.models.concept import ConceptInventory
 from app.models.document import ExtractedDocument
 from app.services.vector_store import get_collection
-from app.storage.episodes import read_episode
+from app.storage.episodes import read_episode, read_episode_state
 
 router = APIRouter()
 
 
 @router.get("/api/documents/{document_id}/inspection/{stage}")
 def inspect_stage(document_id: str, stage: str, request: Request):
-    if stage not in ("extraction", "index", "analysis", "episode"):
+    if stage not in ("extraction", "index", "analysis", "episode", "validation"):
         return JSONResponse(status_code=404, content=error_body("NOT_FOUND", "Stage not found."))
     base = request.app.state.data_dir
     conn = sqlite3.connect(base / "app.db")
@@ -34,6 +34,11 @@ def inspect_stage(document_id: str, stage: str, request: Request):
             return read_episode(base, document_id)
         except LookupError:
             return JSONResponse(status_code=404, content=error_body("NOT_FOUND", "Stage output is not available yet."))
+    if stage == "validation":
+        state = read_episode_state(base, document_id)
+        if state is None:
+            return JSONResponse(status_code=404, content=error_body("NOT_FOUND", "Stage output is not available yet."))
+        return state
     suffix, model = ("extracted", ExtractedDocument) if stage == "extraction" else ("concepts", ConceptInventory)
     path = base / "storage" / f"{document_id}.{suffix}.json"
     if not path.is_file():

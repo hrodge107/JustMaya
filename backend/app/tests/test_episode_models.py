@@ -110,7 +110,7 @@ def test_wrong_checkpoint_count_flagged():
     scenes = _valid_scenes()
     scenes[3] = _scene("s4", dialogue=[_line("line-x")], next_id="s5")
     violations = validate_script(_script(scenes), CHUNKS, OBJECTIVES, WEB_URLS)
-    assert any("exactly two checkpoints" in v for v in violations)
+    assert any("exactly 2 checkpoints" in v for v in violations)
 
 
 def test_invented_chunk_and_web_refs_flagged():

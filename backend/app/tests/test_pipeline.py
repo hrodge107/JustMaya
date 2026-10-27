@@ -338,9 +338,10 @@ def test_analysis_node_reexecution_replaces_one_artifact(tmp_path, fixtures, mon
 
 
 def _stub_generate(monkeypatch):
+    import app.services.episode_validator as episode_validator
     from app.models.episode import EpisodeScript
 
-    async def fake(roadmap, lesson_context, passages, known, provider, job_id, settings):
+    async def fake(roadmap, lesson_context, passages, known, provider, job_id, settings, **kw):
         return EpisodeScript.model_validate({
             "episodeId": lesson_context.episode_id,
             "documentId": roadmap.document_id,
@@ -377,6 +378,9 @@ def _stub_generate(monkeypatch):
         })
 
     monkeypatch.setattr(pipeline_nodes, "generate_episode", fake)
+    # validate_and_publish imports generate_episode by name into its module —
+    # the regeneration path must hit the same stub.
+    monkeypatch.setattr(episode_validator, "generate_episode", fake)
 
 
 def _episode_rows(tmp_path):
@@ -402,7 +406,7 @@ def test_generate_skips_until_confirmed(tmp_path, fixtures, monkeypatch):
     assert called == [] and _episode_rows(tmp_path) == []
 
 
-def test_confirmed_resume_generates_and_parks(tmp_path, fixtures, monkeypatch):
+def test_confirmed_resume_generates_and_publishes(tmp_path, fixtures, monkeypatch):
     from app.storage.curriculum import confirm_draft
     from app.storage.episodes import read_episode
 
@@ -410,6 +414,7 @@ def test_confirmed_resume_generates_and_parks(tmp_path, fixtures, monkeypatch):
     settings = make_settings(tmp_path)
     stub_index(monkeypatch, [])
     _stub_generate(monkeypatch)
+    _stub_review(monkeypatch, [{"verdict": "pass", "violations": []}])
 
     first = run_job(JOB_ID, settings, tmp_path)
     assert first["job"]["stage"] == "plan"
@@ -417,13 +422,13 @@ def test_confirmed_resume_generates_and_parks(tmp_path, fixtures, monkeypatch):
 
     resumed = run_job(JOB_ID, settings, tmp_path, eligible=("partial_complete",))
     assert resumed["claimed"] is True
-    assert resumed["job"]["status"] == "generating"
-    assert resumed["job"]["execution_state"] == "awaiting_review"
+    assert resumed["job"]["status"] == "ready"
+    assert resumed["job"]["execution_state"] == "complete"
 
     rows = _episode_rows(tmp_path)
     assert len(rows) == 1
     script = read_episode(tmp_path, DOC_ID)
-    assert script.status == "draft"
+    assert script.status == "ready"
     artifact = tmp_path / "storage" / f"{DOC_ID}.{script.episodeId}.script.json"
     assert artifact.exists()
     contents = artifact.read_text(encoding="utf-8")
@@ -438,6 +443,162 @@ def test_confirmed_resume_generates_and_parks(tmp_path, fixtures, monkeypatch):
     assert artifact.read_text(encoding="utf-8") == contents
 
 
+# --- A08: validation stage ---
+
+
+class _ReviewProvider:
+    """Stub generation provider serving the semantic review call."""
+
+    def __init__(self, payloads):
+        self.payloads = list(payloads)
+        self.calls = []
+
+    async def generate_structured(self, **kw):
+        from app.services.model_provider import StructuredResult
+
+        self.calls.append(kw)
+        return StructuredResult(
+            data=self.payloads.pop(0),
+            usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        )
+
+    async def generate_text(self, **kw):
+        raise AssertionError("validation must not call generate_text")
+
+    async def count_input_tokens(self, **kw):
+        return 10
+
+
+def _stub_review(monkeypatch, payloads):
+    provider = _ReviewProvider(payloads)
+    monkeypatch.setattr(pipeline_nodes, "MetaProvider", lambda settings: provider)
+    return provider
+
+
+def _confirmed_run(tmp_path, settings, monkeypatch, review_payloads):
+    from app.storage.curriculum import confirm_draft
+
+    stub_index(monkeypatch, [])
+    _stub_generate(monkeypatch)
+    run_job(JOB_ID, settings, tmp_path)
+    confirm_draft(tmp_path, DOC_ID, revision=1)
+    provider = _stub_review(monkeypatch, review_payloads)
+    resumed = run_job(JOB_ID, settings, tmp_path, eligible=("partial_complete",))
+    return resumed, provider
+
+
+def test_validate_failure_marks_failed(tmp_path, fixtures, monkeypatch):
+    seed_job(tmp_path, fixtures)
+    settings = make_settings(tmp_path)
+    resumed, provider = _confirmed_run(
+        tmp_path, settings, monkeypatch,
+        [{"verdict": "fail", "violations": [{"check": "coverage", "detail": "obj-1 not taught"}]},
+         {"verdict": "fail", "violations": [{"check": "coverage", "detail": "still uncovered"}]}],
+    )
+    assert resumed["job"]["status"] == "failed"
+    assert resumed["job"]["execution_state"] == "failed"
+    assert "still uncovered" in resumed["job"]["error"]
+    # review + regen + re-review bounded calls; draft survives with the report
+    assert len(provider.calls) == 2  # generate path is module-stubbed, not provider-served
+    rows = _episode_rows(tmp_path)
+    assert len(rows) == 1
+
+
+def test_validate_node_idempotent_no_respend(tmp_path, fixtures, monkeypatch):
+    from app.storage.episodes import read_episode
+
+    seed_job(tmp_path, fixtures)
+    settings = make_settings(tmp_path)
+    resumed, provider = _confirmed_run(
+        tmp_path, settings, monkeypatch, [{"verdict": "pass", "violations": []}]
+    )
+    assert resumed["job"]["execution_state"] == "complete"
+
+    nodes = pipeline_nodes.make_nodes(settings, tmp_path)
+    state = {"job_id": JOB_ID, "document_id": DOC_ID}
+    result = nodes["validate"](state)
+    assert result["episode_id"] == read_episode(tmp_path, DOC_ID).episodeId
+    assert len(provider.calls) == 1  # ready short-circuit — no re-spend
+
+
+def test_validate_crash_resumes_at_validate(tmp_path, fixtures, monkeypatch):
+    from app.storage.curriculum import confirm_draft
+    from app.storage.episodes import read_episode_state
+
+    seed_job(tmp_path, fixtures)
+    settings = make_settings(tmp_path)
+    stub_index(monkeypatch, [])
+    _stub_generate(monkeypatch)
+    run_job(JOB_ID, settings, tmp_path)
+    confirm_draft(tmp_path, DOC_ID, revision=1)
+
+    boom = []
+    real = pipeline_nodes.validate_and_publish
+
+    async def explode(*a, **k):
+        boom.append(1)
+        raise TransientStageError("validate boom")
+
+    monkeypatch.setattr(pipeline_nodes, "validate_and_publish", explode)
+    first = run_job(JOB_ID, settings, tmp_path, eligible=("partial_complete",))
+    assert first["job"]["execution_state"] == "failed"
+    assert len(boom) == settings.pipeline_node_max_attempts
+
+    _stub_review(monkeypatch, [{"verdict": "pass", "violations": []}])
+    monkeypatch.setattr(pipeline_nodes, "validate_and_publish", real)
+    second = run_job(JOB_ID, settings, tmp_path, eligible=("failed",))
+    assert second["job"]["status"] == "ready"
+    assert second["job"]["execution_state"] == "complete"
+    assert read_episode_state(tmp_path, DOC_ID)["status"] == "ready"
+
+
+def test_pre_change_draft_resumes_into_validate(tmp_path, fixtures, monkeypatch):
+    """Jobs parked at awaiting_review after generation continue into validate."""
+    from app.storage.curriculum import confirm_draft
+    from app.storage.episodes import read_episode_state
+
+    seed_job(tmp_path, fixtures)
+    settings = make_settings(tmp_path)
+    stub_index(monkeypatch, [])
+    _stub_generate(monkeypatch)
+    monkeypatch.setattr(
+        pipeline_graph, "STAGE_NODES",
+        ("extract", "index", "analyze", "plan", "generate"),
+    )
+    run_job(JOB_ID, settings, tmp_path)
+    confirm_draft(tmp_path, DOC_ID, revision=1)
+    parked = run_job(JOB_ID, settings, tmp_path, eligible=("partial_complete",))
+    assert parked["job"]["execution_state"] == "awaiting_review"
+    assert parked["job"]["stage"] == "generate"
+    assert read_episode_state(tmp_path, DOC_ID)["status"] == "draft"
+
+    monkeypatch.undo()
+    _stub_review(monkeypatch, [{"verdict": "pass", "violations": []}])
+    resumed = run_job(JOB_ID, settings, tmp_path)
+    assert resumed["job"]["status"] == "ready"
+    assert resumed["job"]["execution_state"] == "complete"
+    assert read_episode_state(tmp_path, DOC_ID)["status"] == "ready"
+
+
+def test_inspection_validation_stage(tmp_path, fixtures, monkeypatch):
+    seed_job(tmp_path, fixtures)
+    settings = make_settings(tmp_path)
+    resumed, _ = _confirmed_run(
+        tmp_path, settings, monkeypatch, [{"verdict": "pass", "violations": []}]
+    )
+    assert resumed["job"]["execution_state"] == "complete"
+
+    app = create_app(data_dir=tmp_path)
+    app.state.settings = settings
+    with TestClient(app) as client:
+        resp = client.get(f"/api/documents/{DOC_ID}/inspection/validation")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "ready"
+        assert '"verdict":"pass"' in body["validation"]
+        assert client.get("/api/documents/none/inspection/validation").status_code == 404
+
+
 def test_generate_failure_preserves_prior_draft(tmp_path, fixtures, monkeypatch):
     from app.storage.curriculum import confirm_draft
 
@@ -445,6 +606,7 @@ def test_generate_failure_preserves_prior_draft(tmp_path, fixtures, monkeypatch)
     settings = make_settings(tmp_path)
     stub_index(monkeypatch, [])
     _stub_generate(monkeypatch)
+    _stub_review(monkeypatch, [{"verdict": "pass", "violations": []}])
 
     run_job(JOB_ID, settings, tmp_path)
     confirm_draft(tmp_path, DOC_ID, revision=1)
@@ -470,6 +632,7 @@ def test_ready_episode_survives_draft_overwrite(tmp_path, fixtures, monkeypatch)
     settings = make_settings(tmp_path)
     stub_index(monkeypatch, [])
     _stub_generate(monkeypatch)
+    _stub_review(monkeypatch, [{"verdict": "pass", "violations": []}])
     run_job(JOB_ID, settings, tmp_path)
     confirm_draft(tmp_path, DOC_ID, revision=1)
     run_job(JOB_ID, settings, tmp_path, eligible=("partial_complete",))
@@ -634,3 +797,81 @@ def test_end_to_end_upload_to_indexed(tmp_path, fixtures):
         collection = get_collection(settings)
         count = collection.get(where={"document_id": document_id})["ids"]
         assert len(count) > 0
+
+
+@EMBED
+def test_end_to_end_upload_to_ready_episode(tmp_path, fixtures, monkeypatch):
+    """A08: upload -> review -> confirm -> validated episode -> retrieval."""
+    from app.models.curriculum import Roadmap
+
+    def outline(episode_id):
+        return {"episode_id": episode_id, "title": "Topic",
+                "objective_ids": ["o"],
+                "concepts": [{"concept_id": "c", "basis": "inferred",
+                              "explanation": "Suggested", "uncertainty": []}],
+                "dialogue_words": 100, "words_per_minute": 140,
+                "interaction_minutes": 2}
+
+    async def fake_plan(inventory, provider, job_id, settings):
+        doc = inventory.document_id
+        return Roadmap.model_validate({
+            "curriculum_id": doc + "-curriculum", "document_id": doc,
+            "revision": 1,
+            "episodes": [outline(doc + "-episode-1"), outline(doc + "-episode-2")]})
+    monkeypatch.setattr(pipeline_nodes, "plan_curriculum", fake_plan)
+    _stub_generate(monkeypatch)
+    _stub_review(monkeypatch, [{"verdict": "pass", "violations": []}])
+
+    app = create_app(data_dir=tmp_path)
+    app.state.settings = make_settings(tmp_path)
+    with TestClient(app) as client:
+        pdf = fixtures("PDF_SAMPLE.pdf").read_bytes()
+        resp = client.post(
+            "/api/documents", files={"file": ("s.pdf", pdf, "application/pdf")}
+        )
+        assert resp.status_code == 201
+        job_id = resp.json()["job_id"]
+
+        run = client.post(f"/api/jobs/{job_id}/run")
+        assert run.status_code == 200
+        assert run.json()["execution_state"] == "awaiting_review"
+        document_id = run.json()["document_id"]
+
+        curriculum = client.get(f"/api/documents/{document_id}/curriculum")
+        assert curriculum.status_code == 200
+        roadmap = curriculum.json()
+        assert roadmap["confirmed"] is False
+        assert all(e["status"] == "planned_only" for e in roadmap["episodes"])
+
+        confirm = client.post(
+            f"/api/documents/{document_id}/curriculum/confirm",
+            json={"expected_revision": roadmap["revision"]},
+        )
+        assert confirm.status_code == 200
+
+        resumed = client.post(f"/api/jobs/{job_id}/run")
+        assert resumed.status_code == 200
+        body = resumed.json()
+        assert body["status"] == "ready"
+        assert body["execution_state"] == "complete"
+
+        episode_id = document_id + "-episode-1"
+        episode = client.get(f"/api/episodes/{episode_id}")
+        assert episode.status_code == 200
+        payload = episode.json()
+        assert payload["status"] == "ready"
+        assert payload["documentId"] == document_id
+        assert payload["episodeId"] == episode_id
+
+        after = client.get(f"/api/documents/{document_id}/curriculum").json()
+        assert after["confirmed"] is True
+        assert after["episodes"][0]["status"] == "selected"
+        assert all(
+            e["status"] == "planned_only" for e in after["episodes"][1:]
+        )
+
+        inspection = client.get(
+            f"/api/documents/{document_id}/inspection/validation"
+        )
+        assert inspection.status_code == 200
+        assert inspection.json()["status"] == "ready"

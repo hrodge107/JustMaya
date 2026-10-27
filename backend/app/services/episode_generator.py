@@ -178,7 +178,10 @@ async def generate_episode(
     provider: MeteredProvider,
     job_id: str,
     settings: Settings,
+    repair: list[str] | None = None,
 ) -> EpisodeScript:
+    """`repair` seeds the first call with violations from A08 validation —
+    the internal one-repair-pass flow is unchanged."""
     if not roadmap.confirmed or roadmap.lesson_context is None:
         raise GenerationError(
             "ROADMAP_NOT_CONFIRMED: generation requires a confirmed roadmap "
@@ -186,7 +189,7 @@ async def generate_episode(
         )
     schema = _inline_schema(GeneratedEpisode)
     system = _system()
-    user = _user(roadmap, lesson_context, passages, repair=None)
+    user = _user(roadmap, lesson_context, passages, repair=repair)
 
     count = await provider.count_input_tokens(system=system, user=user)
     if count > settings.generation_max_input_tokens:

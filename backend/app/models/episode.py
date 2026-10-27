@@ -83,6 +83,29 @@ class GeneratedEpisode(BaseModel):
     problems: list[str] = []
 
 
+class SemanticViolation(BaseModel):
+    check: str
+    detail: str
+
+
+class SemanticVerdict(BaseModel):
+    """Flat review-verdict wire shape — the endpoint rejects recursive schemas."""
+
+    verdict: Literal["pass", "fail"]
+    violations: list[SemanticViolation] = []
+
+
+class ValidationReport(BaseModel):
+    """Persisted A08 outcome stored on episodes.validation."""
+
+    schema_version: int = 1
+    checked_at: str
+    deterministic_violations: list[str] = []
+    semantic: SemanticVerdict | None = None
+    regenerated: bool = False
+    bounds: dict[str, int | float] = {}
+
+
 def _check_refs(
     refs: list[EpisodeSourceRef],
     web_refs: list[WebRef],
@@ -110,6 +133,7 @@ def validate_script(
     known_chunks: dict[str, tuple[int, int]],
     known_objective_ids: set[str],
     supplied_web_urls: set[str],
+    expected_checkpoints: int = 2,
 ) -> list[str]:
     """Deterministic structural checks; enum shapes are enforced by schema.
 
@@ -154,8 +178,10 @@ def validate_script(
     if len(question_ids) != len(set(question_ids)):
         violations.append("Duplicate question id")
     checkpoint_count = sum(1 for scene in script.scenes if scene.kind == "checkpoint")
-    if checkpoint_count != 2:
-        violations.append(f"Expected exactly two checkpoints, found {checkpoint_count}")
+    if checkpoint_count != expected_checkpoints:
+        violations.append(
+            f"Expected exactly {expected_checkpoints} checkpoints, found {checkpoint_count}"
+        )
 
     reached: set[str] = set()
     queue: deque[str] = deque([script.startSceneId] if script.startSceneId in scenes else [])
