@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     token_stage_budgets: dict[str, int] = {}
     token_job_budget: int | None = 300_000
 
+    analysis_thin_chars_per_page: int = 200
+    analysis_web_fetch_cap: int = 5
+    analysis_web_timeout_seconds: float = 5.0
+
 
 def load_settings() -> Settings:
     try:

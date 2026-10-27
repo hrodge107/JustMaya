@@ -38,6 +38,10 @@ def run_job(
 ) -> dict:
     conn = connect_db(data_dir)
     try:
+        current = get_job(conn, job_id)
+        if (EXECUTION_PARTIAL in eligible and current and current["execution_state"] == EXECUTION_PARTIAL
+                and (current["status"] != "indexing" or current["stage"] != "index")):
+            return {"claimed": False, "job": current}
         if not claim_job(conn, job_id, eligible):
             return {"claimed": False, "job": get_job(conn, job_id)}
         target = job_pipeline_target(conn, job_id)
@@ -54,6 +58,11 @@ def run_job(
         with SqliteSaver.from_conn_string(str(settings.checkpoint_db_path)) as saver:
             graph = build_graph(saver, settings, data_dir)
             checkpoint = graph.get_state(config)
+            if EXECUTION_PARTIAL in eligible:
+                if checkpoint.next or not checkpoint.values.get("extracted_path") or checkpoint.values.get("inventory_path"):
+                    raise ValueError("Index-only checkpoint is missing or incompatible; cannot resume analysis")
+                graph.update_state(config, {}, as_node="index")
+                checkpoint = graph.get_state(config)
             if checkpoint.next:
                 graph.invoke(None, config)
             else:
