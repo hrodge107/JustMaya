@@ -12,6 +12,7 @@ from pathlib import Path
 
 EXECUTION_QUEUED = "queued"
 EXECUTION_RUNNING = "running"
+EXECUTION_REVIEW = "awaiting_review"
 EXECUTION_PARTIAL = "partial_complete"
 EXECUTION_COMPLETE = "complete"
 EXECUTION_FAILED = "failed"
@@ -19,6 +20,7 @@ EXECUTION_STATES = frozenset(
     {
         EXECUTION_QUEUED,
         EXECUTION_RUNNING,
+        EXECUTION_REVIEW,
         EXECUTION_PARTIAL,
         EXECUTION_COMPLETE,
         EXECUTION_FAILED,
@@ -50,7 +52,7 @@ def claim_job(
 ) -> bool:
     placeholders = ",".join("?" for _ in eligible)
     cur = conn.execute(
-        f"UPDATE jobs SET execution_state = ?, updated_at = ? "
+        f"UPDATE jobs SET execution_state = ?, updated_at = ?, error = NULL "
         f"WHERE job_id = ? AND execution_state IN ({placeholders})",
         (EXECUTION_RUNNING, _now(), job_id, *eligible),
     )

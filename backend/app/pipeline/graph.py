@@ -15,7 +15,7 @@ from app.config import Settings
 from app.pipeline.nodes import TRANSIENT_ERRORS, make_nodes
 from app.pipeline.state import PipelineState
 
-STAGE_NODES = ("extract", "index", "analyze")
+STAGE_NODES = ("extract", "index", "analyze", "plan")
 
 
 def build_graph(checkpointer: BaseCheckpointSaver, settings: Settings, data_dir: Path):

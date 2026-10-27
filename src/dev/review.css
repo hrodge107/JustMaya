@@ -1,0 +1,23 @@
+body:has(.review-root) { background: #eef2f0; color: #20312d; }
+#root:has(.review-root) { width: 100%; max-width: none; border: 0; text-align: left; display: block; }
+.review-root { max-width: 1120px; margin: 0 auto; padding: 2rem 1rem 5rem; font: 16px/1.5 'Segoe UI', sans-serif; }
+.review-root h1, .review-root h2, .review-root h3 { color: #17352e; font-family: 'Segoe UI', sans-serif; letter-spacing: normal; }
+.review-root h1 { font-size: 2.5rem; margin: .2rem 0; }
+.review-root h2 { font-size: 1.4rem; margin-bottom: .5rem; }
+.review-root h3 { font-size: 1.1rem; margin: 1.2rem 0 .4rem; }
+.review-root header { border-left: 5px solid #286b56; padding-left: 1rem; margin-bottom: 2rem; }
+.review-kicker { color: #34584e; font-size: .85rem; font-weight: 600; }
+.review-root section { background: #fff; border: 1px solid #c8d4ce; border-radius: 6px; padding: 1.2rem; margin: 1rem 0; }
+.review-root article { border-top: 1px solid #c8d4ce; margin-top: 1.2rem; }
+.review-root p { margin: .35rem 0; }
+.review-root form, .review-root .actions, .review-root .timing { display: flex; flex-wrap: wrap; align-items: end; gap: .75rem; margin: .8rem 0; }
+.review-root label { display: grid; gap: .25rem; }
+.review-root input, .review-root select, .review-root button { font: inherit; min-height: 2.5rem; border: 1px solid #617c70; border-radius: 4px; padding: .35rem .6rem; color: #20312d; background: #fff; }
+.review-root button { cursor: pointer; background: #e3eee8; font-weight: 600; }
+.review-root button:disabled { cursor: not-allowed; opacity: .5; }
+.review-root :focus-visible { outline: 3px solid #ad6300; outline-offset: 2px; }
+.review-root pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 32rem; overflow: auto; padding: 1rem; background: #f2f5f3; border: 1px solid #c8d4ce; font-size: .85rem; }
+.review-root li { margin-bottom: .9rem; }
+.review-root .notice { padding: .8rem; border-left: 4px solid #ad6300; background: #fff8e6; }
+.review-root .timing input { max-width: 11rem; }
+@media (max-width: 600px) { .review-root { padding: 1rem .75rem 3rem; } .review-root h1 { font-size: 2rem; } .review-root section { padding: .9rem; } .review-root form { align-items: stretch; flex-direction: column; } }

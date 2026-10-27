@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     analysis_web_fetch_cap: int = 5
     analysis_web_timeout_seconds: float = 5.0
 
+    roadmap_max_input_tokens: int = 24000
+    roadmap_reading_wpm: float = 140.0
+    roadmap_interaction_minutes: float = 2.0
+
 
 def load_settings() -> Settings:
     try:
