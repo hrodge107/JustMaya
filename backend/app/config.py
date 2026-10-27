@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     rag_chunk_overlap: int = 30
     rag_top_k: int = 5
 
+    checkpoint_db_path: Path = DEFAULT_DATA_DIR / "checkpoints.db"
+    worker_poll_seconds: float = 2.0
+    pipeline_node_max_attempts: int = 3
+
 
 def load_settings() -> Settings:
     try:

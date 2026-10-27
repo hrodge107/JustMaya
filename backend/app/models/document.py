@@ -22,6 +22,7 @@ class JobStatusResponse(BaseModel):
     status: str
     stage: str | None = None
     error: str | None = None
+    execution_state: str | None = None
 
 
 class DocumentPage(BaseModel):

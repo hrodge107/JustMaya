@@ -105,6 +105,7 @@ def test_models_serialize():
         "status": "queued",
         "stage": None,
         "error": None,
+        "execution_state": None,
     }
     record = DocumentRecord(
         documentId="d", filename="f.pdf", status="uploaded", createdAt="t"
