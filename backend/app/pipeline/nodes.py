@@ -28,11 +28,20 @@ from app.services.episode_generator import (
     generate_episode,
     passages_for_lesson,
 )
+from app.services.episode_validator import (
+    ValidationFailed,
+    report_passing,
+    validate_and_publish,
+)
 from app.services.model_provider import MetaProvider
 from app.services.token_budget import MeteredProvider
 from app.storage.documents import resolve_document_path
 from app.storage.curriculum import read_draft, save_draft
-from app.storage.episodes import save_episode_draft
+from app.storage.episodes import (
+    read_episode,
+    read_episode_state,
+    save_episode_draft,
+)
 
 
 class TransientStageError(Exception):
@@ -41,7 +50,7 @@ class TransientStageError(Exception):
 
 TRANSIENT_ERRORS = (TransientStageError, sqlite3.OperationalError)
 
-STAGE_STATUS = {"extract": "extracting", "index": "indexing", "analyze": "analyzing", "plan": "planning", "generate": "generating"}
+STAGE_STATUS = {"extract": "extracting", "index": "indexing", "analyze": "analyzing", "plan": "planning", "generate": "generating", "validate": "validating"}
 
 
 def _now() -> str:
@@ -155,4 +164,59 @@ def make_nodes(settings: Settings, data_dir: Path) -> dict:
         save_episode_draft(data_dir, script, roadmap.curriculum_id)
         return {"episode_id": script.episodeId}
 
-    return {"extract": extract, "index": index, "analyze": analyze, "plan": plan, "generate": generate}
+    def validate(state: PipelineState) -> dict:
+        try:
+            roadmap, _, owner = read_draft(data_dir, state["document_id"])
+        except LookupError:
+            roadmap = None
+        if (
+            roadmap is None
+            or owner != state["job_id"]
+            or not roadmap.confirmed
+            or roadmap.lesson_context is None
+        ):
+            # Parked for review or nothing generated yet — same early-exit
+            # contract as the generate node.
+            return {}
+        existing = read_episode_state(data_dir, state["document_id"])
+        if existing is not None and existing["status"] == "ready":
+            # Idempotent re-execution: already published — no re-spend.
+            script = read_episode(data_dir, state["document_id"])
+            return {"episode_id": script.episodeId}
+        mark_stage(data_dir, state["job_id"], "validate")
+        try:
+            script = read_episode(data_dir, state["document_id"])
+        except LookupError:
+            raise ValidationFailed(
+                "VALIDATION_NO_EPISODE: no episode draft exists"
+            )
+        passages, known_chunks = passages_for_lesson(
+            state["document_id"], roadmap.lesson_context, settings
+        )
+        provider = MeteredProvider(MetaProvider(settings), settings, data_dir)
+        script, report = asyncio.run(
+            validate_and_publish(
+                data_dir,
+                script,
+                roadmap,
+                roadmap.lesson_context,
+                passages,
+                known_chunks,
+                provider,
+                state["job_id"],
+                settings,
+            )
+        )
+        artifact = storage_dir / f"{state['document_id']}.{script.episodeId}.script.json"
+        _write_atomic(artifact, script.model_dump_json())
+        if not report_passing(report):
+            failures = report.deterministic_violations or [
+                f"{v.check}: {v.detail}"
+                for v in (report.semantic.violations if report.semantic else [])
+            ]
+            raise ValidationFailed(
+                "Episode failed validation: " + "; ".join(failures)
+            )
+        return {"episode_id": script.episodeId}
+
+    return {"extract": extract, "index": index, "analyze": analyze, "plan": plan, "generate": generate, "validate": validate}

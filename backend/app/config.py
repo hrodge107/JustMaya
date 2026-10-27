@@ -57,6 +57,16 @@ class Settings(BaseSettings):
     generation_max_input_tokens: int = 30_000
     generation_max_passages: int = 24
 
+    # A08 validation bounds: deterministic ceilings on the draft plus sizing
+    # for the single semantic review call. No minimum duration — short locked
+    # scope may produce a sub-five-minute episode without filler.
+    validation_max_scenes: int = 24
+    validation_max_dialogue_words: int = 2200
+    validation_checkpoint_count: int = 2
+    validation_max_minutes: float = 15.0
+    validation_max_input_tokens: int = 24_000
+    validation_max_tokens: int = 10_000
+
 
 def load_settings() -> Settings:
     try:

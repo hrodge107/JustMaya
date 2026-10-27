@@ -18,6 +18,7 @@ from app.pipeline.jobs import (
     EXECUTION_REVIEW,
     EXECUTION_RUNNING,
     claim_job,
+    complete_job,
     connect_db,
     fail_job,
     finish_job,
@@ -25,10 +26,20 @@ from app.pipeline.jobs import (
     job_pipeline_target,
     set_document_status,
 )
+from app.storage.episodes import read_episode_state
 
 ELIGIBLE_RUN = (EXECUTION_QUEUED, EXECUTION_FAILED, EXECUTION_PARTIAL)
 ELIGIBLE_WORKER = (EXECUTION_QUEUED,)
 ELIGIBLE_RECOVERY = (EXECUTION_RUNNING,)
+
+# Stages a partial_complete job may resume into via as_node update.
+_PARTIAL_ADMIT = (
+    ("indexing", "index"),
+    ("analyzing", "analyze"),
+    ("planning", "plan"),
+    ("generating", "generate"),
+    ("validating", "validate"),
+)
 
 
 def run_job(
@@ -40,10 +51,21 @@ def run_job(
     conn = connect_db(data_dir)
     try:
         current = get_job(conn, job_id)
+        # Pre-change drafts park at awaiting_review after generation; they
+        # resume into the validate stage via an as_node update below.
+        resume_generated = (
+            current is not None
+            and current["execution_state"] == EXECUTION_REVIEW
+            and current["stage"] == "generate"
+            and (episode := read_episode_state(data_dir, current["document_id"]))
+            is not None
+            and episode["status"] != "ready"
+        )
         if (EXECUTION_PARTIAL in eligible and current and current["execution_state"] == EXECUTION_PARTIAL
-                and (current["status"], current["stage"]) not in (("indexing", "index"), ("analyzing", "analyze"), ("planning", "plan"), ("generating", "generate"))):
+                and (current["status"], current["stage"]) not in _PARTIAL_ADMIT):
             return {"claimed": False, "job": current}
-        if not claim_job(conn, job_id, eligible):
+        claimable = (EXECUTION_REVIEW,) if resume_generated else eligible
+        if not claim_job(conn, job_id, claimable):
             return {"claimed": False, "job": get_job(conn, job_id)}
         target = job_pipeline_target(conn, job_id)
         if target is None:
@@ -68,6 +90,9 @@ def run_job(
                     raise ValueError("Planning checkpoint is missing its roadmap")
                 graph.update_state(config, {}, as_node=current["stage"])
                 checkpoint = graph.get_state(config)
+            elif resume_generated:
+                graph.update_state(config, {}, as_node="generate")
+                checkpoint = graph.get_state(config)
             if checkpoint.next:
                 graph.invoke(None, config)
             elif not checkpoint.values.get("curriculum_id"):
@@ -91,7 +116,11 @@ def run_job(
 
     conn = connect_db(data_dir)
     try:
-        finish_job(conn, job_id, EXECUTION_REVIEW)
+        episode = read_episode_state(data_dir, document_id)
+        if episode is not None and episode["status"] == "ready":
+            complete_job(conn, job_id)
+        else:
+            finish_job(conn, job_id, EXECUTION_REVIEW)
         job = get_job(conn, job_id)
     finally:
         conn.close()

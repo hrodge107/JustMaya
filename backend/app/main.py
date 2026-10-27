@@ -10,6 +10,7 @@ from starlette.exceptions import HTTPException
 from app.api.documents import router as documents_router
 from app.api.jobs import router as jobs_router
 from app.api.curriculum import router as curriculum_router
+from app.api.episodes import router as episodes_router
 from app.api.inspection import router as inspection_router
 from app.config import load_settings
 from app.errors import error_body
@@ -35,6 +36,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     app.include_router(documents_router)
     app.include_router(jobs_router)
     app.include_router(curriculum_router)
+    app.include_router(episodes_router)
     app.include_router(inspection_router)
 
     @app.exception_handler(HTTPException)

@@ -109,6 +109,16 @@ def finish_job(
         )
 
 
+def complete_job(conn: sqlite3.Connection, job_id: str) -> None:
+    """Terminal publication state: pipeline produced a ready episode."""
+    with conn:
+        conn.execute(
+            "UPDATE jobs SET status = 'ready', execution_state = ?, "
+            "updated_at = ? WHERE job_id = ?",
+            (EXECUTION_COMPLETE, _now(), job_id),
+        )
+
+
 def fail_job(conn: sqlite3.Connection, job_id: str, error: str) -> None:
     with conn:
         conn.execute(
