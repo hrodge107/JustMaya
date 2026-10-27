@@ -31,3 +31,8 @@ session-handoff.md
 
 # Graphify output
 graphify-out/
+
+# Environment
+.env
+.env.*
+!.env.example
