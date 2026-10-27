@@ -51,6 +51,12 @@ class Settings(BaseSettings):
     roadmap_reading_wpm: float = 140.0
     roadmap_interaction_minutes: float = 2.0
 
+    # ponytail: ~30k output cap — reasoning model burns budget before content;
+    # escalate to phase-wise generation only if live runs show truncation
+    generation_max_tokens: int = 30_000
+    generation_max_input_tokens: int = 30_000
+    generation_max_passages: int = 24
+
 
 def load_settings() -> Settings:
     try:

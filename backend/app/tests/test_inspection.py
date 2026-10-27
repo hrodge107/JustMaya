@@ -4,7 +4,9 @@ from fastapi.testclient import TestClient
 
 from app.main import create_app
 from app.models.document import DocumentPage, ExtractedDocument
+from app.storage.episodes import save_episode_draft
 from app.tests.test_curriculum_models import inventory
+from app.tests.test_episode_models import _script, _valid_scenes
 
 
 def test_inspection_reads_persisted_document_scoped_outputs(tmp_path, monkeypatch):
@@ -28,3 +30,7 @@ def test_inspection_reads_persisted_document_scoped_outputs(tmp_path, monkeypatc
         assert client.get(base + "analysis").status_code == 404
         (tmp_path / "storage" / "d.concepts.json").write_text(inventory().model_dump_json(), encoding="utf-8")
         assert client.get(base + "analysis").json()["concepts"][0]["id"] == "c"
+        assert client.get(base + "episode").status_code == 404
+        save_episode_draft(tmp_path, _script(_valid_scenes(), documentId="d"), "cur-1")
+        episode = client.get(base + "episode").json()
+        assert episode["episodeId"] == "ep-1" and episode["status"] == "draft"

@@ -41,7 +41,7 @@ def run_job(
     try:
         current = get_job(conn, job_id)
         if (EXECUTION_PARTIAL in eligible and current and current["execution_state"] == EXECUTION_PARTIAL
-                and (current["status"], current["stage"]) not in (("indexing", "index"), ("analyzing", "analyze"))):
+                and (current["status"], current["stage"]) not in (("indexing", "index"), ("analyzing", "analyze"), ("planning", "plan"), ("generating", "generate"))):
             return {"claimed": False, "job": current}
         if not claim_job(conn, job_id, eligible):
             return {"claimed": False, "job": get_job(conn, job_id)}
@@ -64,6 +64,8 @@ def run_job(
                     raise ValueError("Partial checkpoint is missing or incompatible")
                 if current["stage"] == "analyze" and not checkpoint.values.get("inventory_path"):
                     raise ValueError("Analysis checkpoint is missing its inventory")
+                if current["stage"] == "plan" and not checkpoint.values.get("curriculum_id"):
+                    raise ValueError("Planning checkpoint is missing its roadmap")
                 graph.update_state(config, {}, as_node=current["stage"])
                 checkpoint = graph.get_state(config)
             if checkpoint.next:

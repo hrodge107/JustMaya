@@ -21,6 +21,7 @@ Field ownership:
     chunk_count   out index
     inventory_path out analyze - private document-keyed concept inventory
     curriculum_id out plan - durable roadmap identifier
+    episode_id    out generate - deterministic episode identifier
     error         reserved - future state-carried errors
 """
 
@@ -36,4 +37,5 @@ class PipelineState(TypedDict, total=False):
     chunk_count: int
     inventory_path: str
     curriculum_id: str
+    episode_id: str
     error: dict
