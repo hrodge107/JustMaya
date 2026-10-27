@@ -36,3 +36,6 @@ graphify-out/
 .env
 .env.*
 !.env.example
+
+# Local docs (private: specs, sample PDFs)
+docs/
