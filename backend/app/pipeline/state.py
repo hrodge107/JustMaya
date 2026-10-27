@@ -19,6 +19,7 @@ Field ownership:
     extracted_path out extract - deterministic artifact, storage/{doc}.extracted.json
     page_count    out extract
     chunk_count   out index
+    inventory_path out analyze - private document-keyed concept inventory
     error         reserved - future state-carried errors
 """
 
@@ -32,4 +33,5 @@ class PipelineState(TypedDict, total=False):
     extracted_path: str
     page_count: int
     chunk_count: int
+    inventory_path: str
     error: dict

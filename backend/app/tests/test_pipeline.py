@@ -9,7 +9,10 @@ from fastapi.testclient import TestClient
 from app.config import Settings
 from app.main import create_app
 from app.models.document import ExtractedDocument
+from app.models.concept import ConceptInventory
+from app.services.analysis_windows import analysis_windows
 from app.pipeline import nodes as pipeline_nodes
+from app.pipeline import graph as pipeline_graph
 from app.pipeline.jobs import (
     EXECUTION_STATES,
     claim_job,
@@ -31,6 +34,15 @@ EMBED = pytest.mark.skipif(
 
 DOC_ID = "doc-1"
 JOB_ID = "job-1"
+
+
+@pytest.fixture(autouse=True)
+def stub_analysis(monkeypatch):
+    async def fake(document, provider, job_id, **kwargs):
+        _, coverage = analysis_windows(document)
+        return ConceptInventory(document_id=document.document_id, concepts=[], learning_objectives=[],
+                                prerequisite_edges=[], coverage=coverage)
+    monkeypatch.setattr(pipeline_nodes, "analyze_document", fake)
 
 
 def make_settings(tmp_path):
@@ -119,8 +131,8 @@ def test_full_run_partial_complete(tmp_path, fixtures, monkeypatch):
 
     assert result["claimed"] is True
     job = result["job"]
-    assert job["status"] == "indexing"
-    assert job["stage"] == "index"
+    assert job["status"] == "analyzing"
+    assert job["stage"] == "analyze"
     assert job["execution_state"] == "partial_complete"
     assert job["status"] != "ready"
     assert calls == [DOC_ID]
@@ -128,6 +140,7 @@ def test_full_run_partial_complete(tmp_path, fixtures, monkeypatch):
     assert artifact.exists()
     extracted = ExtractedDocument.model_validate_json(artifact.read_text())
     assert extracted.document_id == DOC_ID
+    assert (tmp_path / "storage" / f"{DOC_ID}.concepts.json").exists()
 
     conn = connect_db(tmp_path)
     doc_status = conn.execute(
@@ -206,10 +219,70 @@ def test_resume_skips_completed_nodes(tmp_path, fixtures, monkeypatch):
     second = run_job(JOB_ID, settings, tmp_path, eligible=("failed",))
 
     assert second["job"]["execution_state"] == "partial_complete"
-    assert second["job"]["status"] == "indexing"
+    assert second["job"]["status"] == "analyzing"
     assert extract_calls == [1]  # extract node was not re-executed
     assert index_calls[-1] == DOC_ID
     assert extraction_artifact_path(tmp_path, DOC_ID).exists()
+
+
+def test_analysis_failure_resumes_without_repeating_prior_nodes(tmp_path, fixtures, monkeypatch):
+    seed_job(tmp_path, fixtures)
+    settings = make_settings(tmp_path)
+    extract_calls, index_calls, analysis_calls = [], [], []
+    spy_extract(monkeypatch, extract_calls)
+    stub_index(monkeypatch, index_calls)
+
+    async def fail(document, provider, job_id, **kwargs):
+        analysis_calls.append(1)
+        raise ValueError("analysis failed")
+    monkeypatch.setattr(pipeline_nodes, "analyze_document", fail)
+    previous = tmp_path / "storage" / f"{DOC_ID}.concepts.json"
+    previous.write_text("previous", encoding="utf-8")
+    first = run_job(JOB_ID, settings, tmp_path)
+    assert first["job"]["execution_state"] == "failed"
+    assert previous.read_text(encoding="utf-8") == "previous"
+
+    async def succeed(document, provider, job_id, **kwargs):
+        analysis_calls.append(1)
+        _, coverage = analysis_windows(document)
+        return ConceptInventory(document_id=document.document_id, concepts=[], learning_objectives=[],
+                                prerequisite_edges=[], coverage=coverage)
+    monkeypatch.setattr(pipeline_nodes, "analyze_document", succeed)
+    second = run_job(JOB_ID, settings, tmp_path)
+    assert second["job"]["status"] == "analyzing"
+    assert second["job"]["execution_state"] == "partial_complete"
+    assert extract_calls == [1] and index_calls == [DOC_ID] and len(analysis_calls) == 2
+    assert ConceptInventory.model_validate_json(previous.read_text(encoding="utf-8")).document_id == DOC_ID
+
+
+def test_explicitly_advance_old_partial_job(tmp_path, fixtures, monkeypatch):
+    seed_job(tmp_path, fixtures)
+    settings = make_settings(tmp_path)
+    extract_calls, index_calls = [], []
+    spy_extract(monkeypatch, extract_calls)
+    stub_index(monkeypatch, index_calls)
+    monkeypatch.setattr(pipeline_graph, "STAGE_NODES", ("extract", "index"))
+    assert run_job(JOB_ID, settings, tmp_path)["job"]["status"] == "indexing"
+    monkeypatch.setattr(pipeline_graph, "STAGE_NODES", ("extract", "index", "analyze"))
+    assert run_job(JOB_ID, settings, tmp_path)["claimed"] is False
+    resumed = run_job(JOB_ID, settings, tmp_path, eligible=("partial_complete",))
+    assert resumed["job"]["status"] == "analyzing"
+    assert extract_calls == [1] and index_calls == [DOC_ID]
+    assert run_job(JOB_ID, settings, tmp_path, eligible=("partial_complete",))["claimed"] is False
+
+
+def test_analysis_node_reexecution_replaces_one_artifact(tmp_path, fixtures, monkeypatch):
+    seed_job(tmp_path, fixtures)
+    settings = make_settings(tmp_path)
+    nodes = pipeline_nodes.make_nodes(settings, tmp_path)
+    state = {"job_id": JOB_ID, "document_id": DOC_ID, "storage_path": f"{DOC_ID}.pdf"}
+    state.update(nodes["extract"](state))
+    first = nodes["analyze"](state)
+    artifact = tmp_path / "storage" / first["inventory_path"]
+    contents = artifact.read_text(encoding="utf-8")
+    second = nodes["analyze"](state)
+    assert first == second and artifact.read_text(encoding="utf-8") == contents
+    assert list((tmp_path / "storage").glob("*.concepts.json")) == [artifact]
 
 
 # --- 5.3: abandoned recovery ---
@@ -284,7 +357,7 @@ def test_run_endpoint_happy_path(client, fixtures):
     run = client.post(f"/api/jobs/{job_id}/run")
     assert run.status_code == 200
     body = run.json()
-    assert body["status"] == "indexing"
+    assert body["status"] == "analyzing"
     assert body["execution_state"] == "partial_complete"
 
 
@@ -350,7 +423,7 @@ def test_end_to_end_upload_to_indexed(tmp_path, fixtures):
         run = client.post(f"/api/jobs/{job_id}/run")
         assert run.status_code == 200
         body = run.json()
-        assert body["status"] == "indexing"
+        assert body["status"] == "analyzing"
         assert body["execution_state"] == "partial_complete"
 
         document_id = body["document_id"]

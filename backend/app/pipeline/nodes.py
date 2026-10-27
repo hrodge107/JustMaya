@@ -1,4 +1,4 @@
-"""Pipeline A graph nodes. Currently wired: extract (A02) -> index (A03).
+"""Pipeline A graph nodes: extract (A02), index (A03), analyze (A04).
 
 Each node marks its stage on the job row at entry, does its work against
 deterministic artifacts, and returns a partial PipelineState update. Domain
@@ -7,7 +7,10 @@ the job failed; transient failures are raised as TransientStageError (or raw
 transient types listed in TRANSIENT_ERRORS) for the node retry policy.
 """
 
+import asyncio
+import os
 import sqlite3
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -16,6 +19,9 @@ from app.models.document import ExtractedDocument
 from app.pipeline.state import PipelineState
 from app.services.pdf_extractor import extract_document
 from app.services.rag_indexer import index_document
+from app.services.concept_analyzer import analyze_document
+from app.services.model_provider import MetaProvider
+from app.services.token_budget import MeteredProvider
 from app.storage.documents import resolve_document_path
 
 
@@ -25,7 +31,7 @@ class TransientStageError(Exception):
 
 TRANSIENT_ERRORS = (TransientStageError, sqlite3.OperationalError)
 
-STAGE_STATUS = {"extract": "extracting", "index": "indexing"}
+STAGE_STATUS = {"extract": "extracting", "index": "indexing", "analyze": "analyzing"}
 
 
 def _now() -> str:
@@ -71,4 +77,21 @@ def make_nodes(settings: Settings, data_dir: Path) -> dict:
         count = index_document(extracted, settings)
         return {"chunk_count": count}
 
-    return {"extract": extract, "index": index}
+    def analyze(state: PipelineState) -> dict:
+        mark_stage(data_dir, state["job_id"], "analyze")
+        extracted = ExtractedDocument.model_validate_json((storage_dir / state["extracted_path"]).read_text(encoding="utf-8"))
+        provider = MeteredProvider(MetaProvider(settings), settings, data_dir)
+        inventory = asyncio.run(analyze_document(extracted, provider, state["job_id"], settings=settings, data_dir=data_dir))
+        artifact = storage_dir / f"{state['document_id']}.concepts.json"
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=storage_dir, delete=False) as handle:
+                temporary = Path(handle.name)
+                handle.write(inventory.model_dump_json())
+            os.replace(temporary, artifact)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+        return {"inventory_path": artifact.name}
+
+    return {"extract": extract, "index": index, "analyze": analyze}
