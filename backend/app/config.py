@@ -25,6 +25,13 @@ class Settings(BaseSettings):
     max_upload_bytes: int = 20 * 1024 * 1024
     max_upload_pages: int = 100
 
+    chroma_dir: Path = DEFAULT_DATA_DIR / "chroma"
+    # ponytail: 180 BPE tokens stays well under MiniLM-L6's 256-word-piece
+    # truncation limit; retune with the real tokenizer if raised past ~200
+    rag_chunk_tokens: int = 180
+    rag_chunk_overlap: int = 30
+    rag_top_k: int = 5
+
 
 def load_settings() -> Settings:
     try:

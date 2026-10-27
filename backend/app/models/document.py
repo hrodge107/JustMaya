@@ -45,3 +45,27 @@ class ExtractedDocument(BaseModel):
     pages: list[DocumentPage]
     sections: list[DocumentSection] = []
     image_only_document: bool = False
+
+
+class SourceRef(BaseModel):
+    chunk_id: str
+    document_id: str
+    page_start: int  # 1-based
+    page_end: int  # 1-based
+    section_id: str | None = None
+
+
+class SourcePassage(BaseModel):
+    chunk_id: str
+    text: str
+    source: SourceRef
+    similarity_score: float | None = None
+
+
+class SourceChunk(BaseModel):
+    chunk_id: str
+    document_id: str
+    text: str
+    page_start: int  # 1-based
+    page_end: int  # 1-based
+    section_id: str | None = None
