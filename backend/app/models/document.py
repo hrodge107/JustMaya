@@ -23,6 +23,13 @@ class JobStatusResponse(BaseModel):
     stage: str | None = None
     error: str | None = None
     execution_state: str | None = None
+    token_usage: dict = {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "cached_tokens": 0,
+        "total_tokens": 0,
+        "by_stage": {},
+    }
 
 
 class DocumentPage(BaseModel):

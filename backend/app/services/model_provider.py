@@ -15,6 +15,12 @@ class GenerationResult:
     usage: dict[str, int] = field(default_factory=dict)
 
 
+@dataclass
+class StructuredResult:
+    data: dict[str, Any]
+    usage: dict[str, int] = field(default_factory=dict)
+
+
 class ModelProviderError(Exception):
     def __init__(self, code: str, message: str, retryable: bool = False):
         super().__init__(message)
@@ -25,12 +31,25 @@ class ModelProviderError(Exception):
 
 class GenerationProvider(Protocol):
     async def generate_text(
-        self, *, system: str, user: str, max_tokens: int | None = None
+        self,
+        *,
+        system: str,
+        user: str,
+        max_tokens: int | None = None,
+        cache_key: str | None = None,
     ) -> GenerationResult: ...
 
     async def generate_structured(
-        self, *, system: str, user: str, schema: dict[str, Any], max_tokens: int | None = None
-    ) -> dict[str, Any]: ...
+        self,
+        *,
+        system: str,
+        user: str,
+        schema: dict[str, Any],
+        max_tokens: int | None = None,
+        cache_key: str | None = None,
+    ) -> StructuredResult: ...
+
+    async def count_input_tokens(self, *, system: str, user: str) -> int: ...
 
 
 _MAX_ATTEMPTS = 3
@@ -102,7 +121,9 @@ class MetaProvider:
         max_attempts: int = _MAX_ATTEMPTS,
         timeout: float = 60.0,
     ):
-        self._url = f"{settings.meta_base_url.rstrip('/')}/chat/completions"
+        base = settings.meta_base_url.rstrip("/")
+        self._url = f"{base}/chat/completions"
+        self._count_url = f"{base}/responses/input_tokens"
         self._key = settings.meta_api_key.get_secret_value()
         self._model = settings.meta_model
         self._transport = transport
@@ -110,25 +131,36 @@ class MetaProvider:
         self._timeout = timeout
 
     async def generate_text(
-        self, *, system: str, user: str, max_tokens: int | None = None
+        self,
+        *,
+        system: str,
+        user: str,
+        max_tokens: int | None = None,
+        cache_key: str | None = None,
     ) -> GenerationResult:
-        payload = self._payload(system, user, max_tokens)
-        body = await self._request(payload)
+        payload = self._payload(system, user, max_tokens, cache_key)
+        body = await self._request(self._url, payload)
         return GenerationResult(text=self._content(body), usage=body.get("usage", {}))
 
     async def generate_structured(
-        self, *, system: str, user: str, schema: dict[str, Any], max_tokens: int | None = None
-    ) -> dict[str, Any]:
+        self,
+        *,
+        system: str,
+        user: str,
+        schema: dict[str, Any],
+        max_tokens: int | None = None,
+        cache_key: str | None = None,
+    ) -> StructuredResult:
         if _has_recursion(schema):
             raise ModelProviderError(
                 "SCHEMA_UNSUPPORTED", "Recursive JSON schemas are not supported by the endpoint"
             )
-        payload = self._payload(system, user, max_tokens)
+        payload = self._payload(system, user, max_tokens, cache_key)
         payload["response_format"] = {
             "type": "json_schema",
             "json_schema": {"name": "response", "schema": _strictify(schema), "strict": True},
         }
-        body = await self._request(payload, retry_parse=True)
+        body = await self._request(self._url, payload)
         raw = self._content(body)
         try:
             data = json.loads(raw)
@@ -137,9 +169,29 @@ class MetaProvider:
                 "BAD_JSON", f"Model output is not valid JSON: {raw[:200]!r}"
             ) from exc
         _validate(data, schema)
-        return data
+        return StructuredResult(data=data, usage=body.get("usage", {}))
 
-    def _payload(self, system: str, user: str, max_tokens: int | None) -> dict[str, Any]:
+    async def count_input_tokens(self, *, system: str, user: str) -> int:
+        """Server-side input-token count for a would-be request (no generation).
+
+        Hits the Responses API's counting endpoint; its rendering of
+        instructions+input may differ from chat-completions by a few tokens —
+        budgets need magnitude, not exactness.
+        """
+        body = await self._request(
+            self._count_url,
+            {"model": self._model, "instructions": system, "input": user},
+        )
+        try:
+            return int(body["input_tokens"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ModelProviderError(
+                "BAD_RESPONSE", f"Unexpected count response: {str(body)[:200]}"
+            ) from exc
+
+    def _payload(
+        self, system: str, user: str, max_tokens: int | None, cache_key: str | None
+    ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "model": self._model,
             "messages": [
@@ -149,13 +201,15 @@ class MetaProvider:
         }
         if max_tokens is not None:
             payload["max_tokens"] = max_tokens
+        if cache_key is not None:
+            payload["prompt_cache_key"] = cache_key
         return payload
 
-    async def _request(self, payload: dict[str, Any], retry_parse: bool = False) -> dict[str, Any]:
+    async def _request(self, url: str, payload: dict[str, Any]) -> dict[str, Any]:
         last: ModelProviderError | None = None
         for attempt in range(self._max_attempts):
             try:
-                return await self._once(payload)
+                return await self._once(url, payload)
             except ModelProviderError as exc:
                 if not exc.retryable:
                     raise
@@ -164,13 +218,13 @@ class MetaProvider:
                     await asyncio.sleep(2 ** attempt + random.uniform(0, 0.5))
         raise last or ModelProviderError("INTERNAL", "No attempts made", retryable=True)
 
-    async def _once(self, payload: dict[str, Any]) -> dict[str, Any]:
+    async def _once(self, url: str, payload: dict[str, Any]) -> dict[str, Any]:
         async with httpx.AsyncClient(
             transport=self._transport, timeout=self._timeout
         ) as client:
             try:
                 resp = await client.post(
-                    self._url,
+                    url,
                     json=payload,
                     headers={"Authorization": f"Bearer {self._key}"},
                 )

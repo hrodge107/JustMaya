@@ -36,6 +36,13 @@ class Settings(BaseSettings):
     worker_poll_seconds: float = 2.0
     pipeline_node_max_attempts: int = 3
 
+    # Token governance: caps on total tokens (prompt+completion) per stage and
+    # per job; None disables that scope. Per-stage overrides via env JSON, e.g.
+    # TOKEN_STAGE_BUDGETS='{"analyze": 200000}'
+    token_stage_budget: int | None = 100_000
+    token_stage_budgets: dict[str, int] = {}
+    token_job_budget: int | None = 300_000
+
 
 def load_settings() -> Settings:
     try:

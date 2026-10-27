@@ -44,6 +44,17 @@ CREATE TABLE IF NOT EXISTS episodes (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS token_usage (
+    usage_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id TEXT NOT NULL,
+    stage TEXT NOT NULL,
+    prompt_tokens INTEGER NOT NULL,
+    completion_tokens INTEGER NOT NULL,
+    cached_tokens INTEGER NOT NULL DEFAULT 0,
+    total_tokens INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+);
 """
 
 
