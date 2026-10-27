@@ -39,3 +39,8 @@ graphify-out/
 
 # Local docs (private: specs, sample PDFs)
 docs/
+
+# Python backend
+.venv/
+__pycache__/
+backend/data/
