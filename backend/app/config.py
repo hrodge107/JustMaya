@@ -22,6 +22,9 @@ class Settings(BaseSettings):
 
     data_dir: Path = DEFAULT_DATA_DIR
 
+    max_upload_bytes: int = 20 * 1024 * 1024
+    max_upload_pages: int = 100
+
 
 def load_settings() -> Settings:
     try:
