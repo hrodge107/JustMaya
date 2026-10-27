@@ -334,6 +334,158 @@ def test_analysis_node_reexecution_replaces_one_artifact(tmp_path, fixtures, mon
     assert list((tmp_path / "storage").glob("*.concepts.json")) == [artifact]
 
 
+# --- A07: generation stage ---
+
+
+def _stub_generate(monkeypatch):
+    from app.models.episode import EpisodeScript
+
+    async def fake(roadmap, lesson_context, passages, known, provider, job_id, settings):
+        return EpisodeScript.model_validate({
+            "episodeId": lesson_context.episode_id,
+            "documentId": roadmap.document_id,
+            "title": roadmap.episodes[0].title,
+            "learningObjectives": ["Learn"],
+            "estimatedMinutes": 5.0,
+            "startSceneId": "s1",
+            "scenes": [
+                {"sceneId": "s1", "kind": "dialogue",
+                 "dialogue": [{"lineId": "l1", "speaker": "mascot", "text": "Hi",
+                               "emotion": "happy", "sourceRefs": [], "webRefs": []}],
+                 "nextSceneId": "s2"},
+                {"sceneId": "s2", "kind": "checkpoint", "dialogue": [],
+                 "question": {"questionId": "q1", "prompt": "W?", "objectiveId": "o",
+                              "options": [{"optionId": "a", "label": "A"},
+                                          {"optionId": "b", "label": "B"}],
+                              "correctOptionId": "a", "correctExplanation": "R",
+                              "incorrectExplanation": "N", "sourceRefs": [],
+                              "webRefs": [], "maxAttempts": 2},
+                 "nextSceneId": "s3"},
+                {"sceneId": "s3", "kind": "checkpoint", "dialogue": [],
+                 "question": {"questionId": "q2", "prompt": "W?", "objectiveId": "o",
+                              "options": [{"optionId": "a", "label": "A"},
+                                          {"optionId": "b", "label": "B"}],
+                              "correctOptionId": "a", "correctExplanation": "R",
+                              "incorrectExplanation": "N", "sourceRefs": [],
+                              "webRefs": [], "maxAttempts": 2},
+                 "nextSceneId": "s4"},
+                {"sceneId": "s4", "kind": "ending",
+                 "dialogue": [{"lineId": "l2", "speaker": "mascot", "text": "Done",
+                               "emotion": "happy", "sourceRefs": [], "webRefs": []}],
+                 "nextSceneId": None},
+            ],
+        })
+
+    monkeypatch.setattr(pipeline_nodes, "generate_episode", fake)
+
+
+def _episode_rows(tmp_path):
+    conn = connect_db(tmp_path)
+    try:
+        return conn.execute("SELECT * FROM episodes").fetchall()
+    finally:
+        conn.close()
+
+
+def test_generate_skips_until_confirmed(tmp_path, fixtures, monkeypatch):
+    seed_job(tmp_path, fixtures)
+    settings = make_settings(tmp_path)
+    stub_index(monkeypatch, [])
+    called = []
+    _stub_generate(monkeypatch)
+    monkeypatch.setattr(
+        pipeline_nodes, "generate_episode",
+        lambda *a, **k: called.append(1) or (_ for _ in ()).throw(AssertionError("must not run")),
+    )
+    result = run_job(JOB_ID, settings, tmp_path)
+    assert result["job"]["execution_state"] == "awaiting_review"
+    assert called == [] and _episode_rows(tmp_path) == []
+
+
+def test_confirmed_resume_generates_and_parks(tmp_path, fixtures, monkeypatch):
+    from app.storage.curriculum import confirm_draft
+    from app.storage.episodes import read_episode
+
+    seed_job(tmp_path, fixtures)
+    settings = make_settings(tmp_path)
+    stub_index(monkeypatch, [])
+    _stub_generate(monkeypatch)
+
+    first = run_job(JOB_ID, settings, tmp_path)
+    assert first["job"]["stage"] == "plan"
+    confirm_draft(tmp_path, DOC_ID, revision=1)
+
+    resumed = run_job(JOB_ID, settings, tmp_path, eligible=("partial_complete",))
+    assert resumed["claimed"] is True
+    assert resumed["job"]["status"] == "generating"
+    assert resumed["job"]["execution_state"] == "awaiting_review"
+
+    rows = _episode_rows(tmp_path)
+    assert len(rows) == 1
+    script = read_episode(tmp_path, DOC_ID)
+    assert script.status == "draft"
+    artifact = tmp_path / "storage" / f"{DOC_ID}.{script.episodeId}.script.json"
+    assert artifact.exists()
+    contents = artifact.read_text(encoding="utf-8")
+
+    # idempotent node re-execution (mid-node crash replays the whole node)
+    nodes = pipeline_nodes.make_nodes(settings, tmp_path)
+    state = {"job_id": JOB_ID, "document_id": DOC_ID}
+    first = nodes["generate"](state)
+    second = nodes["generate"](state)
+    assert first == second == {"episode_id": script.episodeId}
+    assert len(_episode_rows(tmp_path)) == 1
+    assert artifact.read_text(encoding="utf-8") == contents
+
+
+def test_generate_failure_preserves_prior_draft(tmp_path, fixtures, monkeypatch):
+    from app.storage.curriculum import confirm_draft
+
+    seed_job(tmp_path, fixtures)
+    settings = make_settings(tmp_path)
+    stub_index(monkeypatch, [])
+    _stub_generate(monkeypatch)
+
+    run_job(JOB_ID, settings, tmp_path)
+    confirm_draft(tmp_path, DOC_ID, revision=1)
+    run_job(JOB_ID, settings, tmp_path, eligible=("partial_complete",))
+    assert len(_episode_rows(tmp_path)) == 1
+
+    async def boom(*a, **k):
+        raise ValueError("generation exploded")
+
+    monkeypatch.setattr(pipeline_nodes, "generate_episode", boom)
+    nodes = pipeline_nodes.make_nodes(settings, tmp_path)
+    state = {"job_id": JOB_ID, "document_id": DOC_ID}
+    with pytest.raises(ValueError, match="generation exploded"):
+        nodes["generate"](state)
+    assert len(_episode_rows(tmp_path)) == 1
+
+
+def test_ready_episode_survives_draft_overwrite(tmp_path, fixtures, monkeypatch):
+    from app.storage.curriculum import confirm_draft
+    from app.storage.episodes import read_episode, save_episode_draft
+
+    seed_job(tmp_path, fixtures)
+    settings = make_settings(tmp_path)
+    stub_index(monkeypatch, [])
+    _stub_generate(monkeypatch)
+    run_job(JOB_ID, settings, tmp_path)
+    confirm_draft(tmp_path, DOC_ID, revision=1)
+    run_job(JOB_ID, settings, tmp_path, eligible=("partial_complete",))
+
+    script = read_episode(tmp_path, DOC_ID)
+    conn = connect_db(tmp_path)
+    with conn:
+        conn.execute("UPDATE episodes SET status = 'ready' WHERE episode_id = ?", (script.episodeId,))
+    conn.close()
+
+    changed = script.model_copy(deep=True)
+    changed.title = "overwritten"
+    save_episode_draft(tmp_path, changed, "cur-1")
+    assert read_episode(tmp_path, DOC_ID).title == script.title
+
+
 # --- 5.3: abandoned recovery ---
 
 
