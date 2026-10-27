@@ -62,8 +62,9 @@ async def test_generate_structured_validates_against_schema():
         assert payload["response_format"]["type"] == "json_schema"
         return _resp(_ok_body(json.dumps({"title": "T", "score": 4, "tags": ["a"]})))
 
-    data = await _provider(handler).generate_structured(system="s", user="u", schema=SCHEMA)
-    assert data == {"title": "T", "score": 4, "tags": ["a"]}
+    result = await _provider(handler).generate_structured(system="s", user="u", schema=SCHEMA)
+    assert result.data == {"title": "T", "score": 4, "tags": ["a"]}
+    assert result.usage["total_tokens"] == 15
 
 
 @pytest.mark.anyio
@@ -167,6 +168,79 @@ async def test_key_never_serialized():
 
 
 @pytest.mark.anyio
+async def test_count_input_tokens_shape_and_parse():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        seen["payload"] = json.loads(request.content)
+        return _resp({"object": "response.input_tokens", "input_tokens": 1234})
+
+    n = await _provider(handler).count_input_tokens(system="sys prompt", user="user text")
+    assert n == 1234
+    assert seen["url"].endswith("/responses/input_tokens")
+    assert seen["payload"] == {
+        "model": "muse-spark-1.3-contributor",
+        "instructions": "sys prompt",
+        "input": "user text",
+    }
+
+
+@pytest.mark.anyio
+async def test_count_input_tokens_retries_transient():
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        if len(calls) == 1:
+            return httpx.Response(500, text="err")
+        return _resp({"input_tokens": 7})
+
+    assert await _provider(handler).count_input_tokens(system="s", user="u") == 7
+    assert len(calls) == 2
+
+
+@pytest.mark.anyio
+async def test_count_input_tokens_bad_body():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _resp({"unexpected": True})
+
+    with pytest.raises(ModelProviderError) as exc_info:
+        await _provider(handler).count_input_tokens(system="s", user="u")
+    assert exc_info.value.code == "BAD_RESPONSE"
+
+
+@pytest.mark.anyio
+async def test_prompt_cache_key_forwarded_only_when_set():
+    payloads = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payloads.append(json.loads(request.content))
+        return _resp(_ok_body())
+
+    provider = _provider(handler)
+    await provider.generate_text(system="s", user="u")
+    await provider.generate_text(system="s", user="u", cache_key="analyze")
+    assert "prompt_cache_key" not in payloads[0]
+    assert payloads[1]["prompt_cache_key"] == "analyze"
+
+
+@pytest.mark.anyio
+async def test_cached_tokens_survive_in_usage():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _resp(_ok_body(usage={
+            "prompt_tokens": 100,
+            "completion_tokens": 5,
+            "total_tokens": 105,
+            "prompt_tokens_details": {"cached_tokens": 80},
+        }))
+
+    result = await _provider(handler).generate_text(system="s", user="u")
+    assert result.usage["prompt_tokens_details"]["cached_tokens"] == 80
+    assert result.usage["total_tokens"] == 105
+
+
+@pytest.mark.anyio
 async def test_live_capped_structured_call():
     if os.environ.get("JUSTMAYA_LIVE") != "1":
         pytest.skip("set JUSTMAYA_LIVE=1 to run the live endpoint check")
@@ -183,7 +257,7 @@ async def test_live_capped_structured_call():
                 "properties": {"ok": {"type": "boolean"}, "n": {"type": "integer"}}},
         max_tokens=1024,  # reasoning model: needs ~400 tokens before content
     )
-    assert isinstance(data.get("ok"), bool)
+    assert isinstance(data.data.get("ok"), bool)
 
     result = await provider.generate_text(system="s", user="say hi", max_tokens=1024)
     assert result.text

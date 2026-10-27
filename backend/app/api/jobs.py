@@ -8,6 +8,7 @@ from app.errors import error_body
 from app.models.document import JobStatusResponse
 from app.pipeline.jobs import connect_db
 from app.pipeline.runner import ELIGIBLE_RUN, run_job
+from app.services.token_budget import job_usage
 
 router = APIRouter()
 
@@ -35,6 +36,7 @@ async def get_job(job_id: str, request: Request) -> JobStatusResponse:
         stage=row[3],
         error=row[4],
         execution_state=row[5],
+        token_usage=job_usage(request.app.state.data_dir, row[0]),
     )
 
 
@@ -66,4 +68,6 @@ async def run_job_endpoint(job_id: str, request: Request) -> JobStatusResponse:
                 "jobs can be run.",
             ),
         )
-    return JobStatusResponse(**result["job"])
+    job = result["job"]
+    job["token_usage"] = job_usage(data_dir, job_id)
+    return JobStatusResponse(**job)

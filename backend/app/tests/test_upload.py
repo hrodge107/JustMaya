@@ -106,6 +106,13 @@ def test_models_serialize():
         "stage": None,
         "error": None,
         "execution_state": None,
+        "token_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "cached_tokens": 0,
+            "total_tokens": 0,
+            "by_stage": {},
+        },
     }
     record = DocumentRecord(
         documentId="d", filename="f.pdf", status="uploaded", createdAt="t"
