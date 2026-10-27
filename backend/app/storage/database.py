@@ -47,6 +47,15 @@ CREATE TABLE IF NOT EXISTS episodes (
 """
 
 
+EXTRA_COLUMNS = {
+    "documents": {
+        "file_hash": "TEXT",
+        "file_size": "INTEGER",
+        "storage_path": "TEXT",
+    },
+}
+
+
 def init_db(data_dir: Path | None = None) -> Path:
     data_dir = data_dir or DEFAULT_DATA_DIR
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -56,6 +65,11 @@ def init_db(data_dir: Path | None = None) -> Path:
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("PRAGMA journal_mode = WAL")
         conn.executescript(SCHEMA)
+        for table, columns in EXTRA_COLUMNS.items():
+            existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+            for name, col_type in columns.items():
+                if name not in existing:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {col_type}")
         conn.commit()
     finally:
         conn.close()

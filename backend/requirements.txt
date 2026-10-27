@@ -3,3 +3,5 @@ uvicorn[standard]==0.54.0
 pydantic-settings==2.16.1
 pytest==9.1.1
 httpx==0.28.1
+python-multipart==0.0.20
+pymupdf==1.26.6

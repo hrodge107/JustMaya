@@ -7,15 +7,14 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException
 
+from app.api.documents import router as documents_router
+from app.api.jobs import router as jobs_router
 from app.config import load_settings
+from app.errors import error_body
 from app.storage.database import init_db
 from app.storage.documents import init_storage
 
 STATUS_CODES = {404: "NOT_FOUND", 405: "METHOD_NOT_ALLOWED"}
-
-
-def error_body(code: str, message: str, retryable: bool = False) -> dict:
-    return {"error": {"code": code, "message": message, "retryable": retryable}}
 
 
 def create_app(data_dir: Path | None = None) -> FastAPI:
@@ -26,9 +25,13 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         base = data_dir or settings.data_dir
         init_db(base)
         init_storage(base)
+        app.state.data_dir = base
         yield
 
     app = FastAPI(title="JustMaya", lifespan=lifespan)
+    app.state.settings = settings
+    app.include_router(documents_router)
+    app.include_router(jobs_router)
 
     @app.exception_handler(HTTPException)
     async def http_error(request: Request, exc: HTTPException) -> JSONResponse:
