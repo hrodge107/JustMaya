@@ -24,3 +24,18 @@ def test_secret_not_in_repr(monkeypatch):
     settings = Settings(_env_file=None)
     assert "secret-value-123" not in repr(settings)
     assert "secret-value-123" not in str(settings)
+
+
+def test_rag_settings_defaults_and_overrides(monkeypatch):
+    monkeypatch.setenv("META_API_KEY", "secret-value-123")
+    defaults = Settings(_env_file=None)
+    assert defaults.chroma_dir.name == "chroma"
+    assert defaults.rag_chunk_tokens == 180
+    assert defaults.rag_chunk_overlap == 30
+    assert defaults.rag_top_k == 5
+
+    monkeypatch.setenv("RAG_CHUNK_TOKENS", "120")
+    monkeypatch.setenv("RAG_TOP_K", "3")
+    overridden = Settings(_env_file=None)
+    assert overridden.rag_chunk_tokens == 120
+    assert overridden.rag_top_k == 3
