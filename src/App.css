@@ -87,6 +87,10 @@ body:has(.learner) { margin: 0; background: #e9e9f1; color: #30304c; color-schem
 
 .ready { background: var(--ink); color: var(--paper); }
 .ready h2 { color: var(--paper); }
+/* Light button on the dark ready panel keeps the control boundary visible. */
+.learner button.on-dark { background: var(--paper); color: var(--ink); }
+.learner button.on-dark:hover:not(:disabled) { background: var(--mint-bright); }
+.learner button.on-dark:active:not(:disabled) { background: #5fd3c8; }
 
 @media (max-width: 940px) {
   .flow { grid-template-columns: minmax(0, 1fr); }
