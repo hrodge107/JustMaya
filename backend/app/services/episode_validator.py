@@ -193,12 +193,13 @@ async def semantic_review(
         },
         ensure_ascii=False,
     )
-    count = await provider.count_input_tokens(system=_REVIEW_SYSTEM, user=user)
-    if count > settings.validation_max_input_tokens:
-        raise ValidationFailed(
-            f"VALIDATION_INPUT_TOO_LARGE: review input {count} tokens exceeds "
-            f"{settings.validation_max_input_tokens}"
-        )
+    await provider.require_input_budget(
+        system=_REVIEW_SYSTEM, user=user,
+        limit=settings.validation_max_input_tokens,
+        exc=lambda count, limit: ValidationFailed(
+            f"VALIDATION_INPUT_TOO_LARGE: review input {count} tokens exceeds {limit}"
+        ),
+    )
     raw = await provider.generate_structured(
         job_id=job_id,
         stage=VALIDATION_STAGE,

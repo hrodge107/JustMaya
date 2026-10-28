@@ -1,6 +1,17 @@
+"""Pipeline tests inject through the public stage contract:
+`StageContext(provider=..., services=StageServices(...))` into
+run_job/drain/make_nodes, `build_graph(stages=...)` subsets via
+`STAGES[:n]`, and `app.state.stage_ctx` for the run endpoint.
+
+Remaining service-internal seam (deliberate, outside the node contract):
+`episode_validator.generate_episode` — validate_and_publish's
+regeneration path imports it by name inside the service module.
+"""
+
 import os
 import sqlite3
 import threading
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -10,9 +21,20 @@ from app.config import Settings
 from app.main import create_app
 from app.models.document import ExtractedDocument
 from app.models.concept import ConceptInventory
+from app.pipeline.nodes import (
+    STAGES,
+    TransientStageError,
+    extraction_artifact_path,
+    make_nodes,
+)
+from app.pipeline.runner import run_job
+from app.pipeline.stage import StageContext, StageServices
+from app.pipeline.worker import drain
 from app.services.analysis_windows import analysis_windows
-from app.pipeline import nodes as pipeline_nodes
-from app.pipeline import graph as pipeline_graph
+from app.services.pdf_extractor import extract_document as real_extract_document
+from app.services.vector_store import get_collection
+from app.storage.database import init_db
+from app.storage.documents import init_storage
 from app.storage.jobs import (
     ELIGIBLE_RECOVERY,
     ELIGIBLE_RUN,
@@ -26,12 +48,6 @@ from app.storage.jobs import (
     next_queued_job,
     recover_abandoned,
 )
-from app.pipeline.nodes import TransientStageError, extraction_artifact_path
-from app.pipeline.runner import run_job
-from app.pipeline.worker import drain
-from app.services.vector_store import get_collection
-from app.storage.database import init_db
-from app.storage.documents import init_storage
 
 EMBED = pytest.mark.skipif(
     os.environ.get("JUSTMAYA_EMBED") != "1", reason="requires ONNX embedding model"
@@ -41,22 +57,36 @@ DOC_ID = "doc-1"
 JOB_ID = "job-1"
 
 
-@pytest.fixture(autouse=True)
-def stub_analysis(monkeypatch):
-    async def fake(document, provider, job_id, **kwargs):
-        _, coverage = analysis_windows(document)
-        ref = {"document_id": document.document_id, "page_start": 1, "page_end": 1, "section_id": None}
-        return ConceptInventory(document_id=document.document_id, concepts=[{"id": "c", "title": "Topic", "explanation": "Content", "evidence": [ref]}],
-                                learning_objectives=[{"id": "o", "description": "Learn", "concept_ids": ["c"], "evidence": [ref]}],
-                                prerequisite_edges=[], coverage=coverage)
-    monkeypatch.setattr(pipeline_nodes, "analyze_document", fake)
-    async def fake_plan(inventory, provider, job_id, settings):
-        from app.models.curriculum import Roadmap
-        return Roadmap.model_validate({"curriculum_id": inventory.document_id + "-curriculum", "document_id": inventory.document_id,
-            "revision": 1, "episodes": [{"episode_id": inventory.document_id + "-episode", "title": "Topic",
-            "objective_ids": ["o"], "concepts": [{"concept_id": "c", "basis": "inferred", "explanation": "Suggested", "uncertainty": []}],
-            "dialogue_words": 100, "words_per_minute": 140, "interaction_minutes": 2}]})
-    monkeypatch.setattr(pipeline_nodes, "plan_curriculum", fake_plan)
+async def _fake_analyze(document, provider, job_id, **kwargs):
+    _, coverage = analysis_windows(document)
+    ref = {"document_id": document.document_id, "page_start": 1, "page_end": 1, "section_id": None}
+    return ConceptInventory(document_id=document.document_id, concepts=[{"id": "c", "title": "Topic", "explanation": "Content", "evidence": [ref]}],
+                            learning_objectives=[{"id": "o", "description": "Learn", "concept_ids": ["c"], "evidence": [ref]}],
+                            prerequisite_edges=[], coverage=coverage)
+
+
+async def _fake_plan(inventory, provider, job_id, settings):
+    from app.models.curriculum import Roadmap
+    return Roadmap.model_validate({"curriculum_id": inventory.document_id + "-curriculum", "document_id": inventory.document_id,
+        "revision": 1, "episodes": [{"episode_id": inventory.document_id + "-episode", "title": "Topic",
+        "objective_ids": ["o"], "concepts": [{"concept_id": "c", "basis": "inferred", "explanation": "Suggested", "uncertainty": []}],
+        "dialogue_words": 100, "words_per_minute": 140, "interaction_minutes": 2}]})
+
+
+def _services(**overrides):
+    return replace(
+        StageServices(analyze_document=_fake_analyze, plan_curriculum=_fake_plan),
+        **overrides,
+    )
+
+
+def _ctx(settings, data_dir, *, provider=None, services=None, **service_overrides):
+    """StageContext with the default analyze/plan fakes (they would hit the
+    real model); override per test via kwargs or a `services=` bundle."""
+    return StageContext(
+        settings, data_dir, provider=provider,
+        services=services or _services(**service_overrides),
+    )
 
 
 def make_settings(tmp_path):
@@ -92,24 +122,22 @@ def seed_job(tmp_path, fixture_path, doc_id=DOC_ID, job_id=JOB_ID):
     conn.close()
 
 
-def stub_index(monkeypatch, calls, fail_times=0):
+def stub_index(calls, fail_times=0):
     def fake(extracted, settings=None):
         calls.append(extracted.document_id)
         if len(calls) <= fail_times:
             raise TransientStageError("transient boom")
         return 28
 
-    monkeypatch.setattr(pipeline_nodes, "index_document", fake)
+    return fake
 
 
-def spy_extract(monkeypatch, calls):
-    real = pipeline_nodes.extract_document
-
+def spy_extract(calls):
     def spy(*args, **kwargs):
         calls.append(1)
-        return real(*args, **kwargs)
+        return real_extract_document(*args, **kwargs)
 
-    monkeypatch.setattr(pipeline_nodes, "extract_document", spy)
+    return spy
 
 
 # --- 5.1: claiming, stages, terminal states ---
@@ -145,13 +173,13 @@ def test_retry_claim_clears_previous_error(tmp_path, fixtures):
     conn.close()
 
 
-def test_full_run_partial_complete(tmp_path, fixtures, monkeypatch):
+def test_full_run_partial_complete(tmp_path, fixtures):
     seed_job(tmp_path, fixtures)
     settings = make_settings(tmp_path)
     calls = []
-    stub_index(monkeypatch, calls)
+    ctx = _ctx(settings, tmp_path, index_document=stub_index(calls))
 
-    result = run_job(JOB_ID, settings, tmp_path)
+    result = run_job(JOB_ID, settings, tmp_path, ctx=ctx)
 
     assert result["claimed"] is True
     job = result["job"]
@@ -176,13 +204,13 @@ def test_full_run_partial_complete(tmp_path, fixtures, monkeypatch):
     assert doc_status == "processing"
 
 
-def test_node_failure_marks_failed(tmp_path, fixtures, monkeypatch):
+def test_node_failure_marks_failed(tmp_path, fixtures):
     seed_job(tmp_path, fixtures)
     settings = make_settings(tmp_path)
     calls = []
-    stub_index(monkeypatch, calls, fail_times=10)
+    ctx = _ctx(settings, tmp_path, index_document=stub_index(calls, fail_times=10))
 
-    result = run_job(JOB_ID, settings, tmp_path)
+    result = run_job(JOB_ID, settings, tmp_path, ctx=ctx)
 
     job = result["job"]
     assert job["status"] == "failed"
@@ -208,7 +236,7 @@ def test_ineligible_job_not_claimed(tmp_path, fixtures):
     assert result["job"]["execution_state"] == "running"
 
 
-def test_domain_error_not_retried(tmp_path, fixtures, monkeypatch):
+def test_domain_error_not_retried(tmp_path, fixtures):
     seed_job(tmp_path, fixtures)
     settings = make_settings(tmp_path)
     calls = []
@@ -217,8 +245,8 @@ def test_domain_error_not_retried(tmp_path, fixtures, monkeypatch):
         calls.append(1)
         raise ValueError("deterministic domain failure")
 
-    monkeypatch.setattr(pipeline_nodes, "extract_document", bad_extract)
-    result = run_job(JOB_ID, settings, tmp_path)
+    result = run_job(JOB_ID, settings, tmp_path,
+                     ctx=_ctx(settings, tmp_path, extract_document=bad_extract))
     assert result["job"]["execution_state"] == "failed"
     assert len(calls) == 1
 
@@ -226,21 +254,25 @@ def test_domain_error_not_retried(tmp_path, fixtures, monkeypatch):
 # --- 5.2: resume from checkpoint ---
 
 
-def test_resume_skips_completed_nodes(tmp_path, fixtures, monkeypatch):
+def test_resume_skips_completed_nodes(tmp_path, fixtures):
     seed_job(tmp_path, fixtures)
     settings = make_settings(tmp_path)
-    extract_calls = []
-    index_calls = []
-    spy_extract(monkeypatch, extract_calls)
-    stub_index(monkeypatch, index_calls, fail_times=10)
+    extract_calls, index_calls = [], []
 
-    first = run_job(JOB_ID, settings, tmp_path)
+    first = run_job(JOB_ID, settings, tmp_path, ctx=_ctx(
+        settings, tmp_path,
+        extract_document=spy_extract(extract_calls),
+        index_document=stub_index(index_calls, fail_times=10),
+    ))
     assert first["job"]["execution_state"] == "failed"
     assert extract_calls == [1]
     assert len(index_calls) == settings.pipeline_node_max_attempts
 
-    stub_index(monkeypatch, index_calls, fail_times=-1)
-    second = run_job(JOB_ID, settings, tmp_path, eligible=("failed",))
+    second = run_job(JOB_ID, settings, tmp_path, eligible=("failed",), ctx=_ctx(
+        settings, tmp_path,
+        extract_document=spy_extract(extract_calls),
+        index_document=stub_index(index_calls, fail_times=-1),
+    ))
 
     assert second["job"]["execution_state"] == "awaiting_review"
     assert second["job"]["status"] == "planning"
@@ -249,20 +281,23 @@ def test_resume_skips_completed_nodes(tmp_path, fixtures, monkeypatch):
     assert extraction_artifact_path(tmp_path, DOC_ID).exists()
 
 
-def test_analysis_failure_resumes_without_repeating_prior_nodes(tmp_path, fixtures, monkeypatch):
+def test_analysis_failure_resumes_without_repeating_prior_nodes(tmp_path, fixtures):
     seed_job(tmp_path, fixtures)
     settings = make_settings(tmp_path)
     extract_calls, index_calls, analysis_calls = [], [], []
-    spy_extract(monkeypatch, extract_calls)
-    stub_index(monkeypatch, index_calls)
 
     async def fail(document, provider, job_id, **kwargs):
         analysis_calls.append(1)
         raise ValueError("analysis failed")
-    monkeypatch.setattr(pipeline_nodes, "analyze_document", fail)
+
     previous = tmp_path / "storage" / f"{DOC_ID}.concepts.json"
     previous.write_text("previous", encoding="utf-8")
-    first = run_job(JOB_ID, settings, tmp_path)
+    first = run_job(JOB_ID, settings, tmp_path, ctx=_ctx(
+        settings, tmp_path,
+        extract_document=spy_extract(extract_calls),
+        index_document=stub_index(index_calls),
+        analyze_document=fail,
+    ))
     assert first["job"]["execution_state"] == "failed"
     assert previous.read_text(encoding="utf-8") == "previous"
 
@@ -273,62 +308,66 @@ def test_analysis_failure_resumes_without_repeating_prior_nodes(tmp_path, fixtur
         return ConceptInventory(document_id=document.document_id, concepts=[{"id": "c", "title": "Topic", "explanation": "Content", "evidence": [ref]}],
                                 learning_objectives=[{"id": "o", "description": "Learn", "concept_ids": ["c"], "evidence": [ref]}],
                                 prerequisite_edges=[], coverage=coverage)
-    monkeypatch.setattr(pipeline_nodes, "analyze_document", succeed)
-    second = run_job(JOB_ID, settings, tmp_path)
+
+    second = run_job(JOB_ID, settings, tmp_path, ctx=_ctx(
+        settings, tmp_path,
+        extract_document=spy_extract(extract_calls),
+        index_document=stub_index(index_calls),
+        analyze_document=succeed,
+    ))
     assert second["job"]["status"] == "planning"
     assert second["job"]["execution_state"] == "awaiting_review"
     assert extract_calls == [1] and index_calls == [DOC_ID] and len(analysis_calls) == 2
     assert ConceptInventory.model_validate_json(previous.read_text(encoding="utf-8")).document_id == DOC_ID
 
 
-def test_explicitly_advance_old_partial_job(tmp_path, fixtures, monkeypatch):
+def test_explicitly_advance_old_partial_job(tmp_path, fixtures):
     seed_job(tmp_path, fixtures)
     settings = make_settings(tmp_path)
     extract_calls, index_calls = [], []
-    spy_extract(monkeypatch, extract_calls)
-    stub_index(monkeypatch, index_calls)
-    monkeypatch.setattr(pipeline_graph, "STAGE_NODES", ("extract", "index"))
-    assert run_job(JOB_ID, settings, tmp_path)["job"]["status"] == "indexing"
+    ctx = _ctx(settings, tmp_path,
+               extract_document=spy_extract(extract_calls),
+               index_document=stub_index(index_calls))
+    assert run_job(JOB_ID, settings, tmp_path, ctx=ctx, stages=STAGES[:2])["job"]["status"] == "indexing"
     conn = connect_db(tmp_path)
     with conn:
         conn.execute("UPDATE jobs SET execution_state = ? WHERE job_id = ?", (EXECUTION_PARTIAL, JOB_ID))
     conn.close()
-    monkeypatch.setattr(pipeline_graph, "STAGE_NODES", ("extract", "index", "analyze", "plan"))
-    resumed = run_job(JOB_ID, settings, tmp_path)
+    resumed = run_job(JOB_ID, settings, tmp_path, ctx=ctx, stages=STAGES[:4])
     assert resumed["job"]["status"] == "planning"
     assert resumed["job"]["execution_state"] == "awaiting_review"
     assert extract_calls == [1] and index_calls == [DOC_ID]
     assert run_job(JOB_ID, settings, tmp_path, eligible=("partial_complete",))["claimed"] is False
 
 
-def test_advance_analysis_checkpoint_without_reanalysis(tmp_path, fixtures, monkeypatch):
+def test_advance_analysis_checkpoint_without_reanalysis(tmp_path, fixtures):
     seed_job(tmp_path, fixtures)
     settings = make_settings(tmp_path)
     calls = []
-    stub_index(monkeypatch, calls)
-    monkeypatch.setattr(pipeline_graph, "STAGE_NODES", ("extract", "index", "analyze"))
-    assert run_job(JOB_ID, settings, tmp_path)["job"]["status"] == "analyzing"
+    ctx = _ctx(settings, tmp_path, index_document=stub_index(calls))
+    assert run_job(JOB_ID, settings, tmp_path, ctx=ctx, stages=STAGES[:3])["job"]["status"] == "analyzing"
     conn = connect_db(tmp_path)
     with conn:
         conn.execute("UPDATE jobs SET execution_state = ? WHERE job_id = ?", (EXECUTION_PARTIAL, JOB_ID))
     conn.close()
+
     def unexpected(*args, **kwargs):
         raise AssertionError("analysis must not repeat")
-    monkeypatch.setattr(pipeline_nodes, "analyze_document", unexpected)
-    monkeypatch.setattr(pipeline_graph, "STAGE_NODES", ("extract", "index", "analyze", "plan"))
-    result = run_job(JOB_ID, settings, tmp_path)
+
+    ctx = _ctx(settings, tmp_path, analyze_document=unexpected)
+    result = run_job(JOB_ID, settings, tmp_path, ctx=ctx, stages=STAGES[:4])
     assert result["job"]["execution_state"] == "awaiting_review"
     assert calls == [DOC_ID]
-    drain(settings, tmp_path)
+    drain(settings, tmp_path, ctx=ctx, stages=STAGES[:4])
     conn = connect_db(tmp_path)
     assert get_job(conn, JOB_ID)["execution_state"] == "awaiting_review"
     conn.close()
 
 
-def test_analysis_node_reexecution_replaces_one_artifact(tmp_path, fixtures, monkeypatch):
+def test_analysis_node_reexecution_replaces_one_artifact(tmp_path, fixtures):
     seed_job(tmp_path, fixtures)
     settings = make_settings(tmp_path)
-    nodes = pipeline_nodes.make_nodes(settings, tmp_path)
+    nodes = make_nodes(_ctx(settings, tmp_path))
     state = {"job_id": JOB_ID, "document_id": DOC_ID, "storage_path": f"{DOC_ID}.pdf"}
     state.update(nodes["extract"](state))
     first = nodes["analyze"](state)
@@ -382,10 +421,10 @@ def _stub_generate(monkeypatch):
             ],
         })
 
-    monkeypatch.setattr(pipeline_nodes, "generate_episode", fake)
-    # validate_and_publish imports generate_episode by name into its module —
-    # the regeneration path must hit the same stub.
+    # validate_and_publish imports generate_episode by name — its regen path
+    # must hit the same stub (service-internal seam, not the node contract).
     monkeypatch.setattr(episode_validator, "generate_episode", fake)
+    return fake
 
 
 def _episode_rows(tmp_path):
@@ -399,14 +438,17 @@ def _episode_rows(tmp_path):
 def test_generate_skips_until_confirmed(tmp_path, fixtures, monkeypatch):
     seed_job(tmp_path, fixtures)
     settings = make_settings(tmp_path)
-    stub_index(monkeypatch, [])
     called = []
-    _stub_generate(monkeypatch)
-    monkeypatch.setattr(
-        pipeline_nodes, "generate_episode",
-        lambda *a, **k: called.append(1) or (_ for _ in ()).throw(AssertionError("must not run")),
-    )
-    result = run_job(JOB_ID, settings, tmp_path)
+
+    async def must_not_run(*a, **k):
+        called.append(1)
+        raise AssertionError("must not run")
+
+    result = run_job(JOB_ID, settings, tmp_path, ctx=_ctx(
+        settings, tmp_path,
+        index_document=stub_index([]),
+        generate_episode=must_not_run,
+    ))
     assert result["job"]["execution_state"] == "awaiting_review"
     assert called == [] and _episode_rows(tmp_path) == []
 
@@ -417,15 +459,16 @@ def test_confirmed_resume_generates_and_publishes(tmp_path, fixtures, monkeypatc
 
     seed_job(tmp_path, fixtures)
     settings = make_settings(tmp_path)
-    stub_index(monkeypatch, [])
-    _stub_generate(monkeypatch)
-    _stub_review(monkeypatch, [{"verdict": "pass", "violations": []}])
+    ctx = _ctx(settings, tmp_path,
+               index_document=stub_index([]),
+               generate_episode=_stub_generate(monkeypatch),
+               provider=_ReviewProvider([{"verdict": "pass", "violations": []}]))
 
-    first = run_job(JOB_ID, settings, tmp_path)
+    first = run_job(JOB_ID, settings, tmp_path, ctx=ctx)
     assert first["job"]["stage"] == "plan"
     confirm_draft(tmp_path, DOC_ID, revision=1)
 
-    resumed = run_job(JOB_ID, settings, tmp_path, eligible=("partial_complete",))
+    resumed = run_job(JOB_ID, settings, tmp_path, eligible=("partial_complete",), ctx=ctx)
     assert resumed["claimed"] is True
     assert resumed["job"]["status"] == "ready"
     assert resumed["job"]["execution_state"] == "complete"
@@ -439,7 +482,7 @@ def test_confirmed_resume_generates_and_publishes(tmp_path, fixtures, monkeypatc
     contents = artifact.read_text(encoding="utf-8")
 
     # idempotent node re-execution (mid-node crash replays the whole node)
-    nodes = pipeline_nodes.make_nodes(settings, tmp_path)
+    nodes = make_nodes(ctx)
     state = {"job_id": JOB_ID, "document_id": DOC_ID}
     first = nodes["generate"](state)
     second = nodes["generate"](state)
@@ -474,21 +517,17 @@ class _ReviewProvider:
         return 10
 
 
-def _stub_review(monkeypatch, payloads):
-    provider = _ReviewProvider(payloads)
-    monkeypatch.setattr(pipeline_nodes, "MetaProvider", lambda settings: provider)
-    return provider
-
-
 def _confirmed_run(tmp_path, settings, monkeypatch, review_payloads):
     from app.storage.curriculum import confirm_draft
 
-    stub_index(monkeypatch, [])
-    _stub_generate(monkeypatch)
-    run_job(JOB_ID, settings, tmp_path)
+    provider = _ReviewProvider(review_payloads)
+    ctx = _ctx(settings, tmp_path,
+               index_document=stub_index([]),
+               generate_episode=_stub_generate(monkeypatch),
+               provider=provider)
+    run_job(JOB_ID, settings, tmp_path, ctx=ctx)
     confirm_draft(tmp_path, DOC_ID, revision=1)
-    provider = _stub_review(monkeypatch, review_payloads)
-    resumed = run_job(JOB_ID, settings, tmp_path, eligible=("partial_complete",))
+    resumed = run_job(JOB_ID, settings, tmp_path, eligible=("partial_complete",), ctx=ctx)
     return resumed, provider
 
 
@@ -519,7 +558,7 @@ def test_validate_node_idempotent_no_respend(tmp_path, fixtures, monkeypatch):
     )
     assert resumed["job"]["execution_state"] == "complete"
 
-    nodes = pipeline_nodes.make_nodes(settings, tmp_path)
+    nodes = make_nodes(_ctx(settings, tmp_path))
     state = {"job_id": JOB_ID, "document_id": DOC_ID}
     result = nodes["validate"](state)
     assert result["episode_id"] == read_episode(tmp_path, DOC_ID).episodeId
@@ -532,26 +571,27 @@ def test_validate_crash_resumes_at_validate(tmp_path, fixtures, monkeypatch):
 
     seed_job(tmp_path, fixtures)
     settings = make_settings(tmp_path)
-    stub_index(monkeypatch, [])
-    _stub_generate(monkeypatch)
-    run_job(JOB_ID, settings, tmp_path)
+    services = _services(index_document=stub_index([]),
+                         generate_episode=_stub_generate(monkeypatch))
+    run_job(JOB_ID, settings, tmp_path,
+            ctx=StageContext(settings, tmp_path, services=services))
     confirm_draft(tmp_path, DOC_ID, revision=1)
 
     boom = []
-    real = pipeline_nodes.validate_and_publish
 
     async def explode(*a, **k):
         boom.append(1)
         raise TransientStageError("validate boom")
 
-    monkeypatch.setattr(pipeline_nodes, "validate_and_publish", explode)
-    first = run_job(JOB_ID, settings, tmp_path, eligible=("partial_complete",))
+    first = run_job(JOB_ID, settings, tmp_path, eligible=("partial_complete",),
+                    ctx=StageContext(settings, tmp_path,
+                                     services=replace(services, validate_and_publish=explode)))
     assert first["job"]["execution_state"] == "failed"
     assert len(boom) == settings.pipeline_node_max_attempts
 
-    _stub_review(monkeypatch, [{"verdict": "pass", "violations": []}])
-    monkeypatch.setattr(pipeline_nodes, "validate_and_publish", real)
-    second = run_job(JOB_ID, settings, tmp_path, eligible=("failed",))
+    provider = _ReviewProvider([{"verdict": "pass", "violations": []}])
+    second = run_job(JOB_ID, settings, tmp_path, eligible=("failed",),
+                     ctx=StageContext(settings, tmp_path, provider=provider, services=services))
     assert second["job"]["status"] == "ready"
     assert second["job"]["execution_state"] == "complete"
     assert read_episode_state(tmp_path, DOC_ID)["status"] == "ready"
@@ -564,22 +604,20 @@ def test_pre_change_draft_resumes_into_validate(tmp_path, fixtures, monkeypatch)
 
     seed_job(tmp_path, fixtures)
     settings = make_settings(tmp_path)
-    stub_index(monkeypatch, [])
-    _stub_generate(monkeypatch)
-    monkeypatch.setattr(
-        pipeline_graph, "STAGE_NODES",
-        ("extract", "index", "analyze", "plan", "generate"),
-    )
-    run_job(JOB_ID, settings, tmp_path)
+    services = _services(index_document=stub_index([]),
+                         generate_episode=_stub_generate(monkeypatch))
+    ctx = StageContext(settings, tmp_path, services=services)
+    run_job(JOB_ID, settings, tmp_path, ctx=ctx, stages=STAGES[:5])
     confirm_draft(tmp_path, DOC_ID, revision=1)
-    parked = run_job(JOB_ID, settings, tmp_path, eligible=("partial_complete",))
+    parked = run_job(JOB_ID, settings, tmp_path, eligible=("partial_complete",),
+                     ctx=ctx, stages=STAGES[:5])
     assert parked["job"]["execution_state"] == "awaiting_review"
     assert parked["job"]["stage"] == "generate"
     assert read_episode_state(tmp_path, DOC_ID)["status"] == "draft"
 
-    monkeypatch.undo()
-    _stub_review(monkeypatch, [{"verdict": "pass", "violations": []}])
-    resumed = run_job(JOB_ID, settings, tmp_path)
+    provider = _ReviewProvider([{"verdict": "pass", "violations": []}])
+    resumed = run_job(JOB_ID, settings, tmp_path,
+                      ctx=StageContext(settings, tmp_path, provider=provider, services=services))
     assert resumed["job"]["status"] == "ready"
     assert resumed["job"]["execution_state"] == "complete"
     assert read_episode_state(tmp_path, DOC_ID)["status"] == "ready"
@@ -609,20 +647,21 @@ def test_generate_failure_preserves_prior_draft(tmp_path, fixtures, monkeypatch)
 
     seed_job(tmp_path, fixtures)
     settings = make_settings(tmp_path)
-    stub_index(monkeypatch, [])
-    _stub_generate(monkeypatch)
-    _stub_review(monkeypatch, [{"verdict": "pass", "violations": []}])
-
-    run_job(JOB_ID, settings, tmp_path)
+    services = _services(index_document=stub_index([]),
+                         generate_episode=_stub_generate(monkeypatch))
+    ctx = StageContext(settings, tmp_path,
+                       provider=_ReviewProvider([{"verdict": "pass", "violations": []}]),
+                       services=services)
+    run_job(JOB_ID, settings, tmp_path, ctx=ctx)
     confirm_draft(tmp_path, DOC_ID, revision=1)
-    run_job(JOB_ID, settings, tmp_path, eligible=("partial_complete",))
+    run_job(JOB_ID, settings, tmp_path, eligible=("partial_complete",), ctx=ctx)
     assert len(_episode_rows(tmp_path)) == 1
 
     async def boom(*a, **k):
         raise ValueError("generation exploded")
 
-    monkeypatch.setattr(pipeline_nodes, "generate_episode", boom)
-    nodes = pipeline_nodes.make_nodes(settings, tmp_path)
+    nodes = make_nodes(StageContext(
+        settings, tmp_path, services=replace(services, generate_episode=boom)))
     state = {"job_id": JOB_ID, "document_id": DOC_ID}
     with pytest.raises(ValueError, match="generation exploded"):
         nodes["generate"](state)
@@ -635,12 +674,13 @@ def test_ready_episode_survives_draft_overwrite(tmp_path, fixtures, monkeypatch)
 
     seed_job(tmp_path, fixtures)
     settings = make_settings(tmp_path)
-    stub_index(monkeypatch, [])
-    _stub_generate(monkeypatch)
-    _stub_review(monkeypatch, [{"verdict": "pass", "violations": []}])
-    run_job(JOB_ID, settings, tmp_path)
+    ctx = _ctx(settings, tmp_path,
+               index_document=stub_index([]),
+               generate_episode=_stub_generate(monkeypatch),
+               provider=_ReviewProvider([{"verdict": "pass", "violations": []}]))
+    run_job(JOB_ID, settings, tmp_path, ctx=ctx)
     confirm_draft(tmp_path, DOC_ID, revision=1)
-    run_job(JOB_ID, settings, tmp_path, eligible=("partial_complete",))
+    run_job(JOB_ID, settings, tmp_path, eligible=("partial_complete",), ctx=ctx)
 
     script = read_episode(tmp_path, DOC_ID)
     conn = connect_db(tmp_path)
@@ -657,12 +697,12 @@ def test_ready_episode_survives_draft_overwrite(tmp_path, fixtures, monkeypatch)
 # --- 5.3: abandoned recovery ---
 
 
-def test_abandoned_job_recovered(tmp_path, fixtures, monkeypatch):
+def test_abandoned_job_recovered(tmp_path, fixtures):
     seed_job(tmp_path, fixtures)
     settings = make_settings(tmp_path)
     calls = []
-    stub_index(monkeypatch, calls, fail_times=10)
-    first = run_job(JOB_ID, settings, tmp_path)
+    first = run_job(JOB_ID, settings, tmp_path, ctx=_ctx(
+        settings, tmp_path, index_document=stub_index(calls, fail_times=10)))
     assert first["job"]["execution_state"] == "failed"
 
     # simulate a worker that died after claiming: running state + pending checkpoint
@@ -676,19 +716,17 @@ def test_abandoned_job_recovered(tmp_path, fixtures, monkeypatch):
     conn.close()
     assert abandoned == [JOB_ID]
 
-    stub_index(monkeypatch, calls, fail_times=-1)
-    recovered = run_job(JOB_ID, settings, tmp_path, eligible=ELIGIBLE_RECOVERY)
+    recovered = run_job(JOB_ID, settings, tmp_path, eligible=ELIGIBLE_RECOVERY,
+                        ctx=_ctx(settings, tmp_path, index_document=stub_index(calls, fail_times=-1)))
     assert recovered["claimed"] is True
     assert recovered["job"]["execution_state"] == "awaiting_review"
 
 
-def test_worker_drain_processes_queued(tmp_path, fixtures, monkeypatch):
+def test_worker_drain_processes_queued(tmp_path, fixtures):
     seed_job(tmp_path, fixtures)
     settings = make_settings(tmp_path)
     calls = []
-    stub_index(monkeypatch, calls)
-
-    drain(settings, tmp_path)
+    drain(settings, tmp_path, ctx=_ctx(settings, tmp_path, index_document=stub_index(calls)))
 
     conn = connect_db(tmp_path)
     job = get_job(conn, JOB_ID)
@@ -702,11 +740,11 @@ def test_worker_drain_processes_queued(tmp_path, fixtures, monkeypatch):
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
+def client(tmp_path):
     app = create_app(data_dir=tmp_path)
     app.state.settings = make_settings(tmp_path)
-    calls = []
-    stub_index(monkeypatch, calls)
+    app.state.stage_ctx = _ctx(app.state.settings, tmp_path,
+                               index_document=stub_index([]))
     with TestClient(app) as c:
         yield c
 
@@ -736,11 +774,12 @@ def test_run_endpoint_unknown_job(client):
     assert resp.json()["error"]["code"] == "NOT_FOUND"
 
 
-def test_run_endpoint_ineligible(client, fixtures, tmp_path):
+def test_run_endpoint_ineligible(client, fixtures):
     pdf = fixtures("PDF_SAMPLE.pdf").read_bytes()
     resp = client.post(
         "/api/documents", files={"file": ("s.pdf", pdf, "application/pdf")}
     )
+    assert resp.status_code == 201
     job_id = resp.json()["job_id"]
     client.post(f"/api/jobs/{job_id}/run")
     again = client.post(f"/api/jobs/{job_id}/run")
@@ -755,7 +794,7 @@ def test_run_endpoint_ineligible(client, fixtures, tmp_path):
 def test_index_node_idempotent(tmp_path, fixtures):
     seed_job(tmp_path, fixtures)
     settings = make_settings(tmp_path)
-    nodes = pipeline_nodes.make_nodes(settings, tmp_path)
+    nodes = make_nodes(_ctx(settings, tmp_path))
     extracted = nodes["extract"](
         {"job_id": JOB_ID, "document_id": DOC_ID, "storage_path": f"{DOC_ID}.pdf"}
     )
@@ -781,6 +820,7 @@ def test_index_node_idempotent(tmp_path, fixtures):
 def test_end_to_end_upload_to_indexed(tmp_path, fixtures):
     app = create_app(data_dir=tmp_path)
     app.state.settings = make_settings(tmp_path)
+    app.state.stage_ctx = _ctx(app.state.settings, tmp_path)
     with TestClient(app) as client:
         pdf = fixtures("PDF_SAMPLE.pdf").read_bytes()
         resp = client.post(
@@ -823,12 +863,15 @@ def test_end_to_end_upload_to_ready_episode(tmp_path, fixtures, monkeypatch):
             "curriculum_id": doc + "-curriculum", "document_id": doc,
             "revision": 1,
             "episodes": [outline(doc + "-episode-1"), outline(doc + "-episode-2")]})
-    monkeypatch.setattr(pipeline_nodes, "plan_curriculum", fake_plan)
-    _stub_generate(monkeypatch)
-    _stub_review(monkeypatch, [{"verdict": "pass", "violations": []}])
 
     app = create_app(data_dir=tmp_path)
     app.state.settings = make_settings(tmp_path)
+    app.state.stage_ctx = _ctx(
+        app.state.settings, tmp_path,
+        plan_curriculum=fake_plan,
+        generate_episode=_stub_generate(monkeypatch),
+        provider=_ReviewProvider([{"verdict": "pass", "violations": []}]),
+    )
     with TestClient(app) as client:
         pdf = fixtures("PDF_SAMPLE.pdf").read_bytes()
         resp = client.post(

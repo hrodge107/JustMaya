@@ -46,7 +46,8 @@ async def run_job_endpoint(job_id: str, request: Request) -> JobStatusResponse:
         )
 
     result = await run_in_threadpool(
-        run_job, job_id, request.app.state.settings, data_dir, ELIGIBLE_RUN
+        run_job, job_id, request.app.state.settings, data_dir, ELIGIBLE_RUN,
+        ctx=getattr(request.app.state, "stage_ctx", None),
     )
     if not result["claimed"]:
         return JSONResponse(

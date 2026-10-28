@@ -11,6 +11,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 
 from app.config import Settings
 from app.pipeline.graph import build_graph
+from app.pipeline.stage import Stage, StageContext
 from app.storage.documents import set_document_status
 from app.storage.jobs import (
     ELIGIBLE_RUN,
@@ -35,6 +36,9 @@ def run_job(
     settings: Settings,
     data_dir: Path,
     eligible: tuple[str, ...] = ELIGIBLE_RUN,
+    *,
+    ctx: StageContext | None = None,
+    stages: tuple[Stage, ...] | None = None,
 ) -> dict:
     conn = connect_db(data_dir)
     try:
@@ -61,7 +65,7 @@ def run_job(
     config = {"configurable": {"thread_id": job_id}}
     try:
         with SqliteSaver.from_conn_string(str(settings.checkpoint_db_path)) as saver:
-            graph = build_graph(saver, settings, data_dir)
+            graph = build_graph(saver, settings, data_dir, ctx=ctx, stages=stages)
             checkpoint = graph.get_state(config)
             if current and current["execution_state"] == EXECUTION_PARTIAL:
                 if checkpoint.next or not checkpoint.values.get("extracted_path"):

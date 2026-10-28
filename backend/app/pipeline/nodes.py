@@ -1,46 +1,34 @@
-"""Pipeline A graph nodes: extract (A02), index (A03), analyze (A04),
-plan (A05/A06), generate (A07).
+"""Pipeline A stages: extract (A02), index (A03), analyze (A04),
+plan (A05/A06), generate (A07), validate (A08).
 
-Each node marks its stage on the job row at entry, does its work against
-deterministic artifacts, and returns a partial PipelineState update. Domain
-failures (e.g. ExtractionError) propagate untransformed so the runner can mark
-the job failed; transient failures are raised as TransientStageError (or raw
-transient types listed in TRANSIENT_ERRORS) for the node retry policy.
+Each stage is a declared `Stage(name, run)` in STAGES; run(ctx, state)
+does its work against deterministic artifacts and returns a partial
+PipelineState update. Dependencies arrive through the injected
+StageContext; `mark_stage` stays inside each run because its position
+relative to the roadmap guard is stage semantics (plan marks before the
+guard; generate/validate guard first so parking never marks). Domain
+failures (e.g. ExtractionError) propagate untransformed so the runner can
+mark the job failed; transient failures are raised as TransientStageError
+(or raw transient types listed in TRANSIENT_ERRORS) for the node retry
+policy.
 """
 
 import asyncio
 import os
 import sqlite3
 import tempfile
+from functools import partial
 from pathlib import Path
 
-from app.config import Settings
 from app.models.document import ExtractedDocument
 from app.models.concept import ConceptInventory
+from app.pipeline.stage import Stage, StageContext
 from app.pipeline.state import PipelineState
-from app.services.pdf_extractor import extract_document
-from app.services.rag_indexer import index_document
-from app.services.concept_analyzer import analyze_document
-from app.services.curriculum_planner import plan_curriculum
-from app.services.episode_generator import (
-    GenerationError,
-    generate_episode,
-    passages_for_lesson,
-)
-from app.services.episode_validator import (
-    ValidationFailed,
-    report_passing,
-    validate_and_publish,
-)
-from app.services.model_provider import MetaProvider
-from app.services.token_budget import MeteredProvider
+from app.services.episode_generator import GenerationError, passages_for_lesson
+from app.services.episode_validator import ValidationFailed, report_passing
+from app.storage.curriculum import save_draft
 from app.storage.documents import resolve_document_path
-from app.storage.curriculum import read_draft, save_draft
-from app.storage.episodes import (
-    read_episode,
-    read_episode_state,
-    save_episode_draft,
-)
+from app.storage.episodes import read_episode, read_episode_state, save_episode_draft
 from app.storage.jobs import mark_stage
 
 
@@ -55,150 +43,164 @@ def extraction_artifact_path(data_dir: Path, document_id: str) -> Path:
     return data_dir / "storage" / f"{document_id}.extracted.json"
 
 
-def make_nodes(settings: Settings, data_dir: Path) -> dict:
-    storage_dir = data_dir / "storage"
+def _write_atomic(storage_dir: Path, artifact: Path, payload: str) -> None:
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=storage_dir, delete=False) as handle:
+            temporary = Path(handle.name)
+            handle.write(payload)
+        os.replace(temporary, artifact)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
-    def _write_atomic(artifact: Path, payload: str) -> None:
-        temporary = None
-        try:
-            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=storage_dir, delete=False) as handle:
-                temporary = Path(handle.name)
-                handle.write(payload)
-            os.replace(temporary, artifact)
-        finally:
-            if temporary is not None:
-                temporary.unlink(missing_ok=True)
 
-    def extract(state: PipelineState) -> dict:
-        mark_stage(data_dir, state["job_id"], "extract")
-        pdf_path = resolve_document_path(storage_dir, state["storage_path"])
-        extracted = extract_document(state["document_id"], pdf_path)
-        artifact = extraction_artifact_path(data_dir, state["document_id"])
-        artifact.write_text(extracted.model_dump_json(), encoding="utf-8")
-        return {
-            "extracted_path": artifact.name,
-            "page_count": extracted.page_count,
-        }
+def _extract(ctx: StageContext, state: PipelineState) -> dict:
+    mark_stage(ctx.data_dir, state["job_id"], "extract")
+    pdf_path = resolve_document_path(ctx.storage_dir, state["storage_path"])
+    extracted = ctx.services.extract_document(state["document_id"], pdf_path)
+    artifact = extraction_artifact_path(ctx.data_dir, state["document_id"])
+    artifact.write_text(extracted.model_dump_json(), encoding="utf-8")
+    return {
+        "extracted_path": artifact.name,
+        "page_count": extracted.page_count,
+    }
 
-    def index(state: PipelineState) -> dict:
-        mark_stage(data_dir, state["job_id"], "index")
-        artifact = storage_dir / state["extracted_path"]
-        extracted = ExtractedDocument.model_validate_json(
-            artifact.read_text(encoding="utf-8")
+
+def _index(ctx: StageContext, state: PipelineState) -> dict:
+    mark_stage(ctx.data_dir, state["job_id"], "index")
+    artifact = ctx.storage_dir / state["extracted_path"]
+    extracted = ExtractedDocument.model_validate_json(
+        artifact.read_text(encoding="utf-8")
+    )
+    count = ctx.services.index_document(extracted, ctx.settings)
+    return {"chunk_count": count}
+
+
+def _analyze(ctx: StageContext, state: PipelineState) -> dict:
+    mark_stage(ctx.data_dir, state["job_id"], "analyze")
+    extracted = ExtractedDocument.model_validate_json(
+        (ctx.storage_dir / state["extracted_path"]).read_text(encoding="utf-8")
+    )
+    inventory = asyncio.run(
+        ctx.services.analyze_document(
+            extracted, ctx.provider, state["job_id"],
+            settings=ctx.settings, data_dir=ctx.data_dir,
         )
-        count = index_document(extracted, settings)
-        return {"chunk_count": count}
+    )
+    artifact = ctx.storage_dir / f"{state['document_id']}.concepts.json"
+    _write_atomic(ctx.storage_dir, artifact, inventory.model_dump_json())
+    return {"inventory_path": artifact.name}
 
-    def analyze(state: PipelineState) -> dict:
-        mark_stage(data_dir, state["job_id"], "analyze")
-        extracted = ExtractedDocument.model_validate_json((storage_dir / state["extracted_path"]).read_text(encoding="utf-8"))
-        provider = MeteredProvider(MetaProvider(settings), settings, data_dir)
-        inventory = asyncio.run(analyze_document(extracted, provider, state["job_id"], settings=settings, data_dir=data_dir))
-        artifact = storage_dir / f"{state['document_id']}.concepts.json"
-        _write_atomic(artifact, inventory.model_dump_json())
-        return {"inventory_path": artifact.name}
 
-    def plan(state: PipelineState) -> dict:
-        mark_stage(data_dir, state["job_id"], "plan")
-        try:
-            existing, _, job_id = read_draft(data_dir, state["document_id"])
-        except LookupError:
-            existing = None
-        if existing is not None:
-            if job_id != state["job_id"]:
-                raise ValueError("Roadmap belongs to a different job")
-            return {"curriculum_id": existing.curriculum_id}
-        inventory = ConceptInventory.model_validate_json((storage_dir / state["inventory_path"]).read_text(encoding="utf-8"))
-        provider = MeteredProvider(MetaProvider(settings), settings, data_dir)
-        roadmap = asyncio.run(plan_curriculum(inventory, provider, state["job_id"], settings))
-        save_draft(data_dir, roadmap, inventory, state["job_id"])
-        return {"curriculum_id": roadmap.curriculum_id}
-
-    def generate(state: PipelineState) -> dict:
-        try:
-            roadmap, _, owner = read_draft(data_dir, state["document_id"])
-        except LookupError:
-            raise GenerationError("ROADMAP_NOT_CONFIRMED: no roadmap exists")
-        if owner != state["job_id"]:
+def _plan(ctx: StageContext, state: PipelineState) -> dict:
+    mark_stage(ctx.data_dir, state["job_id"], "plan")
+    check = ctx.roadmap_guard(state["document_id"], state["job_id"])
+    if check.draft is not None:
+        if check.foreign:
             raise ValueError("Roadmap belongs to a different job")
-        if not roadmap.confirmed or roadmap.lesson_context is None:
-            # Draft still awaits human review — park for END/awaiting_review;
-            # the confirmed resume path after confirm_draft runs the real work.
-            return {}
-        mark_stage(data_dir, state["job_id"], "generate")
-        passages, known_chunks = passages_for_lesson(
-            state["document_id"], roadmap.lesson_context, settings
+        return {"curriculum_id": check.draft.curriculum_id}
+    inventory = ConceptInventory.model_validate_json(
+        (ctx.storage_dir / state["inventory_path"]).read_text(encoding="utf-8")
+    )
+    roadmap = asyncio.run(
+        ctx.services.plan_curriculum(
+            inventory, ctx.provider, state["job_id"], ctx.settings
         )
-        provider = MeteredProvider(MetaProvider(settings), settings, data_dir)
-        script = asyncio.run(
-            generate_episode(
-                roadmap,
-                roadmap.lesson_context,
-                passages,
-                known_chunks,
-                provider,
-                state["job_id"],
-                settings,
-            )
-        )
-        artifact = storage_dir / f"{state['document_id']}.{script.episodeId}.script.json"
-        _write_atomic(artifact, script.model_dump_json())
-        save_episode_draft(data_dir, script, roadmap.curriculum_id)
-        return {"episode_id": script.episodeId}
+    )
+    save_draft(ctx.data_dir, roadmap, inventory, state["job_id"])
+    return {"curriculum_id": roadmap.curriculum_id}
 
-    def validate(state: PipelineState) -> dict:
-        try:
-            roadmap, _, owner = read_draft(data_dir, state["document_id"])
-        except LookupError:
-            roadmap = None
-        if (
-            roadmap is None
-            or owner != state["job_id"]
-            or not roadmap.confirmed
-            or roadmap.lesson_context is None
-        ):
-            # Parked for review or nothing generated yet — same early-exit
-            # contract as the generate node.
-            return {}
-        existing = read_episode_state(data_dir, state["document_id"])
-        if existing is not None and existing["status"] == "ready":
-            # Idempotent re-execution: already published — no re-spend.
-            script = read_episode(data_dir, state["document_id"])
-            return {"episode_id": script.episodeId}
-        mark_stage(data_dir, state["job_id"], "validate")
-        try:
-            script = read_episode(data_dir, state["document_id"])
-        except LookupError:
-            raise ValidationFailed(
-                "VALIDATION_NO_EPISODE: no episode draft exists"
-            )
-        passages, known_chunks = passages_for_lesson(
-            state["document_id"], roadmap.lesson_context, settings
-        )
-        provider = MeteredProvider(MetaProvider(settings), settings, data_dir)
-        script, report = asyncio.run(
-            validate_and_publish(
-                data_dir,
-                script,
-                roadmap,
-                roadmap.lesson_context,
-                passages,
-                known_chunks,
-                provider,
-                state["job_id"],
-                settings,
-            )
-        )
-        artifact = storage_dir / f"{state['document_id']}.{script.episodeId}.script.json"
-        _write_atomic(artifact, script.model_dump_json())
-        if not report_passing(report):
-            failures = report.deterministic_violations or [
-                f"{v.check}: {v.detail}"
-                for v in (report.semantic.violations if report.semantic else [])
-            ]
-            raise ValidationFailed(
-                "Episode failed validation: " + "; ".join(failures)
-            )
-        return {"episode_id": script.episodeId}
 
-    return {"extract": extract, "index": index, "analyze": analyze, "plan": plan, "generate": generate, "validate": validate}
+def _generate(ctx: StageContext, state: PipelineState) -> dict:
+    check = ctx.roadmap_guard(state["document_id"], state["job_id"])
+    if check.draft is None:
+        raise GenerationError("ROADMAP_NOT_CONFIRMED: no roadmap exists")
+    if check.foreign:
+        raise ValueError("Roadmap belongs to a different job")
+    if not check.usable:
+        # Draft still awaits human review — park for END/awaiting_review;
+        # the confirmed resume path after confirm_draft runs the real work.
+        return {}
+    roadmap = check.draft
+    mark_stage(ctx.data_dir, state["job_id"], "generate")
+    passages, known_chunks = passages_for_lesson(
+        state["document_id"], roadmap.lesson_context, ctx.settings
+    )
+    script = asyncio.run(
+        ctx.services.generate_episode(
+            roadmap,
+            roadmap.lesson_context,
+            passages,
+            known_chunks,
+            ctx.provider,
+            state["job_id"],
+            ctx.settings,
+        )
+    )
+    artifact = ctx.storage_dir / f"{state['document_id']}.{script.episodeId}.script.json"
+    _write_atomic(ctx.storage_dir, artifact, script.model_dump_json())
+    save_episode_draft(ctx.data_dir, script, roadmap.curriculum_id)
+    return {"episode_id": script.episodeId}
+
+
+def _validate(ctx: StageContext, state: PipelineState) -> dict:
+    check = ctx.roadmap_guard(state["document_id"], state["job_id"])
+    if check.draft is None or check.foreign or not check.usable:
+        # Parked for review or nothing generated yet — same early-exit
+        # contract as the generate node.
+        return {}
+    roadmap = check.draft
+    existing = read_episode_state(ctx.data_dir, state["document_id"])
+    if existing is not None and existing["status"] == "ready":
+        # Idempotent re-execution: already published — no re-spend.
+        script = read_episode(ctx.data_dir, state["document_id"])
+        return {"episode_id": script.episodeId}
+    mark_stage(ctx.data_dir, state["job_id"], "validate")
+    try:
+        script = read_episode(ctx.data_dir, state["document_id"])
+    except LookupError:
+        raise ValidationFailed(
+            "VALIDATION_NO_EPISODE: no episode draft exists"
+        )
+    passages, known_chunks = passages_for_lesson(
+        state["document_id"], roadmap.lesson_context, ctx.settings
+    )
+    script, report = asyncio.run(
+        ctx.services.validate_and_publish(
+            ctx.data_dir,
+            script,
+            roadmap,
+            roadmap.lesson_context,
+            passages,
+            known_chunks,
+            ctx.provider,
+            state["job_id"],
+            ctx.settings,
+        )
+    )
+    artifact = ctx.storage_dir / f"{state['document_id']}.{script.episodeId}.script.json"
+    _write_atomic(ctx.storage_dir, artifact, script.model_dump_json())
+    if not report_passing(report):
+        failures = report.deterministic_violations or [
+            f"{v.check}: {v.detail}"
+            for v in (report.semantic.violations if report.semantic else [])
+        ]
+        raise ValidationFailed(
+            "Episode failed validation: " + "; ".join(failures)
+        )
+    return {"episode_id": script.episodeId}
+
+
+STAGES = (
+    Stage("extract", _extract),
+    Stage("index", _index),
+    Stage("analyze", _analyze),
+    Stage("plan", _plan),
+    Stage("generate", _generate),
+    Stage("validate", _validate),
+)
+
+
+def make_nodes(ctx: StageContext) -> dict:
+    return {stage.name: partial(stage.run, ctx) for stage in STAGES}

@@ -191,12 +191,13 @@ async def generate_episode(
     system = _system()
     user = _user(roadmap, lesson_context, passages, repair=repair)
 
-    count = await provider.count_input_tokens(system=system, user=user)
-    if count > settings.generation_max_input_tokens:
-        raise GenerationError(
-            f"GENERATION_INPUT_TOO_LARGE: input {count} tokens exceeds "
-            f"{settings.generation_max_input_tokens}"
-        )
+    await provider.require_input_budget(
+        system=system, user=user,
+        limit=settings.generation_max_input_tokens,
+        exc=lambda count, limit: GenerationError(
+            f"GENERATION_INPUT_TOO_LARGE: input {count} tokens exceeds {limit}"
+        ),
+    )
 
     async def call(user_text: str) -> dict:
         return await provider.generate_structured(

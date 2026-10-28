@@ -6,6 +6,7 @@ a re-executed node genuinely re-spends, so it appends another row.
 """
 
 import sqlite3
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -134,6 +135,22 @@ class MeteredProvider:
 
     async def count_input_tokens(self, *, system: str, user: str) -> int:
         return await self._provider.count_input_tokens(system=system, user=user)
+
+    async def require_input_budget(
+        self,
+        *,
+        system: str,
+        user: str,
+        limit: int,
+        exc: Callable[[int, int], Exception],
+    ) -> int:
+        """Shared input-size preflight: count once, raise `exc(count,
+        limit)` when over, return the count otherwise. `exc` is
+        caller-supplied so each stage keeps its own error type and code."""
+        count = await self._provider.count_input_tokens(system=system, user=user)
+        if count > limit:
+            raise exc(count, limit)
+        return count
 
     async def generate_text(
         self,
