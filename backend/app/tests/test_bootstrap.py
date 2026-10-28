@@ -3,7 +3,14 @@ import sqlite3
 from app.storage.database import init_db
 from app.storage.documents import init_storage
 
-EXPECTED_TABLES = {"documents", "jobs", "roadmaps", "episodes"}
+EXPECTED_TABLES = {
+    "documents",
+    "jobs",
+    "roadmaps",
+    "episodes",
+    "learner_sessions",
+    "session_requests",
+}
 
 
 def table_names(db_path):

@@ -2,9 +2,12 @@ import sqlite3
 from pathlib import Path
 
 from app.config import DEFAULT_DATA_DIR
+from app.models.session import SESSION_MODES, SESSION_STATUSES
 from app.storage.jobs import JOB_STATUSES
 
 _JOB_STATUS_CHECK = ", ".join(f"'{status}'" for status in JOB_STATUSES)
+_SESSION_MODE_CHECK = ", ".join(f"'{mode}'" for mode in SESSION_MODES)
+_SESSION_STATUS_CHECK = ", ".join(f"'{status}'" for status in SESSION_STATUSES)
 
 SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS documents (
@@ -54,6 +57,25 @@ CREATE TABLE IF NOT EXISTS token_usage (
     cached_tokens INTEGER NOT NULL DEFAULT 0,
     total_tokens INTEGER NOT NULL,
     created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS learner_sessions (
+    session_id TEXT PRIMARY KEY,
+    episode_id TEXT NOT NULL REFERENCES episodes(episode_id),
+    mode TEXT NOT NULL CHECK (mode IN ({_SESSION_MODE_CHECK})),
+    status TEXT NOT NULL CHECK (status IN ({_SESSION_STATUS_CHECK})),
+    version INTEGER NOT NULL,
+    payload TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS session_requests (
+    session_id TEXT NOT NULL REFERENCES learner_sessions(session_id),
+    request_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (session_id, request_id)
 );
 """
 

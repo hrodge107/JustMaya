@@ -12,6 +12,7 @@ from app.api.jobs import router as jobs_router
 from app.api.curriculum import router as curriculum_router
 from app.api.episodes import router as episodes_router
 from app.api.inspection import router as inspection_router
+from app.api.sessions import router as sessions_router
 from app.config import load_settings
 from app.errors import error_body
 from app.storage.database import init_db
@@ -38,6 +39,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     app.include_router(curriculum_router)
     app.include_router(episodes_router)
     app.include_router(inspection_router)
+    app.include_router(sessions_router)
 
     @app.exception_handler(HTTPException)
     async def http_error(request: Request, exc: HTTPException) -> JSONResponse:

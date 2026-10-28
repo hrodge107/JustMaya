@@ -83,6 +83,33 @@ class GeneratedEpisode(BaseModel):
     problems: list[str] = []
 
 
+# Grading data never leaves the server on learner-facing episode reads.
+# `feedback` is the structured shape arriving with recall-checkpoints —
+# stripping by name keeps the projection to one mechanism.
+LEARNER_HIDDEN_QUESTION_FIELDS = frozenset(
+    {
+        "correctOptionId",
+        "correctExplanation",
+        "incorrectExplanation",
+        "feedback",
+    }
+)
+
+
+def learner_view(script: EpisodeScript) -> dict:
+    """Learner-facing episode payload: everything except answer keys and
+    grading explanations. Internal reads (inspection, grading) keep the
+    full persisted model."""
+    data = script.model_dump()
+    for scene in data["scenes"]:
+        question = scene.get("question")
+        if question is None:
+            continue
+        for field in LEARNER_HIDDEN_QUESTION_FIELDS:
+            question.pop(field, None)
+    return data
+
+
 class SemanticViolation(BaseModel):
     check: str
     detail: str
