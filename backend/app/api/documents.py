@@ -11,6 +11,7 @@ from app.config import Settings
 from app.errors import error_body
 from app.models.document import UploadResponse
 from app.storage.documents import save_document_file
+from app.storage.jobs import enqueue
 
 router = APIRouter()
 
@@ -67,7 +68,6 @@ async def upload_document(
 
     file_hash = hashlib.sha256(data).hexdigest()
     document_id = uuid.uuid4().hex
-    job_id = uuid.uuid4().hex
     now = datetime.now(timezone.utc).isoformat()
 
     storage_dir = data_dir / "storage"
@@ -95,11 +95,7 @@ async def upload_document(
                     now,
                 ),
             )
-            conn.execute(
-                "INSERT INTO jobs (job_id, document_id, status, created_at, updated_at) "
-                "VALUES (?, ?, 'queued', ?, ?)",
-                (job_id, document_id, now, now),
-            )
+            job_id = enqueue(conn, document_id)
     except Exception:
         if not existing:
             (storage_dir / storage_path).unlink(missing_ok=True)

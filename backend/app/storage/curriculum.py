@@ -7,6 +7,7 @@ from pathlib import Path
 from app.models.concept import ConceptInventory
 from app.models.curriculum import Roadmap, RoadmapEdit, validate_roadmap
 from app.services.curriculum_review import apply_edit, lock_lesson
+from app.storage.jobs import release_from_review
 
 
 class RoadmapConflict(Exception):
@@ -81,9 +82,7 @@ def confirm_draft(data_dir: Path, document_id: str, revision: int) -> Roadmap:
             conn.commit()
             return roadmap
         result = lock_lesson(roadmap, inventory)
-        changed = conn.execute("UPDATE jobs SET execution_state = 'partial_complete', updated_at = ? WHERE job_id = ? AND execution_state = 'awaiting_review'",
-                               (datetime.now(timezone.utc).isoformat(), job_id)).rowcount
-        if changed != 1:
+        if not release_from_review(conn, job_id):
             raise RoadmapConflict("Job is not awaiting review")
         conn.execute("UPDATE roadmaps SET payload = ? WHERE curriculum_id = ?", (result.model_dump_json(), result.curriculum_id))
         conn.commit()

@@ -11,12 +11,13 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 
 from app.config import Settings
 from app.pipeline.graph import build_graph
-from app.pipeline.jobs import (
-    EXECUTION_FAILED,
+from app.storage.documents import set_document_status
+from app.storage.jobs import (
+    ELIGIBLE_RUN,
+    EXECUTION_COMPLETE,
     EXECUTION_PARTIAL,
-    EXECUTION_QUEUED,
     EXECUTION_REVIEW,
-    EXECUTION_RUNNING,
+    admission,
     claim_job,
     complete_job,
     connect_db,
@@ -24,21 +25,8 @@ from app.pipeline.jobs import (
     finish_job,
     get_job,
     job_pipeline_target,
-    set_document_status,
-)
-from app.storage.episodes import read_episode_state
-
-ELIGIBLE_RUN = (EXECUTION_QUEUED, EXECUTION_FAILED, EXECUTION_PARTIAL)
-ELIGIBLE_WORKER = (EXECUTION_QUEUED,)
-ELIGIBLE_RECOVERY = (EXECUTION_RUNNING,)
-
-# Stages a partial_complete job may resume into via as_node update.
-_PARTIAL_ADMIT = (
-    ("indexing", "index"),
-    ("analyzing", "analyze"),
-    ("planning", "plan"),
-    ("generating", "generate"),
-    ("validating", "validate"),
+    needs_generate_resume,
+    resolve_outcome,
 )
 
 
@@ -51,20 +39,14 @@ def run_job(
     conn = connect_db(data_dir)
     try:
         current = get_job(conn, job_id)
+        claimable = admission(data_dir, current, eligible)
+        if claimable is None:
+            return {"claimed": False, "job": current}
         # Pre-change drafts park at awaiting_review after generation; they
         # resume into the validate stage via an as_node update below.
-        resume_generated = (
-            current is not None
-            and current["execution_state"] == EXECUTION_REVIEW
-            and current["stage"] == "generate"
-            and (episode := read_episode_state(data_dir, current["document_id"]))
-            is not None
-            and episode["status"] != "ready"
+        resume_generated = current is not None and needs_generate_resume(
+            data_dir, current
         )
-        if (EXECUTION_PARTIAL in eligible and current and current["execution_state"] == EXECUTION_PARTIAL
-                and (current["status"], current["stage"]) not in _PARTIAL_ADMIT):
-            return {"claimed": False, "job": current}
-        claimable = (EXECUTION_REVIEW,) if resume_generated else eligible
         if not claim_job(conn, job_id, claimable):
             return {"claimed": False, "job": get_job(conn, job_id)}
         target = job_pipeline_target(conn, job_id)
@@ -116,8 +98,7 @@ def run_job(
 
     conn = connect_db(data_dir)
     try:
-        episode = read_episode_state(data_dir, document_id)
-        if episode is not None and episode["status"] == "ready":
+        if resolve_outcome(data_dir, document_id) == EXECUTION_COMPLETE:
             complete_job(conn, job_id)
         else:
             finish_job(conn, job_id, EXECUTION_REVIEW)

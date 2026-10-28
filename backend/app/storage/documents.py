@@ -1,3 +1,4 @@
+import sqlite3
 from pathlib import Path
 
 from app.config import DEFAULT_DATA_DIR
@@ -17,3 +18,13 @@ def save_document_file(storage_dir: Path, document_id: str, data: bytes) -> Path
 
 def resolve_document_path(storage_dir: Path, storage_path: str) -> Path:
     return storage_dir / Path(storage_path).name
+
+
+def set_document_status(
+    conn: sqlite3.Connection, document_id: str, status: str
+) -> None:
+    with conn:
+        conn.execute(
+            "UPDATE documents SET status = ? WHERE document_id = ?",
+            (status, document_id),
+        )

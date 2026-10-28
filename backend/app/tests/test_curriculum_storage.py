@@ -4,6 +4,7 @@ import pytest
 
 from app.storage.curriculum import RoadmapConflict, confirm_draft, read_draft, save_draft, update_draft
 from app.storage.database import init_db
+from app.storage.jobs import EXECUTION_PARTIAL, EXECUTION_REVIEW
 from app.tests.test_curriculum_models import inventory, roadmap
 from app.tests.test_curriculum_review import edit
 
@@ -14,7 +15,7 @@ def store(tmp_path):
     init_db(tmp_path)
     conn = sqlite3.connect(tmp_path / "app.db")
     conn.execute("INSERT INTO documents (document_id, filename, status, created_at) VALUES ('d', 'a.pdf', 'processing', 'now')")
-    conn.execute("INSERT INTO jobs (job_id, document_id, status, stage, error, created_at, updated_at, execution_state) VALUES ('j', 'd', 'planning', 'plan', NULL, 'now', 'now', 'awaiting_review')")
+    conn.execute("INSERT INTO jobs (job_id, document_id, status, stage, error, created_at, updated_at, execution_state) VALUES ('j', 'd', 'planning', 'plan', NULL, 'now', 'now', ?)", (EXECUTION_REVIEW,))
     conn.commit()
     conn.close()
     return tmp_path
@@ -31,7 +32,7 @@ def test_revision_and_confirmation_are_atomic_and_repeatable(store):
     with pytest.raises(RoadmapConflict):
         update_draft(store, "d", edit(changed, ["c"]))
     conn = sqlite3.connect(store / "app.db")
-    assert conn.execute("SELECT execution_state FROM jobs WHERE job_id='j'").fetchone()[0] == "partial_complete"
+    assert conn.execute("SELECT execution_state FROM jobs WHERE job_id='j'").fetchone()[0] == EXECUTION_PARTIAL
     conn.close()
 
 

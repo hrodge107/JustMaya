@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from app.main import create_app
 from app.storage.curriculum import read_draft, save_draft
+from app.storage.jobs import EXECUTION_REVIEW
 from app.tests.test_curriculum_models import inventory, roadmap
 
 
@@ -13,7 +14,7 @@ def test_review_api_conflicts_confirmation_and_private_context(tmp_path):
         assert client.get(url).status_code == 404
         conn = sqlite3.connect(tmp_path / "app.db")
         conn.execute("INSERT INTO documents (document_id, filename, status, created_at) VALUES ('d', 'a.pdf', 'processing', 'now')")
-        conn.execute("INSERT INTO jobs (job_id, document_id, status, stage, created_at, updated_at, execution_state) VALUES ('j', 'd', 'planning', 'plan', 'now', 'now', 'awaiting_review')")
+        conn.execute("INSERT INTO jobs (job_id, document_id, status, stage, created_at, updated_at, execution_state) VALUES ('j', 'd', 'planning', 'plan', 'now', 'now', ?)", (EXECUTION_REVIEW,))
         conn.commit()
         conn.close()
         save_draft(tmp_path, roadmap(), inventory(), "j")
