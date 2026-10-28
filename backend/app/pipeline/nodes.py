@@ -12,7 +12,6 @@ import asyncio
 import os
 import sqlite3
 import tempfile
-from datetime import datetime, timezone
 from pathlib import Path
 
 from app.config import Settings
@@ -42,6 +41,7 @@ from app.storage.episodes import (
     read_episode_state,
     save_episode_draft,
 )
+from app.storage.jobs import mark_stage
 
 
 class TransientStageError(Exception):
@@ -49,24 +49,6 @@ class TransientStageError(Exception):
 
 
 TRANSIENT_ERRORS = (TransientStageError, sqlite3.OperationalError)
-
-STAGE_STATUS = {"extract": "extracting", "index": "indexing", "analyze": "analyzing", "plan": "planning", "generate": "generating", "validate": "validating"}
-
-
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def mark_stage(data_dir: Path, job_id: str, node: str) -> None:
-    conn = sqlite3.connect(data_dir / "app.db", timeout=10)
-    try:
-        with conn:
-            conn.execute(
-                "UPDATE jobs SET status = ?, stage = ?, updated_at = ? WHERE job_id = ?",
-                (STAGE_STATUS[node], node, _now(), job_id),
-            )
-    finally:
-        conn.close()
 
 
 def extraction_artifact_path(data_dir: Path, document_id: str) -> Path:

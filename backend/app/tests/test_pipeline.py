@@ -13,7 +13,12 @@ from app.models.concept import ConceptInventory
 from app.services.analysis_windows import analysis_windows
 from app.pipeline import nodes as pipeline_nodes
 from app.pipeline import graph as pipeline_graph
-from app.pipeline.jobs import (
+from app.storage.jobs import (
+    ELIGIBLE_RECOVERY,
+    ELIGIBLE_RUN,
+    EXECUTION_FAILED,
+    EXECUTION_PARTIAL,
+    EXECUTION_RUNNING,
     EXECUTION_STATES,
     claim_job,
     connect_db,
@@ -22,7 +27,7 @@ from app.pipeline.jobs import (
     recover_abandoned,
 )
 from app.pipeline.nodes import TransientStageError, extraction_artifact_path
-from app.pipeline.runner import ELIGIBLE_RECOVERY, ELIGIBLE_RUN, run_job
+from app.pipeline.runner import run_job
 from app.pipeline.worker import drain
 from app.services.vector_store import get_collection
 from app.storage.database import init_db
@@ -134,8 +139,8 @@ def test_retry_claim_clears_previous_error(tmp_path, fixtures):
     seed_job(tmp_path, fixtures)
     conn = connect_db(tmp_path)
     with conn:
-        conn.execute("UPDATE jobs SET execution_state='failed', error='old error' WHERE job_id=?", (JOB_ID,))
-    assert claim_job(conn, JOB_ID, ("failed",))
+        conn.execute("UPDATE jobs SET execution_state=?, error='old error' WHERE job_id=?", (EXECUTION_FAILED, JOB_ID))
+    assert claim_job(conn, JOB_ID, (EXECUTION_FAILED,))
     assert get_job(conn, JOB_ID)["error"] is None
     conn.close()
 
@@ -286,7 +291,7 @@ def test_explicitly_advance_old_partial_job(tmp_path, fixtures, monkeypatch):
     assert run_job(JOB_ID, settings, tmp_path)["job"]["status"] == "indexing"
     conn = connect_db(tmp_path)
     with conn:
-        conn.execute("UPDATE jobs SET execution_state = 'partial_complete' WHERE job_id = ?", (JOB_ID,))
+        conn.execute("UPDATE jobs SET execution_state = ? WHERE job_id = ?", (EXECUTION_PARTIAL, JOB_ID))
     conn.close()
     monkeypatch.setattr(pipeline_graph, "STAGE_NODES", ("extract", "index", "analyze", "plan"))
     resumed = run_job(JOB_ID, settings, tmp_path)
@@ -305,7 +310,7 @@ def test_advance_analysis_checkpoint_without_reanalysis(tmp_path, fixtures, monk
     assert run_job(JOB_ID, settings, tmp_path)["job"]["status"] == "analyzing"
     conn = connect_db(tmp_path)
     with conn:
-        conn.execute("UPDATE jobs SET execution_state = 'partial_complete' WHERE job_id = ?", (JOB_ID,))
+        conn.execute("UPDATE jobs SET execution_state = ? WHERE job_id = ?", (EXECUTION_PARTIAL, JOB_ID))
     conn.close()
     def unexpected(*args, **kwargs):
         raise AssertionError("analysis must not repeat")
@@ -664,8 +669,8 @@ def test_abandoned_job_recovered(tmp_path, fixtures, monkeypatch):
     conn = connect_db(tmp_path)
     with conn:
         conn.execute(
-            "UPDATE jobs SET execution_state = 'running' WHERE job_id = ?",
-            (JOB_ID,),
+            "UPDATE jobs SET execution_state = ? WHERE job_id = ?",
+            (EXECUTION_RUNNING, JOB_ID),
         )
     abandoned = recover_abandoned(conn)
     conn.close()

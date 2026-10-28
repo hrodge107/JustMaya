@@ -106,6 +106,7 @@ def test_models_serialize():
         "stage": None,
         "error": None,
         "execution_state": None,
+        "can_run": False,
         "token_usage": {
             "prompt_tokens": 0,
             "completion_tokens": 0,

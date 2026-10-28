@@ -9,10 +9,16 @@ import argparse
 import time
 
 from app.config import load_settings
-from app.pipeline.jobs import connect_db, next_queued_job, recover_abandoned
-from app.pipeline.runner import ELIGIBLE_RECOVERY, ELIGIBLE_WORKER, run_job
+from app.pipeline.runner import run_job
 from app.storage.database import init_db
 from app.storage.documents import init_storage
+from app.storage.jobs import (
+    ELIGIBLE_RECOVERY,
+    ELIGIBLE_WORKER,
+    connect_db,
+    next_queued_job,
+    recover_abandoned,
+)
 
 
 def drain(settings, data_dir) -> None:

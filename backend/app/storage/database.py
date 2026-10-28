@@ -2,8 +2,11 @@ import sqlite3
 from pathlib import Path
 
 from app.config import DEFAULT_DATA_DIR
+from app.storage.jobs import JOB_STATUSES
 
-SCHEMA = """
+_JOB_STATUS_CHECK = ", ".join(f"'{status}'" for status in JOB_STATUSES)
+
+SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS documents (
     document_id TEXT PRIMARY KEY,
     filename TEXT NOT NULL,
@@ -16,10 +19,7 @@ CREATE TABLE IF NOT EXISTS documents (
 CREATE TABLE IF NOT EXISTS jobs (
     job_id TEXT PRIMARY KEY,
     document_id TEXT NOT NULL REFERENCES documents(document_id),
-    status TEXT NOT NULL CHECK (status IN (
-        'queued', 'extracting', 'indexing', 'analyzing', 'planning',
-        'generating', 'validating', 'ready', 'failed'
-    )),
+    status TEXT NOT NULL CHECK (status IN ({_JOB_STATUS_CHECK})),
     stage TEXT,
     error TEXT,
     created_at TEXT NOT NULL,
@@ -64,8 +64,9 @@ EXTRA_COLUMNS = {
         "file_size": "INTEGER",
         "storage_path": "TEXT",
     },
-    # execution_state vocabulary (queued|running|partial_complete|complete|failed)
-    # is enforced in app/pipeline/ — a CHECK can't be added via ALTER TABLE
+    # execution_state vocabulary (queued|running|awaiting_review|
+    # partial_complete|complete|failed) is enforced in app/storage/jobs.py —
+    # a CHECK can't be added via ALTER TABLE
     "jobs": {
         "execution_state": "TEXT NOT NULL DEFAULT 'queued'",
     },

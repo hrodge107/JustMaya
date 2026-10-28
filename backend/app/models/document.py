@@ -23,6 +23,7 @@ class JobStatusResponse(BaseModel):
     stage: str | None = None
     error: str | None = None
     execution_state: str | None = None
+    can_run: bool = False
     token_usage: dict = {
         "prompt_tokens": 0,
         "completion_tokens": 0,

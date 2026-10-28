@@ -6,8 +6,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.config import load_settings
-from app.pipeline.jobs import EXECUTION_PARTIAL
 from app.pipeline.runner import run_job
+from app.storage.jobs import EXECUTION_PARTIAL
 
 
 if __name__ == "__main__":
