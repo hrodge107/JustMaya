@@ -19,6 +19,12 @@ class FakeMeter:
         self.count_input = kwargs
         return self.count
 
+    async def require_input_budget(self, *, system, user, limit, exc):
+        count = await self.count_input_tokens(system=system, user=user)
+        if count > limit:
+            raise exc(count, limit)
+        return count
+
     async def generate_structured(self, **kwargs):
         self.calls.append(kwargs)
         return self.response

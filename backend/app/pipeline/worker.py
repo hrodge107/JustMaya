@@ -21,16 +21,18 @@ from app.storage.jobs import (
 )
 
 
-def drain(settings, data_dir) -> None:
+def drain(settings, data_dir, *, ctx=None, stages=None) -> None:
     conn = connect_db(data_dir)
     try:
         for job_id in recover_abandoned(conn):
-            run_job(job_id, settings, data_dir, eligible=ELIGIBLE_RECOVERY)
+            run_job(job_id, settings, data_dir, eligible=ELIGIBLE_RECOVERY,
+                    ctx=ctx, stages=stages)
         while True:
             job_id = next_queued_job(conn)
             if job_id is None:
                 return
-            run_job(job_id, settings, data_dir, eligible=ELIGIBLE_WORKER)
+            run_job(job_id, settings, data_dir, eligible=ELIGIBLE_WORKER,
+                    ctx=ctx, stages=stages)
     finally:
         conn.close()
 

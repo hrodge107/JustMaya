@@ -277,9 +277,33 @@ def test_job_status_reports_token_usage(data_dir):
         assert fresh["token_usage"]["by_stage"] == {}
 
 
-def test_budget_error_inside_node_fails_job_once(data_dir, monkeypatch):
-    import app.pipeline.nodes as pipeline_nodes
+@pytest.mark.anyio
+async def test_require_input_budget_under_limit_returns_count(data_dir):
+    stub = StubProvider(count=42)
+    metered = MeteredProvider(stub, _settings(), data_dir)
+    n = await metered.require_input_budget(
+        system="s", user="u", limit=100,
+        exc=lambda c, lim: ValueError("TOO_BIG"),
+    )
+    assert n == 42
+    assert stub.calls == [{"count": {"system": "s", "user": "u"}}]
+
+
+@pytest.mark.anyio
+async def test_require_input_budget_over_limit_raises_caller_exc(data_dir):
+    stub = StubProvider(count=101)
+    metered = MeteredProvider(stub, _settings(), data_dir)
+    with pytest.raises(ValueError, match="TOO_BIG: 101 of 100"):
+        await metered.require_input_budget(
+            system="s", user="u", limit=100,
+            exc=lambda c, lim: ValueError(f"TOO_BIG: {c} of {lim}"),
+        )
+    assert stub.calls == [{"count": {"system": "s", "user": "u"}}]
+
+
+def test_budget_error_inside_node_fails_job_once(data_dir):
     from app.pipeline.runner import run_job
+    from app.pipeline.stage import StageContext, StageServices
     from app.storage.documents import init_storage
 
     init_storage(data_dir)
@@ -295,8 +319,10 @@ def test_budget_error_inside_node_fails_job_once(data_dir, monkeypatch):
         calls.append(1)
         raise TokenBudgetError("extract", "job", planned=999, spent=1, budget=1000)
 
-    monkeypatch.setattr(pipeline_nodes, "extract_document", boom)
-    result = run_job("j1", settings, data_dir)
+    ctx = StageContext(
+        settings, data_dir, services=StageServices(extract_document=boom)
+    )
+    result = run_job("j1", settings, data_dir, ctx=ctx)
 
     job = result["job"]
     assert job["execution_state"] == "failed"

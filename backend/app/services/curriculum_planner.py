@@ -46,9 +46,13 @@ SYSTEM = (
 async def plan_curriculum(inventory: ConceptInventory, provider: MeteredProvider,
                           job_id: str, settings: Settings) -> Roadmap:
     payload = json.dumps({"untrusted_inventory": inventory.model_dump()}, ensure_ascii=False)
-    count = await provider.count_input_tokens(system=SYSTEM, user=payload)
-    if count > settings.roadmap_max_input_tokens:
-        raise ValueError("ROADMAP_INPUT_TOO_LARGE: inventory exceeds the planning input limit")
+    await provider.require_input_budget(
+        system=SYSTEM, user=payload,
+        limit=settings.roadmap_max_input_tokens,
+        exc=lambda count, limit: ValueError(
+            "ROADMAP_INPUT_TOO_LARGE: inventory exceeds the planning input limit"
+        ),
+    )
     result = await provider.generate_structured(
         job_id=job_id, stage="planning", system=SYSTEM, user=payload,
         schema=_inline_schema(Plan), max_tokens=20000, preflight=True,
