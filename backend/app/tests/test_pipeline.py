@@ -24,7 +24,6 @@ from app.models.concept import ConceptInventory
 from app.pipeline.nodes import (
     STAGES,
     TransientStageError,
-    extraction_artifact_path,
     make_nodes,
 )
 from app.pipeline.runner import run_job
@@ -33,6 +32,7 @@ from app.pipeline.worker import drain
 from app.services.analysis_windows import analysis_windows
 from app.services.pdf_extractor import extract_document as real_extract_document
 from app.services.vector_store import get_collection
+from app.storage.artifacts import ArtifactStore
 from app.storage.database import init_db
 from app.storage.documents import init_storage
 from app.storage.jobs import (
@@ -188,7 +188,7 @@ def test_full_run_partial_complete(tmp_path, fixtures):
     assert job["execution_state"] == "awaiting_review"
     assert job["status"] != "ready"
     assert calls == [DOC_ID]
-    artifact = extraction_artifact_path(tmp_path, DOC_ID)
+    artifact = ArtifactStore(tmp_path / "storage").path(DOC_ID, "extracted")
     assert artifact.exists()
     extracted = ExtractedDocument.model_validate_json(artifact.read_text())
     assert extracted.document_id == DOC_ID
@@ -278,7 +278,7 @@ def test_resume_skips_completed_nodes(tmp_path, fixtures):
     assert second["job"]["status"] == "planning"
     assert extract_calls == [1]  # extract node was not re-executed
     assert index_calls[-1] == DOC_ID
-    assert extraction_artifact_path(tmp_path, DOC_ID).exists()
+    assert ArtifactStore(tmp_path / "storage").path(DOC_ID, "extracted").exists()
 
 
 def test_analysis_failure_resumes_without_repeating_prior_nodes(tmp_path, fixtures):

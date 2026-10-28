@@ -9,6 +9,7 @@ from app.errors import error_body
 from app.models.concept import ConceptInventory
 from app.models.document import ExtractedDocument
 from app.services.vector_store import get_collection
+from app.storage.artifacts import ArtifactStore
 from app.storage.episodes import read_episode, read_episode_state
 
 router = APIRouter()
@@ -39,8 +40,9 @@ def inspect_stage(document_id: str, stage: str, request: Request):
         if state is None:
             return JSONResponse(status_code=404, content=error_body("NOT_FOUND", "Stage output is not available yet."))
         return state
-    suffix, model = ("extracted", ExtractedDocument) if stage == "extraction" else ("concepts", ConceptInventory)
-    path = base / "storage" / f"{document_id}.{suffix}.json"
+    store = ArtifactStore(base / "storage")
+    kind, model = ("extracted", ExtractedDocument) if stage == "extraction" else ("concepts", ConceptInventory)
+    path = store.path(document_id, kind)
     if not path.is_file():
         return JSONResponse(status_code=404, content=error_body("NOT_FOUND", "Stage output is not available yet."))
-    return model.model_validate_json(path.read_text(encoding="utf-8"))
+    return store.load(path, model)

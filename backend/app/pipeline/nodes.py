@@ -14,11 +14,8 @@ policy.
 """
 
 import asyncio
-import os
 import sqlite3
-import tempfile
 from functools import partial
-from pathlib import Path
 
 from app.models.document import ExtractedDocument
 from app.models.concept import ConceptInventory
@@ -39,28 +36,13 @@ class TransientStageError(Exception):
 TRANSIENT_ERRORS = (TransientStageError, sqlite3.OperationalError)
 
 
-def extraction_artifact_path(data_dir: Path, document_id: str) -> Path:
-    return data_dir / "storage" / f"{document_id}.extracted.json"
-
-
-def _write_atomic(storage_dir: Path, artifact: Path, payload: str) -> None:
-    temporary = None
-    try:
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=storage_dir, delete=False) as handle:
-            temporary = Path(handle.name)
-            handle.write(payload)
-        os.replace(temporary, artifact)
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
-
-
 def _extract(ctx: StageContext, state: PipelineState) -> dict:
     mark_stage(ctx.data_dir, state["job_id"], "extract")
     pdf_path = resolve_document_path(ctx.storage_dir, state["storage_path"])
     extracted = ctx.services.extract_document(state["document_id"], pdf_path)
-    artifact = extraction_artifact_path(ctx.data_dir, state["document_id"])
-    artifact.write_text(extracted.model_dump_json(), encoding="utf-8")
+    artifact = ctx.artifacts.save(
+        state["document_id"], "extracted", extracted.model_dump_json()
+    )
     return {
         "extracted_path": artifact.name,
         "page_count": extracted.page_count,
@@ -69,27 +51,23 @@ def _extract(ctx: StageContext, state: PipelineState) -> dict:
 
 def _index(ctx: StageContext, state: PipelineState) -> dict:
     mark_stage(ctx.data_dir, state["job_id"], "index")
-    artifact = ctx.storage_dir / state["extracted_path"]
-    extracted = ExtractedDocument.model_validate_json(
-        artifact.read_text(encoding="utf-8")
-    )
+    extracted = ctx.artifacts.load(state["extracted_path"], ExtractedDocument)
     count = ctx.services.index_document(extracted, ctx.settings)
     return {"chunk_count": count}
 
 
 def _analyze(ctx: StageContext, state: PipelineState) -> dict:
     mark_stage(ctx.data_dir, state["job_id"], "analyze")
-    extracted = ExtractedDocument.model_validate_json(
-        (ctx.storage_dir / state["extracted_path"]).read_text(encoding="utf-8")
-    )
+    extracted = ctx.artifacts.load(state["extracted_path"], ExtractedDocument)
     inventory = asyncio.run(
         ctx.services.analyze_document(
             extracted, ctx.provider, state["job_id"],
             settings=ctx.settings, data_dir=ctx.data_dir,
         )
     )
-    artifact = ctx.storage_dir / f"{state['document_id']}.concepts.json"
-    _write_atomic(ctx.storage_dir, artifact, inventory.model_dump_json())
+    artifact = ctx.artifacts.save(
+        state["document_id"], "concepts", inventory.model_dump_json()
+    )
     return {"inventory_path": artifact.name}
 
 
@@ -100,9 +78,7 @@ def _plan(ctx: StageContext, state: PipelineState) -> dict:
         if check.foreign:
             raise ValueError("Roadmap belongs to a different job")
         return {"curriculum_id": check.draft.curriculum_id}
-    inventory = ConceptInventory.model_validate_json(
-        (ctx.storage_dir / state["inventory_path"]).read_text(encoding="utf-8")
-    )
+    inventory = ctx.artifacts.load(state["inventory_path"], ConceptInventory)
     roadmap = asyncio.run(
         ctx.services.plan_curriculum(
             inventory, ctx.provider, state["job_id"], ctx.settings
@@ -138,8 +114,10 @@ def _generate(ctx: StageContext, state: PipelineState) -> dict:
             ctx.settings,
         )
     )
-    artifact = ctx.storage_dir / f"{state['document_id']}.{script.episodeId}.script.json"
-    _write_atomic(ctx.storage_dir, artifact, script.model_dump_json())
+    ctx.artifacts.save(
+        state["document_id"], "script", script.model_dump_json(),
+        episode_id=script.episodeId,
+    )
     save_episode_draft(ctx.data_dir, script, roadmap.curriculum_id)
     return {"episode_id": script.episodeId}
 
@@ -179,8 +157,10 @@ def _validate(ctx: StageContext, state: PipelineState) -> dict:
             ctx.settings,
         )
     )
-    artifact = ctx.storage_dir / f"{state['document_id']}.{script.episodeId}.script.json"
-    _write_atomic(ctx.storage_dir, artifact, script.model_dump_json())
+    ctx.artifacts.save(
+        state["document_id"], "script", script.model_dump_json(),
+        episode_id=script.episodeId,
+    )
     if not report_passing(report):
         failures = report.deterministic_violations or [
             f"{v.check}: {v.detail}"
