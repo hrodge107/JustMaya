@@ -6,7 +6,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 
 INSTALL_CMD=(npm install)
-VERIFY_CMD=(npm run lint --silent && npm run build)
+VERIFY_CMD="npm run lint --silent && npm run build"
 START_CMD=(npm run dev)
 
 echo "==> Working directory: $PWD"
