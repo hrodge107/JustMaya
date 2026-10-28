@@ -2,11 +2,9 @@
    laptop or phone, SEKAI-classic adaptation (dark scene, light dialogue box,
    dark text), dial ENERGY 2 / RHYTHM 1 / MOTION 2.
    - Palette reuses the learner tokens (ink, paper, wash, mint) plus two scene
-     shades; mint is the single accent: current progress segment, Continue,
-     focus ring.
-   - Proportions follow the reference's 1920x1080 text layer: the dialogue box
-     covers the lower ~30% of the scene, the speaker name sits inside its top
-     left at the same size and a heavier weight, the text column wraps at ~68%.
+     shades; mint marks progress, the advance cue, and focus.
+   - The full-width dialogue overlays the scene on wide screens; a raised
+     nameplate separates the speaker from the line.
    - Signature: the stand-in face glyph, drawn from CSS shapes whose geometry
      encodes the five emotions. Only transform/opacity animate. */
 
@@ -133,12 +131,7 @@ body:has(.player) { margin: 0; background: #e9e9f1; color: #30304c; color-scheme
   .vn-scene { border-radius: 22px; padding: 24px 32px 19%; min-height: 100%; }
   /* Positioned so it paints (and takes clicks) above the positioned scene. */
   .vn-dialogue { position: relative; z-index: 1; align-self: end; min-height: min(17vw, 210px); margin: 0 18px 18px; border-radius: 16px; box-shadow: 0 6px 18px #23233a40; }
-  /* Reference text column (~68%); Continue takes the empty right side so the
-     box stays near the reference's lower-30% band even on long lines. */
-  .vn-dialogue { display: grid; grid-template-columns: minmax(0, 68%) minmax(0, 1fr); grid-template-rows: auto 1fr; column-gap: 24px; align-content: start; }
-  .vn-speaker, .vn-text { grid-column: 1; }
-  .vn-controls { grid-column: 2; grid-row: 1 / span 2; align-self: end; padding-top: 0; }
-  .vn-frame:not(.mode-playing) .vn-controls { grid-column: 1 / -1; grid-row: auto; justify-content: flex-start; padding-top: 12px; }
+  .vn-frame:not(.mode-playing) .vn-controls { justify-content: flex-start; }
 }
 @media (max-width: 639px) {
   .player-header { flex-wrap: wrap; gap: 8px 12px; }
@@ -150,3 +143,17 @@ body:has(.player) { margin: 0; background: #e9e9f1; color: #30304c; color-scheme
 @media (prefers-reduced-motion: reduce) {
   .player * { transition: none !important; animation: none !important; }
 }
+
+/* The dialogue itself is the activation surface; the nameplate belongs to the speaker. */
+.vn-dialogue { position: relative; padding: 0; background: rgba(247, 247, 250, .95); }
+.player .vn-dialogue-target { position: relative; display: flex; flex-direction: column; align-items: flex-start; width: 100%; min-height: 150px; padding: 0 30px 38px; border-radius: inherit; background: transparent; color: var(--ink); text-align: left; }
+.vn-dialogue-target .vn-speaker { display: block; min-width: min(40%, 280px); margin: -16px 0 12px; padding: 6px 22px; border: 2px solid #e1e1ed; border-radius: 22px; background: #626281; color: white; }
+.vn-dialogue-target .vn-text { display: block; max-width: none; }
+.vn-advance-cue { position: absolute; right: 24px; bottom: 14px; color: var(--mint-ink); font-size: 1rem; }
+.vn-dialogue-target .vn-error { flex: none; margin-top: 12px; }
+.vn-dialogue:not(:has(.vn-dialogue-target)) { padding: 20px 30px; }
+@media (min-width: 1000px) {
+  .vn-dialogue { display: block; margin: 0; border-radius: 20px; min-height: 0; }
+  .player .vn-dialogue-target { min-height: min(17vw, 210px); }
+}
+@media (max-width: 639px) { .player .vn-dialogue-target { padding: 0 20px 36px; } }

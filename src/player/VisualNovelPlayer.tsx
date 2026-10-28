@@ -40,7 +40,7 @@ function DialogueText({ id, text, revealed, onRevealed }: { id: string; text: st
   useEffect(() => { if (!revealed && count >= text.length) onRevealed(id) }, [count, revealed, text, id, onRevealed])
   const shown = revealed ? text : text.slice(0, count)
   // The animated copy is hidden from AT; the live region carries the whole line once.
-  return <p className="vn-text" aria-hidden="true">{shown}<span className="vn-text-rest">{revealed ? '' : text.slice(count)}</span></p>
+  return <span className="vn-text" aria-hidden="true">{shown}<span className="vn-text-rest">{revealed ? '' : text.slice(count)}</span></span>
 }
 
 export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: string; onExit(): void }) {
@@ -51,8 +51,10 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
   const [advanceError, setAdvanceError] = useState('')
   const [revealedLine, setRevealedLine] = useState('')
   const requestId = useRef<string | null>(null)
+  const reloadRequired = useRef(false)
   const alive = useRef(true)
   const continueRef = useRef<HTMLButtonElement>(null)
+  const advancing = useRef(false)
   const reduced = useReducedMotion()
 
   useEffect(() => {
@@ -86,7 +88,15 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
   async function advance() {
     if (!session || !line || mode !== 'playing') return
     if (!revealed) { setRevealedLine(line.lineId); return }
-    if (pending) return
+    if (advancing.current) return
+    advancing.current = true
+    if (reloadRequired.current) {
+      setPending(true); setAdvanceError('')
+      try { await reload(); reloadRequired.current = false }
+      catch { if (alive.current) setAdvanceError('Could not reload your place in the lesson. Try again.') }
+      finally { advancing.current = false; if (alive.current) setPending(false) }
+      return
+    }
     // One id per step until the server acknowledges it: a retry of a request
     // that actually landed is deduplicated, never applied twice.
     requestId.current ??= crypto.randomUUID()
@@ -98,9 +108,10 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         requestId.current = null
-        await reload().catch(() => { if (alive.current) setAdvanceError('Could not reload your place in the lesson. Try again.') })
+        reloadRequired.current = true
+        await reload().then(() => { reloadRequired.current = false }).catch(() => { if (alive.current) setAdvanceError('Could not reload your place in the lesson. Try again.') })
       } else if (alive.current) setAdvanceError(err instanceof Error ? err.message : 'Could not continue.')
-    } finally { if (alive.current) setPending(false) }
+    } finally { advancing.current = false; if (alive.current) setPending(false) }
   }
 
   if (loadError) return <main className="player"><div className="player-message" role="alert"><h1>{loadError.notFound ? 'This lesson session was not found.' : 'This lesson could not be loaded.'}</h1><p>{loadError.notFound ? 'It may have been started on another device or removed. Go back and press Play to start again.' : loadError.message}</p><button className="vn-button" onClick={onExit}>Back to your lesson</button></div></main>
@@ -126,20 +137,22 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
         </div>
       </section>
       <section className="vn-dialogue" aria-label="Dialogue">
-        {line && <>
-          <p className="vn-speaker">{speaker}</p>
-          <DialogueText key={line.lineId} id={line.lineId} text={line.text} revealed={revealed} onRevealed={setRevealedLine} />
+        {mode === 'playing' && line ? <>
+          <button ref={continueRef} type="button" className="vn-dialogue-target" aria-label={advanceError ? 'Retry advancing dialogue' : 'Reveal or advance dialogue'} aria-busy={pending || undefined} aria-disabled={pending || undefined} onClick={() => void advance()}>
+            <span className="vn-speaker">{speaker}</span>
+            <DialogueText key={line.lineId} id={line.lineId} text={line.text} revealed={revealed} onRevealed={setRevealedLine} />
+            {advanceError && <span className="vn-error" role="alert">{advanceError} Activate the dialogue to try again.</span>}
+            <span className="vn-advance-cue" aria-hidden="true">{pending ? '…' : '◆'}</span>
+          </button>
           <p className="sr-only" aria-live="polite">{speaker}: {line.text}</p>
+        </> : <>
+          {line && <><p className="vn-speaker">{speaker}</p><p className="vn-text">{line.text}</p></>}
+          <div className="vn-controls">
+            {mode === 'checkpoint' && <p className="vn-note">You can answer this checkpoint once that part of the lesson is ready. Your place is saved here.</p>}
+            {mode === 'completed' && <button className="vn-button" onClick={onExit}>Back to your lesson</button>}
+            {mode !== 'checkpoint' && mode !== 'completed' && <p className="vn-note">This session is in {mode} mode, which this player cannot show yet.</p>}
+          </div>
         </>}
-        <div className="vn-controls">
-          {mode === 'playing' && <>
-            {advanceError && <p className="vn-error" role="alert">{advanceError}</p>}
-            <button ref={continueRef} className="vn-button" aria-busy={pending || undefined} aria-disabled={pending || undefined} onClick={() => void advance()}>{advanceError ? 'Try again' : pending ? 'Saving your place…' : 'Continue'}</button>
-          </>}
-          {mode === 'checkpoint' && <p className="vn-note">You can answer this checkpoint once that part of the lesson is ready. Your place is saved here.</p>}
-          {mode === 'completed' && <button className="vn-button" onClick={onExit}>Back to your lesson</button>}
-          {mode !== 'playing' && mode !== 'checkpoint' && mode !== 'completed' && <p className="vn-note">This session is in {mode} mode, which this player cannot show yet.</p>}
-        </div>
       </section>
     </div>
   </main>
