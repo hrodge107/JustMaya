@@ -24,6 +24,7 @@ from app.services.model_provider import GenerationProvider, MetaProvider
 from app.services.pdf_extractor import extract_document
 from app.services.rag_indexer import index_document
 from app.services.token_budget import MeteredProvider
+from app.storage.artifacts import ArtifactStore
 from app.storage.curriculum import read_draft
 
 
@@ -79,6 +80,7 @@ class StageContext:
         self.settings = settings
         self.data_dir = data_dir
         self.storage_dir = data_dir / "storage"
+        self.artifacts = ArtifactStore(self.storage_dir)
         self.provider = MeteredProvider(
             provider if provider is not None else MetaProvider(settings),
             settings,
