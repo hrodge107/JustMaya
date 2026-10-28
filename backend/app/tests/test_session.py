@@ -7,6 +7,8 @@ directly; API tests go through TestClient.
 """
 
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event
 
 import pytest
 from fastapi.testclient import TestClient
@@ -29,6 +31,7 @@ from app.storage.database import init_db
 from app.storage.sessions import (
     EpisodeNotReady,
     SessionConflict,
+    _connect,
     apply_advance,
     create_session,
     get_session,
@@ -210,8 +213,12 @@ def test_create_session_persists_initial_state(tmp_path):
         "WHERE session_id = ?",
         (session.sessionId,),
     ).fetchone()
+    episode_status = conn.execute(
+        "SELECT status FROM episodes WHERE episode_id = 'ep'"
+    ).fetchone()[0]
     conn.close()
     assert row == ("ep", "playing", "active", 1)
+    assert episode_status == "ready"
 
 
 def test_create_session_rejects_draft_and_unknown(tmp_path):
@@ -367,3 +374,101 @@ def test_episode_get_strips_grading_fields_inspection_keeps_them(tmp_path):
 
         inspection = client.get("/api/documents/d/inspection/episode").json()
         assert inspection["scenes"][1]["question"]["correctOptionId"] == "a"
+
+
+def test_session_connection_enforces_foreign_keys(tmp_path):
+    init_db(tmp_path)
+    conn = _connect(tmp_path)
+    try:
+        assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO learner_sessions "
+                "(session_id, episode_id, mode, status, version, payload, created_at, updated_at) "
+                "VALUES ('orphan', 'missing', 'playing', 'active', 1, '{}', 'now', 'now')"
+            )
+    finally:
+        conn.close()
+
+
+def test_duplicate_request_returns_latest_state_and_checks_kind(tmp_path):
+    _seed(tmp_path)
+    session = create_session(tmp_path, "ep")
+    apply_advance(tmp_path, session.sessionId, "r1", 1)
+    apply_advance(tmp_path, session.sessionId, "r2", 2)
+    assert apply_advance(tmp_path, session.sessionId, "r1", 1).version == 3
+
+    conn = sqlite3.connect(tmp_path / "app.db")
+    conn.execute(
+        "UPDATE session_requests SET kind = 'other' "
+        "WHERE session_id = ? AND request_id = 'r1'",
+        (session.sessionId,),
+    )
+    conn.commit()
+    conn.close()
+    with pytest.raises(SessionConflict, match="another operation"):
+        apply_advance(tmp_path, session.sessionId, "r1", 1)
+
+
+def test_missing_session_is_not_misreported_as_duplicate(tmp_path):
+    init_db(tmp_path)
+    with pytest.raises(LookupError, match="Session not found"):
+        apply_advance(tmp_path, "missing", "r1", 1)
+
+
+def test_concurrent_advances_with_same_version_apply_once(tmp_path):
+    _seed(tmp_path)
+    session = create_session(tmp_path, "ep")
+
+    def advance(request_id):
+        try:
+            return apply_advance(tmp_path, session.sessionId, request_id, 1)
+        except SessionConflict:
+            return None
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(advance, ("r1", "r2")))
+    assert sum(result is not None for result in outcomes) == 1
+    assert get_session(tmp_path, session.sessionId).version == 2
+
+
+def test_unrelated_integrity_error_is_not_misreported_as_duplicate(tmp_path):
+    _seed(tmp_path)
+    session = create_session(tmp_path, "ep")
+    with pytest.raises(sqlite3.IntegrityError):
+        apply_advance(tmp_path, session.sessionId, None, 1)
+
+
+def test_create_session_checks_database_publication_state(tmp_path):
+    _seed(tmp_path)
+    conn = sqlite3.connect(tmp_path / "app.db")
+    conn.execute("UPDATE episodes SET status = 'draft' WHERE episode_id = 'ep'")
+    conn.commit()
+    conn.close()
+    with pytest.raises(EpisodeNotReady):
+        create_session(tmp_path, "ep")
+
+
+def test_create_session_serializes_with_episode_status_change(tmp_path):
+    _seed(tmp_path)
+    writer = sqlite3.connect(tmp_path / "app.db", timeout=10, isolation_level=None)
+    writer.execute("BEGIN IMMEDIATE")
+    writer.execute("UPDATE episodes SET status = 'draft' WHERE episode_id = 'ep'")
+    started = Event()
+
+    def create_after_lock():
+        started.set()
+        return create_session(tmp_path, "ep")
+
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            pending = pool.submit(create_after_lock)
+            assert started.wait(timeout=2)
+            writer.commit()
+            with pytest.raises(EpisodeNotReady):
+                pending.result(timeout=5)
+    finally:
+        writer.close()
+    conn = sqlite3.connect(tmp_path / "app.db")
+    assert conn.execute("SELECT count(*) FROM learner_sessions").fetchone()[0] == 0
+    conn.close()
