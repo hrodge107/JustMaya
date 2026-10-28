@@ -54,6 +54,9 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
   const reloadRequired = useRef(false)
   const alive = useRef(true)
   const continueRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLButtonElement>(null)
+  const dialogRef = useRef<HTMLDialogElement>(null)
+  const closeRef = useRef<HTMLButtonElement>(null)
   const advancing = useRef(false)
   const reduced = useReducedMotion()
 
@@ -78,7 +81,12 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
   const revealed = reduced || (line !== undefined && revealedLine === line.lineId)
   const nodTrigger = session && line?.emotion === 'happy' ? happyLinesReached(order, session) : 0
 
-  useEffect(() => { if (session && mode === 'playing') continueRef.current?.focus({ preventScroll: true }) }, [session, mode])
+  useEffect(() => { if (session && mode === 'playing' && !dialogRef.current?.open) continueRef.current?.focus({ preventScroll: true }) }, [session, mode])
+
+  function openMenu() {
+    dialogRef.current?.showModal()
+    closeRef.current?.focus({ preventScroll: true })
+  }
 
   async function reload() {
     const s = await api.session(sessionId)
@@ -123,13 +131,15 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
   const speaker = line ? SPEAKER[line.speaker] ?? line.speaker : ''
 
   return <main className="player">
-    <header className="player-header"><span className="brand">JustMaya</span><span className="player-title">{episode.title}</span><button className="vn-quiet" onClick={onExit}>Leave episode</button></header>
     <div className={`vn-frame mode-${mode}`}>
-      <section className="vn-scene" aria-label="Scene">
+      <header className="player-header">
+        <span className="brand">JustMaya</span><span className="player-title">{episode.title}</span>
         <div className="vn-progress">
           <span>Scene {sceneNumber} of {order.length}</span>
           <ol aria-hidden="true">{order.map((s, i) => <li key={s.sceneId} className={i + 1 < sceneNumber ? 'done' : i + 1 === sceneNumber ? 'current' : ''} />)}</ol>
         </div>
+      </header>
+      <section className="vn-scene" aria-label="Scene">
         <div className="vn-stage">
           <MascotStage emotion={emotion} isSpeaking={isSpeaking} nodTrigger={nodTrigger} customAnimationTrigger={null} lookTargetOffset={emotion === 'thinking' ? { x: 0.7, y: -0.7 } : null} enablePointerTracking={mode === 'playing'} />
           {mode === 'checkpoint' && scene.question && <div className="vn-prompt"><p className="vn-prompt-label">Checkpoint</p><p className="vn-prompt-text">{scene.question.prompt}</p></div>}
@@ -154,6 +164,25 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
           </div>
         </>}
       </section>
+      <div className="vn-menu-rail">
+        <button ref={menuRef} type="button" className="vn-menu-trigger" aria-haspopup="dialog" aria-controls="episode-menu" onClick={openMenu}>
+          <span className="vn-menu-icon" aria-hidden="true"><span /><span /><span /></span>
+          Menu
+        </button>
+      </div>
     </div>
+    <dialog ref={dialogRef} id="episode-menu" className="vn-menu-dialog" aria-labelledby="episode-menu-title" onClose={() => menuRef.current?.focus({ preventScroll: true })} onKeyDown={event => {
+      if (event.key !== 'Tab') return
+      const buttons = event.currentTarget.querySelectorAll('button')
+      const first = buttons[0], last = buttons[buttons.length - 1]
+      // Keep boundary tabs in the menu rather than moving to browser chrome.
+      if (event.shiftKey ? document.activeElement === first : document.activeElement === last) {
+        event.preventDefault()
+        ;(event.shiftKey ? last : first).focus()
+      }
+    }}>
+      <div className="vn-menu-heading"><h2 id="episode-menu-title">Episode menu</h2><button ref={closeRef} type="button" className="vn-quiet" onClick={() => dialogRef.current?.close()}>Close</button></div>
+      <button type="button" className="vn-button vn-menu-leave" onClick={onExit}>Leave episode</button>
+    </dialog>
   </main>
 }

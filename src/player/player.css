@@ -3,7 +3,7 @@
    dark text), dial ENERGY 2 / RHYTHM 1 / MOTION 2.
    - Palette reuses the learner tokens (ink, paper, wash, mint) plus two scene
      shades; mint marks progress, the advance cue, and focus.
-   - The full-width dialogue overlays the scene on wide screens; a raised
+   - The full-width dialogue overlays the scene at every width; a raised
      nameplate separates the speaker from the line.
    - Signature: the stand-in face glyph, drawn from CSS shapes whose geometry
      encodes the five emotions. Only transform/opacity animate. */
@@ -26,16 +26,16 @@ body:has(.player) { margin: 0; background: #e9e9f1; color: #30304c; color-scheme
   max-width: 1240px;
   min-height: 100dvh;
   margin: auto;
-  padding: 20px clamp(12px, 3vw, 32px) 40px;
+  padding: 0;
   font-family: 'Nunito Variable', 'Nunito', 'Trebuchet MS', 'Segoe UI', sans-serif;
   line-height: 1.5;
   color: var(--ink);
 }
 .player *, .player *::before, .player *::after { box-sizing: border-box; }
 
-.player-header { display: flex; align-items: center; gap: 16px; margin-bottom: 14px; }
-.player-header .brand { font-size: 1.25rem; font-weight: 900; }
-.player-title { flex: 1; min-width: 0; font-weight: 700; color: var(--muted); overflow-wrap: anywhere; }
+.player-header { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 14px; padding: 16px max(18px, env(safe-area-inset-right)) 16px max(18px, env(safe-area-inset-left)); padding-top: max(16px, env(safe-area-inset-top)); background: #23233a; color: var(--paper); border-radius: inherit; border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.player-header .brand { font-size: 1rem; font-weight: 900; }
+.player-title { flex: 1 1 180px; min-width: 0; font-size: .9rem; font-weight: 700; overflow-wrap: anywhere; }
 
 /* :where keeps this reset at zero specificity so .vn-button/.vn-quiet weights win. */
 :where(.player) button { font: inherit; cursor: pointer; border: 0; min-height: 48px; border-radius: 12px; }
@@ -48,29 +48,27 @@ body:has(.player) { margin: 0; background: #e9e9f1; color: #30304c; color-scheme
 .vn-quiet { padding: 8px 16px; background: transparent; color: var(--ink); font-weight: 800; box-shadow: inset 0 0 0 2px #77778b; }
 .vn-quiet:hover { background: #dedeea; }
 
-/* Frame: scene and dialogue share one grid cell on wide screens so the box
-   overlays the scene; the row still grows if text ever outgrows it. */
-.vn-frame { display: grid; border-radius: 22px; box-shadow: 0 10px 30px #30304c26; }
+/* Content rows reserve space over one continuous scene background. Long text
+   expands the composition instead of colliding with the bottom controls. */
+.vn-frame { display: grid; grid-template-rows: auto minmax(220px, 1fr) auto auto; min-height: 100dvh; background: radial-gradient(120% 90% at 30% 20%, var(--stage-a), var(--stage-b)); color: var(--paper); }
 .vn-scene {
   position: relative;
   display: flex;
   flex-direction: column;
-  min-height: 260px;
-  padding: 16px 18px;
-  border-radius: 22px 22px 0 0;
-  background: radial-gradient(120% 90% at 30% 20%, var(--stage-a), var(--stage-b));
+  min-width: 0;
+  padding: 16px max(18px, env(safe-area-inset-right)) 16px max(18px, env(safe-area-inset-left));
   color: var(--paper);
 }
-.vn-dialogue { display: flex; flex-direction: column; padding: 18px 20px 20px; background: var(--paper); border-radius: 0 0 22px 22px; min-width: 0; }
+.vn-dialogue { position: relative; display: flex; flex-direction: column; margin: 16px max(12px, env(safe-area-inset-right)) 0 max(12px, env(safe-area-inset-left)); border-radius: 24px; min-width: 0; background: rgba(247, 247, 250, .95); color: var(--ink); }
 
-.vn-progress { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: .9rem; font-weight: 800; }
-.vn-progress ol { display: flex; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.vn-progress { display: flex; flex-basis: 100%; align-items: center; gap: 6px 12px; flex-wrap: wrap; min-width: 0; font-size: .8rem; font-weight: 800; }
+.vn-progress ol { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; padding: 0; list-style: none; }
 .vn-progress li { width: 22px; height: 6px; border-radius: 3px; background: var(--paper); opacity: .22; }
 .vn-progress li.done { opacity: .6; }
 .vn-progress li.current { background: var(--mint-bright); opacity: 1; }
 
-.vn-stage { flex: 1; display: flex; align-items: center; gap: clamp(16px, 4vw, 48px); padding: 18px 0 4px; flex-wrap: wrap; }
-.vn-prompt { flex: 1 1 260px; max-width: 520px; padding: 18px 20px; background: var(--paper); color: var(--ink); border-radius: 14px; }
+.vn-stage { flex: 1; display: flex; justify-content: center; align-content: center; align-items: center; gap: clamp(16px, 4vw, 48px); padding: 18px 0 24px; flex-wrap: wrap; }
+.vn-prompt { flex: 1 1 260px; min-width: 0; max-width: 520px; padding: 18px 20px; background: var(--paper); color: var(--ink); border-radius: 14px; }
 .vn-prompt-label { margin: 0 0 4px; font-size: .8rem; font-weight: 850; letter-spacing: .06em; text-transform: uppercase; color: var(--mint-ink); }
 .vn-prompt-text { margin: 0; font-size: 1.1rem; font-weight: 750; overflow-wrap: anywhere; }
 
@@ -119,41 +117,56 @@ body:has(.player) { margin: 0; background: #e9e9f1; color: #30304c; color-scheme
 @keyframes mouth-talk { from { transform: scaleY(1); } to { transform: scaleY(.35); } }
 @keyframes nod { 0% { transform: none; } 35% { transform: translateY(7px) rotate(2deg); } 70% { transform: translateY(-2px); } 100% { transform: none; } }
 
-/* Intermediate: 16:9 scene band with the dialogue box below it. */
+/* Intermediate canvases retain the portrait composition with a framed edge. */
 @media (min-width: 640px) {
-  .vn-scene { aspect-ratio: 16 / 9; min-height: 0; padding: 20px 26px; }
-  .vn-dialogue { padding: 22px 30px 24px; }
+  .player { padding: 16px; }
+  .vn-frame { min-height: calc(100dvh - 32px); border-radius: 22px; box-shadow: 0 10px 30px #30304c26; }
+  .player-header { padding: 18px 26px; }
+  .vn-scene { padding: 20px 26px; }
+  .vn-dialogue { margin-inline: 20px; }
 }
-/* Wide: the reference layout, box over the lower ~30% of the scene. */
+/* A wide scene keeps its 16:9 composition, growing only when reading needs it. */
 @media (min-width: 1000px) {
-  .vn-frame > * { grid-area: 1 / 1; }
-  /* Padding % resolves against width: 19% of a 16:9 width is ~34% of its height. */
-  .vn-scene { border-radius: 22px; padding: 24px 32px 19%; min-height: 100%; }
-  /* Positioned so it paints (and takes clicks) above the positioned scene. */
-  .vn-dialogue { position: relative; z-index: 1; align-self: end; min-height: min(17vw, 210px); margin: 0 18px 18px; border-radius: 16px; box-shadow: 0 6px 18px #23233a40; }
+  .player { padding: 20px 32px 40px; }
+  .vn-frame { min-height: 0; aspect-ratio: 16 / 9; grid-template-rows: auto minmax(180px, 1fr) auto auto; }
+  .vn-progress { flex-basis: auto; }
+  .vn-dialogue { border-radius: 20px; }
   .vn-frame:not(.mode-playing) .vn-controls { justify-content: flex-start; }
 }
-@media (max-width: 639px) {
-  .player-header { flex-wrap: wrap; gap: 8px 12px; }
-  .player-title { order: 3; flex-basis: 100%; font-size: .9rem; }
-  .player-header .vn-quiet { margin-left: auto; }
-  .vn-stage { justify-content: center; }
-  .vn-button { width: 100%; }
-}
 @media (prefers-reduced-motion: reduce) {
-  .player * { transition: none !important; animation: none !important; }
+  .player *, .vn-menu-dialog::backdrop { transition: none !important; animation: none !important; }
 }
 
 /* The dialogue itself is the activation surface; the nameplate belongs to the speaker. */
-.vn-dialogue { position: relative; padding: 0; background: rgba(247, 247, 250, .95); }
-.player .vn-dialogue-target { position: relative; display: flex; flex-direction: column; align-items: flex-start; width: 100%; min-height: 150px; padding: 0 30px 38px; border-radius: inherit; background: transparent; color: var(--ink); text-align: left; }
+.player .vn-dialogue-target { position: relative; display: flex; flex-direction: column; align-items: flex-start; width: 100%; min-height: 150px; padding: 0 20px 38px; border-radius: inherit; background: transparent; color: var(--ink); text-align: left; }
 .vn-dialogue-target .vn-speaker { display: block; min-width: min(40%, 280px); margin: -16px 0 12px; padding: 6px 22px; border: 2px solid #e1e1ed; border-radius: 22px; background: #626281; color: white; }
 .vn-dialogue-target .vn-text { display: block; max-width: none; }
 .vn-advance-cue { position: absolute; right: 24px; bottom: 14px; color: var(--mint-ink); font-size: 1rem; }
 .vn-dialogue-target .vn-error { flex: none; margin-top: 12px; }
-.vn-dialogue:not(:has(.vn-dialogue-target)) { padding: 20px 30px; }
-@media (min-width: 1000px) {
-  .vn-dialogue { display: block; margin: 0; border-radius: 20px; min-height: 0; }
-  .player .vn-dialogue-target { min-height: min(17vw, 210px); }
+.vn-dialogue:not(:has(.vn-dialogue-target)) { padding: 20px; }
+
+.vn-menu-rail { display: flex; justify-content: flex-end; align-items: flex-end; min-height: clamp(88px, 14dvh, 128px); padding: 16px max(18px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left)); }
+.vn-menu-trigger { display: flex; align-items: center; gap: 10px; padding: 10px 16px; background: var(--paper); color: var(--ink); font-weight: 850; transition: transform .18s var(--ease); }
+.vn-menu-trigger:active { transform: scale(.97); }
+.vn-menu-icon { display: grid; gap: 4px; width: 20px; }
+.vn-menu-icon > span { height: 2px; border-radius: 1px; background: currentColor; }
+.vn-menu-rail :focus-visible { outline-color: var(--mint-bright); }
+
+/* The native top layer blocks background interaction; the backdrop separates
+   the menu from the still-mounted authoritative player. */
+.vn-menu-dialog { margin: auto; width: min(420px, calc(100% - 32px)); max-height: calc(100dvh - 32px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); padding: 24px; overflow: auto; border: 0; border-radius: 20px; background: var(--paper); color: var(--ink); font: inherit; }
+.vn-menu-dialog::backdrop { background: rgb(15 15 29 / .68); }
+.vn-menu-dialog[open] { animation: menu-enter .2s var(--ease); }
+.vn-menu-dialog[open]::backdrop { animation: menu-dim .2s var(--ease); }
+.vn-menu-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 28px; }
+.vn-menu-heading h2 { margin: 0; font: 900 1.25rem/1.3 'Nunito Variable', 'Nunito', sans-serif; color: var(--ink); letter-spacing: normal; overflow-wrap: anywhere; }
+.vn-menu-leave { width: 100%; }
+@keyframes menu-enter { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
+@keyframes menu-dim { from { opacity: 0; } to { opacity: 1; } }
+@media (min-width: 640px) {
+  .player .vn-dialogue-target { padding-inline: 30px; }
+  .vn-menu-rail { padding-inline: 26px; }
 }
-@media (max-width: 639px) { .player .vn-dialogue-target { padding: 0 20px 36px; } }
+@media (min-width: 1000px), (max-height: 500px) {
+  .vn-menu-rail { min-height: 76px; }
+}
