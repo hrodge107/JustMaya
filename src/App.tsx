@@ -1,7 +1,16 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import '@fontsource-variable/nunito'
 import { api, ApiError, type Job, type Roadmap } from './learnerApi'
+import VisualNovelPlayer from './player/VisualNovelPlayer'
 import './App.css'
+
+const sessionParam = () => new URLSearchParams(location.search).get('session') || ''
+function setSessionParam(id: string, push: boolean) {
+  const params = new URLSearchParams(location.search)
+  if (id) params.set('session', id); else params.delete('session')
+  const query = params.toString()
+  history[push ? 'pushState' : 'replaceState'](null, '', query ? `?${query}` : location.pathname)
+}
 
 const ACTIVE = new Set(['queued', 'running'])
 // Stages at which a roadmap can already exist; a failed job that reached
@@ -24,6 +33,8 @@ export default function App() {
   const [job, setJob] = useState<Job | null>(null)
   const [roadmap, setRoadmap] = useState<Roadmap | null>(null)
   const [ready, setReady] = useState('')
+  const [readyEpisodeId, setReadyEpisodeId] = useState('')
+  const [sessionId, setSessionId] = useState(sessionParam)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [running, setRunning] = useState(false)
@@ -34,6 +45,11 @@ export default function App() {
   const errorSource = useRef<'poll' | 'action' | null>(null)
   const jobRef = useRef(jobId)
   useEffect(() => { jobRef.current = jobId }, [jobId])
+  useEffect(() => {
+    const onPop = () => setSessionId(sessionParam())
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
 
   function actionError(e: unknown, fallback: string) {
     errorSource.current = 'action'
@@ -59,7 +75,7 @@ export default function App() {
         const episodeId = saved.episodes[0]?.episode_id
         if (episodeId) {
           const episode = await api.episode(episodeId)
-          if (token === generation.current && sequence === refreshSequence.current && episode.status === 'ready') setReady(episode.title)
+          if (token === generation.current && sequence === refreshSequence.current && episode.status === 'ready') { setReady(episode.title); setReadyEpisodeId(episodeId) }
         }
       }
     }
@@ -157,10 +173,25 @@ export default function App() {
       if (!first) throw new Error('No episode outline is saved for this document yet.')
       const episode = await api.episode(first)
       if (episode.status !== 'ready') throw new Error('This episode is not ready yet.')
-      if (token === generation.current) { setRoadmap(saved); setReady(episode.title) }
+      if (token === generation.current) { setRoadmap(saved); setReady(episode.title); setReadyEpisodeId(first) }
     } catch (e) { if (token === generation.current) setError(e instanceof Error ? e.message : 'Could not open this document.') }
     finally { if (token === generation.current) setBusy(false) }
   }
+
+  async function play() {
+    if (!readyEpisodeId) return
+    setBusy(true); errorSource.current = 'action'; setError('')
+    try {
+      const session = await api.createSession(readyEpisodeId)
+      setSessionParam(session.sessionId, true)
+      setSessionId(session.sessionId)
+    } catch (e) { actionError(e, 'Could not start the episode.') }
+    finally { setBusy(false) }
+  }
+
+  function leavePlayer() { setSessionParam('', false); setSessionId('') }
+
+  if (sessionId) return <VisualNovelPlayer key={sessionId} sessionId={sessionId} onExit={leavePlayer} />
 
   return <main className="learner">
     <header className="learner-header"><span className="brand">JustMaya</span><span>Your learning story</span></header>
@@ -171,7 +202,7 @@ export default function App() {
       {(job || running) && !ready && <section className="panel progress" aria-live="polite"><p className="chapter">Preparing your lesson</p><h2>{job?.stage ? (STAGE_LABEL[job.stage] ?? `Stage: ${job.stage}`) : 'Starting preparation'}</h2><p>{job?.status === 'failed' ? 'Preparation stopped.' : 'Working on your document'}</p>{job?.error && <p className="job-error" role="alert">{job.error}</p>}{job?.can_run && !running && !roadmap && <button onClick={() => void run(job.job_id)}>{job.status === 'queued' ? 'Start preparation' : 'Retry preparation'}</button>}</section>}
       {error && <div className="notice" role="alert">{error}{jobId && <button onClick={() => { errorSource.current = null; setError(''); setWake(w => w + 1) }}>Refresh status</button>}</div>}
       {roadmap && !ready && <section className="panel roadmap"><p className="chapter">Your roadmap</p><h2>Here’s what we’ll cover.</h2><div className="episodes">{roadmap.episodes.map((ep, index) => <article className={ep.status === 'selected' ? 'episode first' : 'episode'} key={ep.episode_id}><span className="episode-tag">{index === 0 ? 'Episode 1' : `Episode ${index + 1}`}{ep.status === 'planned_only' ? ' · Planned' : ''}</span><h3>{ep.title}</h3><p className="episode-time">About {Math.round(ep.estimated_minutes)} min</p>{ep.objective_ids.map(id => <p key={id}>{roadmap.objectives.find(o => o.id === id)?.description || id}</p>)}{ep.warnings?.length > 0 && <p className="episode-warning">{ep.warnings.join(' ')}</p>}</article>)}</div>{roadmap.uncovered_concept_ids.length > 0 && <div className="uncovered"><h3>Topics outside this roadmap</h3><ul>{roadmap.uncovered_concept_ids.map(id => <li key={id}>{roadmap.concepts.find(c => c.id === id)?.title || id}{roadmap.uncovered_reasons[id] ? `: ${roadmap.uncovered_reasons[id]}` : ''}</li>)}</ul></div>}{job && (job.can_run || !roadmap.confirmed) && <button className="primary" disabled={busy || running} onClick={() => void start()}>{roadmap.confirmed ? 'Resume Episode 1 preparation' : 'Start Episode 1'}</button>}</section>}
-      {ready && <section className="panel ready" role="status"><p className="chapter">Episode ready</p><h2>{ready}</h2><p>Playback coming soon.</p></section>}
+      {ready && <section className="panel ready" role="status"><p className="chapter">Episode ready</p><h2>{ready}</h2><p>Play through the lesson one line at a time. Your place is saved as you go.</p><button className="on-dark" disabled={busy || !readyEpisodeId} onClick={() => void play()}>Play Episode 1</button></section>}
     </div>
   </main>
 }

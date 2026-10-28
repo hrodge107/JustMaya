@@ -1,0 +1,152 @@
+/* Visual novel player. Reading: scene-first lesson playback for students on
+   laptop or phone, SEKAI-classic adaptation (dark scene, light dialogue box,
+   dark text), dial ENERGY 2 / RHYTHM 1 / MOTION 2.
+   - Palette reuses the learner tokens (ink, paper, wash, mint) plus two scene
+     shades; mint is the single accent: current progress segment, Continue,
+     focus ring.
+   - Proportions follow the reference's 1920x1080 text layer: the dialogue box
+     covers the lower ~30% of the scene, the speaker name sits inside its top
+     left at the same size and a heavier weight, the text column wraps at ~68%.
+   - Signature: the stand-in face glyph, drawn from CSS shapes whose geometry
+     encodes the five emotions. Only transform/opacity animate. */
+
+body:has(.player) { margin: 0; background: #e9e9f1; color: #30304c; color-scheme: light; }
+#root:has(.player) { width: 100%; max-width: none; border: 0; display: block; text-align: left; }
+
+.player {
+  --ink: #30304c;
+  --paper: #f7f7fa;
+  --wash: #e9e9f1;
+  --mint-ink: #0b6e66;
+  --mint-bright: #7fe5dc;
+  --stage-a: #3a3a5c;
+  --stage-b: #23233a;
+  --muted: #4a4a66;
+  --warn-ink: #613412;
+  --ease: cubic-bezier(.22, 1, .36, 1);
+  box-sizing: border-box;
+  max-width: 1240px;
+  min-height: 100dvh;
+  margin: auto;
+  padding: 20px clamp(12px, 3vw, 32px) 40px;
+  font-family: 'Nunito Variable', 'Nunito', 'Trebuchet MS', 'Segoe UI', sans-serif;
+  line-height: 1.5;
+  color: var(--ink);
+}
+.player *, .player *::before, .player *::after { box-sizing: border-box; }
+
+.player-header { display: flex; align-items: center; gap: 16px; margin-bottom: 14px; }
+.player-header .brand { font-size: 1.25rem; font-weight: 900; }
+.player-title { flex: 1; min-width: 0; font-weight: 700; color: var(--muted); overflow-wrap: anywhere; }
+
+/* :where keeps this reset at zero specificity so .vn-button/.vn-quiet weights win. */
+:where(.player) button { font: inherit; cursor: pointer; border: 0; min-height: 48px; border-radius: 12px; }
+.player :focus-visible { outline: 3px solid #005e56; outline-offset: 3px; }
+.vn-scene :focus-visible { outline-color: var(--mint-bright); }
+.vn-button { padding: 10px 26px; background: var(--mint-ink); color: var(--paper); font-weight: 850; transition: transform .18s var(--ease), opacity .18s var(--ease); }
+.vn-button:hover { background: #095850; }
+.vn-button:active { transform: scale(.97); }
+.vn-button[aria-disabled] { opacity: .7; cursor: progress; }
+.vn-quiet { padding: 8px 16px; background: transparent; color: var(--ink); font-weight: 800; box-shadow: inset 0 0 0 2px #77778b; }
+.vn-quiet:hover { background: #dedeea; }
+
+/* Frame: scene and dialogue share one grid cell on wide screens so the box
+   overlays the scene; the row still grows if text ever outgrows it. */
+.vn-frame { display: grid; border-radius: 22px; box-shadow: 0 10px 30px #30304c26; }
+.vn-scene {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 260px;
+  padding: 16px 18px;
+  border-radius: 22px 22px 0 0;
+  background: radial-gradient(120% 90% at 30% 20%, var(--stage-a), var(--stage-b));
+  color: var(--paper);
+}
+.vn-dialogue { display: flex; flex-direction: column; padding: 18px 20px 20px; background: var(--paper); border-radius: 0 0 22px 22px; min-width: 0; }
+
+.vn-progress { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: .9rem; font-weight: 800; }
+.vn-progress ol { display: flex; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.vn-progress li { width: 22px; height: 6px; border-radius: 3px; background: var(--paper); opacity: .22; }
+.vn-progress li.done { opacity: .6; }
+.vn-progress li.current { background: var(--mint-bright); opacity: 1; }
+
+.vn-stage { flex: 1; display: flex; align-items: center; gap: clamp(16px, 4vw, 48px); padding: 18px 0 4px; flex-wrap: wrap; }
+.vn-prompt { flex: 1 1 260px; max-width: 520px; padding: 18px 20px; background: var(--paper); color: var(--ink); border-radius: 14px; }
+.vn-prompt-label { margin: 0 0 4px; font-size: .8rem; font-weight: 850; letter-spacing: .06em; text-transform: uppercase; color: var(--mint-ink); }
+.vn-prompt-text { margin: 0; font-size: 1.1rem; font-weight: 750; overflow-wrap: anywhere; }
+
+.vn-speaker { margin: 0 0 4px; font-size: clamp(1rem, .92rem + .4vw, 1.2rem); font-weight: 900; }
+.vn-text { margin: 0; max-width: 68ch; font-size: clamp(1rem, .92rem + .4vw, 1.2rem); line-height: 1.35; font-weight: 600; overflow-wrap: anywhere; }
+/* The unrevealed remainder holds its space so the box never jumps while typing. */
+.vn-text-rest { visibility: hidden; }
+.vn-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 12px; margin-top: auto; padding-top: 14px; }
+.vn-error { flex: 1 1 220px; margin: 0; color: var(--warn-ink); font-weight: 750; overflow-wrap: anywhere; }
+.vn-note { margin: 0; max-width: 60ch; color: var(--muted); font-weight: 700; }
+
+.player-message { max-width: 560px; margin: 18vh auto 0; padding: 28px; background: var(--paper); border-radius: 22px; }
+.player-message h1 { margin: 0 0 8px; font-size: 1.5rem; font-weight: 850; color: var(--ink); letter-spacing: normal; }
+.player-message p { margin: 0 0 18px; overflow-wrap: anywhere; }
+
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+/* Mascot stand-in. Face geometry per emotion; gaze via --gx/--gy (-1..1). */
+.mascot { margin: 0; display: grid; justify-items: center; gap: 8px; }
+.mascot-body { position: relative; }
+.mascot-face { position: relative; width: clamp(104px, 13vw, 168px); aspect-ratio: 1; border-radius: 46% 46% 42% 42%; background: var(--paper); box-shadow: inset 0 -6px 0 #d9d9e6; }
+.mascot-face > span { position: absolute; background: var(--ink); transition: transform .22s var(--ease); }
+.eye { top: 38%; width: 13%; height: 19%; border-radius: 40%; transform: translate(calc(var(--gx, 0) * 7px), calc(var(--gy, 0) * 6px)); }
+.eye.left { left: 29%; }
+.eye.right { left: 58%; }
+.mouth { left: 38%; bottom: 23%; width: 24%; height: 5%; border-radius: 4px; transform-origin: center; }
+.brow { top: 26%; left: 26%; width: 20%; height: 4%; border-radius: 2px; opacity: 0; }
+.mascot-mark { position: absolute; top: -10px; right: -18px; font-weight: 900; font-size: 1.6rem; color: var(--mint-bright); }
+
+.mascot[data-emotion='talking'] .mouth { left: 40%; width: 20%; height: 12%; border-radius: 50%; }
+.mascot[data-emotion='happy'] .eye { height: 9%; background: transparent; border-top: 4px solid var(--ink); border-radius: 999px 999px 0 0; }
+.mascot[data-emotion='happy'] .mouth { left: 33%; width: 34%; height: 13%; background: transparent; border-bottom: 4px solid var(--ink); border-radius: 0 0 999px 999px; }
+.mascot[data-emotion='thinking'] .mouth { left: 50%; width: 14%; height: 4%; }
+.mascot[data-emotion='thinking'] .brow { opacity: 1; left: 56%; top: 25%; transform: rotate(-8deg); }
+.mascot[data-emotion='thinking'] .mascot-mark::before { content: '...'; letter-spacing: .1em; }
+.mascot[data-emotion='confused'] .brow { opacity: 1; transform: rotate(14deg); }
+.mascot[data-emotion='confused'] .mouth { left: 40%; width: 20%; transform: rotate(-10deg); }
+.mascot[data-emotion='confused'] .mascot-mark::before { content: '?'; }
+.mascot[data-speaking] .mouth { animation: mouth-talk .26s var(--ease) infinite alternate; }
+.nod { animation: nod .42s var(--ease); }
+
+.mascot-state { display: flex; flex-wrap: wrap; justify-content: center; gap: 0 4px; max-width: 220px; font-size: .9rem; font-weight: 800; text-align: center; }
+.mascot-emotion { text-transform: capitalize; }
+.mascot-standin { flex-basis: 100%; font-size: .78rem; font-weight: 700; color: #c9c9db; }
+
+@keyframes mouth-talk { from { transform: scaleY(1); } to { transform: scaleY(.35); } }
+@keyframes nod { 0% { transform: none; } 35% { transform: translateY(7px) rotate(2deg); } 70% { transform: translateY(-2px); } 100% { transform: none; } }
+
+/* Intermediate: 16:9 scene band with the dialogue box below it. */
+@media (min-width: 640px) {
+  .vn-scene { aspect-ratio: 16 / 9; min-height: 0; padding: 20px 26px; }
+  .vn-dialogue { padding: 22px 30px 24px; }
+}
+/* Wide: the reference layout, box over the lower ~30% of the scene. */
+@media (min-width: 1000px) {
+  .vn-frame > * { grid-area: 1 / 1; }
+  /* Padding % resolves against width: 19% of a 16:9 width is ~34% of its height. */
+  .vn-scene { border-radius: 22px; padding: 24px 32px 19%; min-height: 100%; }
+  /* Positioned so it paints (and takes clicks) above the positioned scene. */
+  .vn-dialogue { position: relative; z-index: 1; align-self: end; min-height: min(17vw, 210px); margin: 0 18px 18px; border-radius: 16px; box-shadow: 0 6px 18px #23233a40; }
+  /* Reference text column (~68%); Continue takes the empty right side so the
+     box stays near the reference's lower-30% band even on long lines. */
+  .vn-dialogue { display: grid; grid-template-columns: minmax(0, 68%) minmax(0, 1fr); grid-template-rows: auto 1fr; column-gap: 24px; align-content: start; }
+  .vn-speaker, .vn-text { grid-column: 1; }
+  .vn-controls { grid-column: 2; grid-row: 1 / span 2; align-self: end; padding-top: 0; }
+  .vn-frame:not(.mode-playing) .vn-controls { grid-column: 1 / -1; grid-row: auto; justify-content: flex-start; padding-top: 12px; }
+}
+@media (max-width: 639px) {
+  .player-header { flex-wrap: wrap; gap: 8px 12px; }
+  .player-title { order: 3; flex-basis: 100%; font-size: .9rem; }
+  .player-header .vn-quiet { margin-left: auto; }
+  .vn-stage { justify-content: center; }
+  .vn-button { width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .player * { transition: none !important; animation: none !important; }
+}
