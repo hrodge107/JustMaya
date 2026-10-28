@@ -48,8 +48,8 @@ body:has(.player) { margin: 0; background: #e9e9f1; color: #30304c; color-scheme
 .vn-quiet { padding: 8px 16px; background: transparent; color: var(--ink); font-weight: 800; box-shadow: inset 0 0 0 2px #77778b; }
 .vn-quiet:hover { background: #dedeea; }
 
-/* Content rows reserve space over one continuous scene background. Long text
-   expands the composition instead of colliding with the bottom controls. */
+/* Content rows reserve space over one continuous scene background. The
+   dialogue viewport stays bounded so long lines scroll inside their panel. */
 .vn-frame { display: grid; grid-template-rows: auto minmax(220px, 1fr) auto auto; min-height: 100dvh; background: radial-gradient(120% 90% at 30% 20%, var(--stage-a), var(--stage-b)); color: var(--paper); }
 .vn-scene {
   position: relative;
@@ -59,7 +59,7 @@ body:has(.player) { margin: 0; background: #e9e9f1; color: #30304c; color-scheme
   padding: 16px max(18px, env(safe-area-inset-right)) 16px max(18px, env(safe-area-inset-left));
   color: var(--paper);
 }
-.vn-dialogue { position: relative; display: flex; flex-direction: column; margin: 16px max(12px, env(safe-area-inset-right)) 0 max(12px, env(safe-area-inset-left)); border-radius: 24px; min-width: 0; background: rgba(247, 247, 250, .95); color: var(--ink); }
+.vn-dialogue { position: relative; display: flex; flex-direction: column; flex: none; block-size: clamp(144px, 28dvh, 224px); min-width: 0; margin: 16px max(12px, env(safe-area-inset-right)) 0 max(12px, env(safe-area-inset-left)); border-radius: 24px; background: rgba(247, 247, 250, .95); color: var(--ink); }
 
 .vn-progress { display: flex; flex-basis: 100%; align-items: center; gap: 6px 12px; flex-wrap: wrap; min-width: 0; font-size: .8rem; font-weight: 800; }
 .vn-progress ol { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; padding: 0; list-style: none; }
@@ -138,9 +138,15 @@ body:has(.player) { margin: 0; background: #e9e9f1; color: #30304c; color-scheme
 }
 
 /* The dialogue itself is the activation surface; the nameplate belongs to the speaker. */
-.player .vn-dialogue-target { position: relative; display: flex; flex-direction: column; align-items: flex-start; width: 100%; min-height: 150px; padding: 0 20px 38px; border-radius: inherit; background: transparent; color: var(--ink); text-align: left; }
-.vn-dialogue-target .vn-speaker { display: block; min-width: min(40%, 280px); margin: -16px 0 12px; padding: 6px 22px; border: 2px solid #e1e1ed; border-radius: 22px; background: #626281; color: white; }
+.player .vn-dialogue-target { position: relative; display: block; flex: 1 1 0; width: 100%; min-height: 0; overflow: hidden; padding: 0; border-radius: inherit; background: transparent; color: var(--ink); text-align: left; }
+.vn-dialogue-scroll-area { position: absolute; inset: 14px 20px 38px; display: block; overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: contain; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: #7f7f96 transparent; touch-action: pan-y; }
+.vn-dialogue-scroll-area::-webkit-scrollbar { width: 8px; }
+.vn-dialogue-scroll-area::-webkit-scrollbar-track { background: transparent; }
+.vn-dialogue-scroll-area::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 8px; background: #7f7f96; background-clip: padding-box; }
+.vn-dialogue-scroll-area::-webkit-scrollbar-thumb:hover { background: #696982; }
+.vn-dialogue-target .vn-speaker { position: sticky; top: 0; z-index: 1; display: block; min-width: min(40%, 280px); margin: 0 0 12px; padding: 6px 22px; border: 2px solid #e1e1ed; border-radius: 22px; background: #626281; color: white; }
 .vn-dialogue-target .vn-text { display: block; max-width: none; }
+.vn-reveal-boundary { display: inline-block; width: 0; height: 1.35em; vertical-align: text-bottom; }
 .vn-advance-cue { position: absolute; right: 24px; bottom: 14px; color: var(--mint-ink); font-size: 1rem; }
 .vn-dialogue-target .vn-error { flex: none; margin-top: 12px; }
 .vn-dialogue:not(:has(.vn-dialogue-target)) { padding: 20px; }
@@ -164,9 +170,14 @@ body:has(.player) { margin: 0; background: #e9e9f1; color: #30304c; color-scheme
 @keyframes menu-enter { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
 @keyframes menu-dim { from { opacity: 0; } to { opacity: 1; } }
 @media (min-width: 640px) {
-  .player .vn-dialogue-target { padding-inline: 30px; }
+  .vn-dialogue-scroll-area { right: 30px; left: 30px; }
   .vn-menu-rail { padding-inline: 26px; }
 }
 @media (min-width: 1000px), (max-height: 500px) {
   .vn-menu-rail { min-height: 76px; }
+}
+@media (max-height: 500px) {
+  .vn-frame { grid-template-rows: auto minmax(100px, 1fr) auto auto; }
+  .vn-scene { min-height: 100px; }
+  .vn-dialogue { block-size: clamp(118px, 34dvh, 152px); }
 }

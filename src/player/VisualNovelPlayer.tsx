@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { api, ApiError, type Emotion, type Episode, type Scene, type Session } from '../learnerApi'
 import MascotStage from './MascotStage'
 import './player.css'
@@ -30,17 +30,19 @@ function happyLinesReached(order: Scene[], session: Session): number {
   return n
 }
 
-function DialogueText({ id, text, revealed, onRevealed }: { id: string; text: string; revealed: boolean; onRevealed(id: string): void }) {
+function DialogueText({ id, text, revealed, onRevealed, onRevealProgress }: { id: string; text: string; revealed: boolean; onRevealed(id: string): void; onRevealProgress(marker: HTMLSpanElement | null): void }) {
   const [count, setCount] = useState(0)
+  const revealBoundaryRef = useRef<HTMLSpanElement>(null)
   useEffect(() => {
     if (revealed) return
     const timer = window.setInterval(() => setCount(c => Math.min(c + 1, text.length)), REVEAL_MS)
     return () => window.clearInterval(timer)
   }, [revealed, text])
+  useLayoutEffect(() => { if (!revealed) onRevealProgress(revealBoundaryRef.current) }, [count, onRevealProgress, revealed])
   useEffect(() => { if (!revealed && count >= text.length) onRevealed(id) }, [count, revealed, text, id, onRevealed])
   const shown = revealed ? text : text.slice(0, count)
   // The animated copy is hidden from AT; the live region carries the whole line once.
-  return <span className="vn-text" aria-hidden="true">{shown}<span className="vn-text-rest">{revealed ? '' : text.slice(count)}</span></span>
+  return <span className="vn-text" aria-hidden="true">{shown}<span ref={revealBoundaryRef} className="vn-reveal-boundary" /><span className="vn-text-rest">{revealed ? '' : text.slice(count)}</span></span>
 }
 
 export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: string; onExit(): void }) {
@@ -54,6 +56,10 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
   const reloadRequired = useRef(false)
   const alive = useRef(true)
   const continueRef = useRef<HTMLButtonElement>(null)
+  const dialogueScrollRef = useRef<HTMLSpanElement>(null)
+  const revealBoundaryRef = useRef<HTMLSpanElement>(null)
+  const followLatestRef = useRef(true)
+  const autoScrollTopRef = useRef<number | null>(null)
   const menuRef = useRef<HTMLButtonElement>(null)
   const dialogRef = useRef<HTMLDialogElement>(null)
   const closeRef = useRef<HTMLButtonElement>(null)
@@ -80,6 +86,63 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
   const mode = session?.mode
   const revealed = reduced || (line !== undefined && revealedLine === line.lineId)
   const nodTrigger = session && line?.emotion === 'happy' ? happyLinesReached(order, session) : 0
+
+  useLayoutEffect(() => {
+    followLatestRef.current = true
+    autoScrollTopRef.current = null
+    const target = dialogueScrollRef.current
+    if (target && target.scrollTop !== 0) {
+      autoScrollTopRef.current = 0
+      target.scrollTop = 0
+    }
+  }, [line?.lineId])
+
+  const onRevealProgress = useCallback((marker: HTMLSpanElement | null) => {
+    revealBoundaryRef.current = marker
+    if (!marker || !followLatestRef.current) return
+    const target = dialogueScrollRef.current
+    if (!target) return
+
+    const targetRect = target.getBoundingClientRect()
+    const viewTop = targetRect.top + target.clientTop
+    const nameplateBottom = target.querySelector<HTMLElement>('.vn-speaker')?.getBoundingClientRect().bottom ?? viewTop
+    const readingTop = Math.max(viewTop, nameplateBottom + 8)
+    const readingBottom = viewTop + target.clientHeight - 8
+    const markerRect = marker.getBoundingClientRect()
+    let nextScrollTop = target.scrollTop
+    if (markerRect.bottom > readingBottom) nextScrollTop += markerRect.bottom - readingBottom
+    else if (markerRect.top < readingTop) nextScrollTop -= readingTop - markerRect.top
+
+    if (Math.abs(nextScrollTop - target.scrollTop) > 1) {
+      nextScrollTop = Math.max(0, nextScrollTop)
+      autoScrollTopRef.current = nextScrollTop
+      target.scrollTop = nextScrollTop
+    }
+  }, [])
+
+  function handleDialogueScroll(target: HTMLSpanElement, fromUserInput = false) {
+    const expectedAutoScrollTop = autoScrollTopRef.current
+    if (!fromUserInput && expectedAutoScrollTop !== null && Math.abs(target.scrollTop - expectedAutoScrollTop) < 1) {
+      autoScrollTopRef.current = null
+      return
+    }
+    autoScrollTopRef.current = null
+
+    const marker = revealBoundaryRef.current
+    if (!marker) return
+    const targetRect = target.getBoundingClientRect()
+    const viewTop = targetRect.top + target.clientTop
+    const nameplateBottom = target.querySelector<HTMLElement>('.vn-speaker')?.getBoundingClientRect().bottom ?? viewTop
+    const readingTop = Math.max(viewTop, nameplateBottom + 8)
+    const readingBottom = viewTop + target.clientHeight - 8
+    const markerRect = marker.getBoundingClientRect()
+    followLatestRef.current = markerRect.top >= readingTop - 1 && markerRect.bottom <= readingBottom + 1
+  }
+
+  function handleManualScrollIntent(target: HTMLSpanElement) {
+    followLatestRef.current = false
+    window.requestAnimationFrame(() => handleDialogueScroll(target, true))
+  }
 
   useEffect(() => { if (session && mode === 'playing' && !dialogRef.current?.open) continueRef.current?.focus({ preventScroll: true }) }, [session, mode])
 
@@ -148,10 +211,30 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
       </section>
       <section className="vn-dialogue" aria-label="Dialogue">
         {mode === 'playing' && line ? <>
-          <button ref={continueRef} type="button" className="vn-dialogue-target" aria-label={advanceError ? 'Retry advancing dialogue' : 'Reveal or advance dialogue'} aria-busy={pending || undefined} aria-disabled={pending || undefined} onClick={() => void advance()}>
-            <span className="vn-speaker">{speaker}</span>
-            <DialogueText key={line.lineId} id={line.lineId} text={line.text} revealed={revealed} onRevealed={setRevealedLine} />
-            {advanceError && <span className="vn-error" role="alert">{advanceError} Activate the dialogue to try again.</span>}
+          <button ref={continueRef} type="button" className="vn-dialogue-target" aria-label={advanceError ? 'Retry advancing dialogue' : 'Reveal or advance dialogue'} aria-busy={pending || undefined} aria-disabled={pending || undefined} onClick={() => void advance()} onKeyDown={event => {
+            if (event.altKey || event.ctrlKey || event.metaKey) return
+            const target = dialogueScrollRef.current
+            if (!target) return
+            if (target.scrollHeight <= target.clientHeight + 1) return
+            const lineStep = parseFloat(getComputedStyle(target).fontSize) * 3
+            let nextScrollTop: number | null = null
+            if (event.key === 'ArrowDown') nextScrollTop = target.scrollTop + lineStep
+            else if (event.key === 'ArrowUp') nextScrollTop = target.scrollTop - lineStep
+            else if (event.key === 'PageDown') nextScrollTop = target.scrollTop + target.clientHeight * .8
+            else if (event.key === 'PageUp') nextScrollTop = target.scrollTop - target.clientHeight * .8
+            else if (event.key === 'Home') nextScrollTop = 0
+            else if (event.key === 'End') nextScrollTop = target.scrollHeight
+            if (nextScrollTop !== null) {
+              event.preventDefault()
+              target.scrollTop = Math.max(0, Math.min(nextScrollTop, target.scrollHeight))
+              handleDialogueScroll(target, true)
+            }
+          }}>
+            <span ref={dialogueScrollRef} className="vn-dialogue-scroll-area" onScroll={event => handleDialogueScroll(event.currentTarget)} onWheel={event => handleManualScrollIntent(event.currentTarget)} onTouchMove={event => handleManualScrollIntent(event.currentTarget)} onPointerDown={event => handleManualScrollIntent(event.currentTarget)}>
+              <span className="vn-speaker">{speaker}</span>
+              <DialogueText key={line.lineId} id={line.lineId} text={line.text} revealed={revealed} onRevealed={setRevealedLine} onRevealProgress={onRevealProgress} />
+              {advanceError && <span className="vn-error" role="alert">{advanceError} Activate the dialogue to try again.</span>}
+            </span>
             <span className="vn-advance-cue" aria-hidden="true">{pending ? '…' : '◆'}</span>
           </button>
           <p className="sr-only" aria-live="polite">{speaker}: {line.text}</p>

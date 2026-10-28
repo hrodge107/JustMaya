@@ -75,7 +75,36 @@ async function layout(page) {
   return page.evaluate(() => {
     const box = selector => { const r = document.querySelector(selector).getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height, bottom: r.bottom, right: r.right } }
     const dialogue = box('.vn-dialogue'), rail = box('.vn-menu-rail'), frame = box('.vn-frame')
-    return { dialogue, rail, frame, width: innerWidth, height: innerHeight, scrollWidth: document.documentElement.scrollWidth, textClipped: document.querySelector('.vn-dialogue-target')?.scrollHeight > document.querySelector('.vn-dialogue-target')?.clientHeight + 1 }
+    const target = document.querySelector('.vn-dialogue-scroll-area')
+    const style = target && getComputedStyle(target)
+    return {
+      dialogue, rail, frame, width: innerWidth, height: innerHeight,
+      scrollWidth: document.documentElement.scrollWidth,
+      dialogueTarget: target && { height: target.getBoundingClientRect().height, clientHeight: target.clientHeight, scrollHeight: target.scrollHeight, clientWidth: target.clientWidth, scrollWidth: target.scrollWidth, scrollTop: target.scrollTop, overflowY: style.overflowY, scrollbarWidth: style.scrollbarWidth },
+    }
+  })
+}
+
+async function revealBoundary(page) {
+  return page.evaluate(() => {
+    const target = document.querySelector('.vn-dialogue-scroll-area')
+    const marker = document.querySelector('.vn-reveal-boundary')
+    const speaker = target?.querySelector('.vn-speaker')
+    if (!target || !marker || !speaker) return null
+    const targetRect = target.getBoundingClientRect()
+    const markerRect = marker.getBoundingClientRect()
+    const speakerRect = speaker.getBoundingClientRect()
+    const viewTop = targetRect.top + target.clientTop
+    const readingTop = speakerRect.bottom + 8
+    const readingBottom = viewTop + target.clientHeight - 8
+    return {
+      scrollTop: target.scrollTop,
+      markerTop: markerRect.top,
+      markerBottom: markerRect.bottom,
+      readingTop,
+      readingBottom,
+      markerVisible: markerRect.top >= readingTop - 1 && markerRect.bottom <= readingBottom + 1,
+    }
   })
 }
 
@@ -85,6 +114,7 @@ async function contrastCheck(page) {
     const frame = style('.vn-frame')
     return {
       text: style('.vn-text').color, dialogue: style('.vn-dialogue').backgroundColor,
+      scrollbar: style('.vn-dialogue-scroll-area').scrollbarColor,
       speaker: style('.vn-speaker').color, nameplate: style('.vn-speaker').backgroundColor,
       headerText: style('.player-title').color, header: style('.player-header').backgroundColor,
       menuText: style('.vn-menu-trigger').color, menu: style('.vn-menu-trigger').backgroundColor,
@@ -100,6 +130,7 @@ async function contrastCheck(page) {
   const foreground = rgb(samples.dialogue), alpha = foreground[3]
   const results = {
     dialogue: Math.min(...samples.stages.map(stage => ratio(rgb(samples.text), rgb(stage).map((v, i) => foreground[i] * alpha + v * (1 - alpha))))),
+    scrollbar: Math.min(...samples.stages.map(stage => ratio(rgb(samples.scrollbar), foreground.slice(0, 3).map((v, i) => v * alpha + rgb(stage)[i] * (1 - alpha))))),
     speaker: ratio(rgb(samples.speaker), rgb(samples.nameplate)),
     header: ratio(rgb(samples.headerText), rgb(samples.header)),
     menu: ratio(rgb(samples.menuText), rgb(samples.menu)),
@@ -107,7 +138,7 @@ async function contrastCheck(page) {
     leave: ratio(rgb(samples.leaveText), rgb(samples.leave)),
     standin: Math.min(...samples.stages.map(stage => ratio(rgb(samples.standin), rgb(stage)))),
   }
-  for (const [name, value] of Object.entries(results)) assert.ok(value >= 4.5, `${name} contrast ${value}`)
+  for (const [name, value] of Object.entries(results)) assert.ok(value >= (name === 'scrollbar' ? 3 : 4.5), `${name} contrast ${value}`)
   return results
 }
 
@@ -152,6 +183,8 @@ async function main() {
       const normal = await layout(f.page)
       if (width === 390) { assert.equal(normal.frame.height, height); assert.equal(normal.frame.x, 0); assert.ok(normal.rail.bottom <= height + 1) }
       assert.ok(normal.dialogue.bottom <= normal.rail.y + 1)
+      assert.equal(normal.dialogueTarget.overflowY, 'auto')
+      if (width === 390) assert.ok(normal.dialogueTarget.scrollHeight <= normal.dialogueTarget.clientHeight + 1, 'A short line should not display an overflow scrollbar')
       await modalCheck(f.page, f.count)
       await f.page.screenshot({ path: path.join(output, `${width}x${height}.png`), fullPage: true })
       f.state.episode.scenes[0].dialogue[0].text = longText
@@ -162,8 +195,22 @@ async function main() {
       await f.page.addStyleTag({ content: `:root { font-size: ${rootSize * 2}px !important; }` })
       const long = await layout(f.page)
       assert.ok(long.scrollWidth <= width + 1, `Horizontal overflow at ${width}: ${long.scrollWidth}`)
-      assert.equal(long.textClipped, false)
+      assert.ok(long.dialogueTarget.scrollHeight > long.dialogueTarget.clientHeight + 1, `Long line did not overflow its dialogue at ${width}x${height}`)
+      assert.ok(long.dialogueTarget.scrollWidth <= long.dialogueTarget.clientWidth + 1, `Horizontal dialogue overflow at ${width}x${height}`)
+      assert.equal(long.dialogueTarget.scrollbarWidth, 'thin')
+      assert.equal(long.dialogue.height, normal.dialogue.height, `Dialogue height changed with long text at ${width}x${height}`)
       assert.ok(long.dialogue.bottom <= long.rail.y + 1)
+      const viewport = f.page.locator('.vn-dialogue-scroll-area')
+      await viewport.evaluate(target => { target.scrollTop = target.scrollHeight })
+      const pinned = await viewport.evaluate(target => {
+        const speaker = target.querySelector('.vn-speaker').getBoundingClientRect()
+        const button = target.closest('.vn-dialogue-target')
+        const cue = button.querySelector('.vn-advance-cue').getBoundingClientRect()
+        const box = target.getBoundingClientRect()
+        const buttonBox = button.getBoundingClientRect()
+        return { atEnd: target.scrollTop + target.clientHeight >= target.scrollHeight - 1, speakerInside: speaker.top >= box.top - 1 && speaker.bottom <= box.bottom + 1, cueInside: cue.top >= buttonBox.top - 1 && cue.bottom <= buttonBox.bottom + 1 }
+      })
+      assert.deepEqual(pinned, { atEnd: true, speakerInside: true, cueInside: true })
       const button = f.page.getByRole('button', { name: 'Menu', exact: true })
       await button.scrollIntoViewIfNeeded()
       await modalCheck(f.page, f.count)
@@ -183,6 +230,91 @@ async function main() {
       evidence.push({ check: `layout/menu/exit/restore ${width}x${height}`, normal, long, result: 'PASS' })
       await f.context.close()
     }
+
+    const revealing = await fixture(browser, { context: { reducedMotion: 'no-preference' }, long: true })
+    await revealing.go()
+    const revealTarget = revealing.page.locator('.vn-dialogue-scroll-area')
+    await revealing.page.waitForFunction(() => document.querySelector('.vn-dialogue-scroll-area')?.scrollTop > 100, undefined, { timeout: 15000 })
+    let boundary = await revealBoundary(revealing.page)
+    assert.ok(boundary?.markerVisible, 'Auto-follow should keep the active reveal boundary in the reading region')
+    await revealTarget.hover()
+    await revealing.page.mouse.wheel(0, -500)
+    await revealing.page.waitForFunction(() => document.querySelector('.vn-dialogue-scroll-area')?.scrollTop === 0)
+    await revealing.page.waitForTimeout(500)
+    assert.equal(await revealTarget.evaluate(target => target.scrollTop), 0, 'Auto-follow should pause while the learner rereads earlier text')
+    const reentryTop = await revealing.page.evaluate(() => {
+      const target = document.querySelector('.vn-dialogue-scroll-area')
+      const marker = document.querySelector('.vn-reveal-boundary').getBoundingClientRect()
+      const bottom = target.getBoundingClientRect().top + target.clientHeight - 8
+      target.scrollTop += marker.bottom - bottom + 48
+      return target.scrollTop
+    })
+    await revealing.page.waitForTimeout(60)
+    boundary = await revealBoundary(revealing.page)
+    assert.ok(boundary?.markerVisible, `Returning to the current boundary should resume following: ${JSON.stringify({ reentryTop, boundary })}`)
+    await revealing.page.waitForFunction(previous => document.querySelector('.vn-dialogue-scroll-area')?.scrollTop > previous, reentryTop, { timeout: 6000 })
+    boundary = await revealBoundary(revealing.page)
+    assert.ok(boundary?.markerVisible, 'Resumed following should keep the new reveal boundary visible')
+    assert.equal(await revealing.page.locator('[aria-live="polite"]').count(), 1)
+    assert.equal(await revealing.page.locator('.vn-text').getAttribute('aria-hidden'), 'true')
+    assert.ok((await revealing.page.locator('[aria-live="polite"]').textContent()).endsWith(longText), 'Assistive technology should receive the complete line once')
+    evidence.push({ check: 'long reveal follows its boundary, pauses on reread, resumes at latest text; single full-line live announcement', result: 'PASS' })
+    await revealing.context.close()
+
+    const scrollKeys = await fixture(browser, { context: { reducedMotion: 'reduce' }, long: true })
+    await scrollKeys.go()
+    const keyTarget = scrollKeys.page.locator('.vn-dialogue-target')
+    const keyViewport = scrollKeys.page.locator('.vn-dialogue-scroll-area')
+    assert.equal(await keyTarget.locator('.vn-text-rest').textContent(), '')
+    await keyViewport.hover()
+    await scrollKeys.page.mouse.wheel(0, 180)
+    await scrollKeys.page.waitForFunction(() => document.querySelector('.vn-dialogue-scroll-area')?.scrollTop > 0)
+    const afterPointerWheel = await keyViewport.evaluate(target => target.scrollTop)
+    assert.equal(scrollKeys.count(), 0, 'Pointer scrolling must not activate dialogue')
+    await keyTarget.focus()
+    await keyTarget.press('ArrowDown')
+    const afterArrowDown = await keyViewport.evaluate(target => target.scrollTop)
+    assert.ok(afterArrowDown > afterPointerWheel)
+    await keyTarget.press('PageDown')
+    const afterPageDown = await keyViewport.evaluate(target => target.scrollTop)
+    assert.ok(afterPageDown > afterArrowDown)
+    await keyTarget.press('PageUp')
+    assert.ok(await keyViewport.evaluate((target, previous) => target.scrollTop < previous, afterPageDown))
+    await keyTarget.press('ArrowUp')
+    await keyTarget.press('Home')
+    assert.equal(await keyViewport.evaluate(target => target.scrollTop), 0)
+    assert.equal(scrollKeys.count(), 0, 'Scroll keys must not activate dialogue')
+    await keyTarget.press('End')
+    assert.ok(await keyViewport.evaluate(target => target.scrollTop + target.clientHeight >= target.scrollHeight - 1))
+    await keyTarget.press('Enter')
+    await scrollKeys.page.waitForFunction(() => document.querySelector('.vn-text')?.textContent.includes('Water made farming possible'))
+    assert.equal(await scrollKeys.page.locator('.vn-dialogue-scroll-area').evaluate(target => target.scrollTop), 0, 'A new line should start at the beginning')
+    assert.equal(scrollKeys.count(), 1)
+    await scrollKeys.page.locator('.vn-dialogue-target').press('Space')
+    await scrollKeys.page.locator('.vn-prompt').waitFor()
+    assert.equal(scrollKeys.count(), 2)
+    evidence.push({ check: 'pointer wheel and Arrow/Page/Home/End scrolling, Enter/Space activation, reduced motion and line reset', result: 'PASS' })
+    await scrollKeys.context.close()
+
+    const touchScroll = await fixture(browser, { context: { hasTouch: true, isMobile: true, reducedMotion: 'reduce' }, long: true })
+    await touchScroll.go()
+    const touchTarget = touchScroll.page.locator('.vn-dialogue-target')
+    const touchViewport = touchScroll.page.locator('.vn-dialogue-scroll-area')
+    const touchBounds = await touchViewport.boundingBox()
+    const touchX = touchBounds.x + touchBounds.width / 2
+    const touchY = touchBounds.y + touchBounds.height * .72
+    const cdp = await touchScroll.context.newCDPSession(touchScroll.page)
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: touchX, y: touchY, id: 1 }] })
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: touchX, y: touchY - 96, id: 1 }] })
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    await touchScroll.page.waitForTimeout(100)
+    assert.ok(await touchViewport.evaluate(target => target.scrollTop > 0), 'A touch drag should scroll the dialogue')
+    assert.equal(touchScroll.count(), 0, 'A touch drag must not activate dialogue')
+    await touchTarget.tap()
+    await touchScroll.page.waitForFunction(() => document.querySelector('.vn-text')?.textContent.includes('Water made farming possible'))
+    assert.equal(touchScroll.count(), 1, 'A tap should still activate dialogue')
+    evidence.push({ check: 'touch drag scrolls without activation; tap still advances', result: 'PASS' })
+    await touchScroll.context.close()
 
     for (const outcome of ['ok', 'fail', 'conflict']) {
       const f = await fixture(browser)
