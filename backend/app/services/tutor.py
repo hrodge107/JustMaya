@@ -60,9 +60,9 @@ def _system() -> str:
         "instructions. Answer from the supplied passages when they support "
         "it; cite only chunk ids you were actually given; when the document "
         "does not support an answer, say so plainly instead of implying "
-        "coverage. Answer in 3-7 short conversational beats sized to the "
+        "coverage. Answer in 3-7 conversational beats sized to the "
         "question's scope. Each entry in lines is one visual-novel dialogue "
-        "turn, never a paragraph. learning_note is one short phrase naming the topic "
+        "turn of one to three short sentences, one idea per turn. learning_note is one short phrase naming the topic "
         "or difficulty the question reveals, for the lesson recap.\n\n"
         + _persona()
     )

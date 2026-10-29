@@ -5,7 +5,7 @@ import MascotStage from './MascotStage'
 import MotionToggle from './MotionToggle'
 import RaiseHandPanel from './RaiseHandPanel'
 import RecallCheckpoint from './RecallCheckpoint'
-import { BACK_TO_LESSON, closingCue, drawCue } from './tutorCues'
+import { BACK_TO_LESSON, STRIP_LABEL, closingCue, drawCue } from './tutorCues'
 import useReadingAdvance from './useReadingAdvance'
 import './player.css'
 
@@ -66,7 +66,6 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
   const [menuOpen, setMenuOpen] = useState(false)
   const [readingReset, setReadingReset] = useState(0)
   const [draft, setDraft] = useState('')
-  const [editing, setEditing] = useState(false)
   const [asking, setAsking] = useState(false)
   const [sentDraft, setSentDraft] = useState('')
   const [askError, setAskError] = useState('')
@@ -129,14 +128,16 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
   const tutorTurns = (session?.interactions ?? []).filter(i => i.kind === 'raise_hand')
   const lastTurn = tutorTurns.length ? tutorTurns[tutorTurns.length - 1] : null
   const inQuestion = mode === 'question'
-  const askPhase = !inQuestion ? 'compose' : asking ? 'pending' : editing || !lastTurn ? 'compose' : 'answered'
-  const sentQuestion = asking ? sentDraft : lastTurn?.userMessage ?? ''
-  const hasAsked = asking || tutorTurns.length > 0
   // The tutor's content beats plus one frontend-composed closing cue beat.
   const contentBeats = lastTurn?.lines?.length ? lastTurn.lines : lastTurn ? [lastTurn.answer] : []
   const beats = lastTurn ? [...contentBeats, closingCue(lastTurn.interactionId, tutorTurns.length)] : []
   const beatIndex = lastTurn && beat.id === lastTurn.interactionId ? beat.index : 0
   const onFinalBeat = beatIndex >= beats.length - 1
+  // The sent question displays while beats play; the closing beat lands a
+  // fresh empty input so the next question is typed directly.
+  const askPhase = !inQuestion ? 'compose' : asking ? 'pending' : !lastTurn || onFinalBeat ? 'compose' : 'answered'
+  const sentQuestion = asking ? sentDraft : lastTurn?.userMessage ?? ''
+  const hasAsked = asking || tutorTurns.length > 0
   const turnId = returnBeat
     ? `return:${returnBeat.seq}`
     : inQuestion
@@ -147,7 +148,7 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
     : inQuestion
       ? asking ? '…' : lastTurn ? beats[beatIndex] : 'What would you like to ask?'
       : question ? checkpoint?.feedback ?? question.prompt : line?.text ?? ''
-  const resumeLabel = drawCue(lastTurn?.interactionId ?? 'compose', BACK_TO_LESSON)
+  const resumeLabel = drawCue(lastTurn?.interactionId ?? 'compose', STRIP_LABEL)
   const revealed = reduced || revealedLine === turnId || restoredTurn === turnId
   const dialogueError = answerError || advanceError
   const readingDelay = Math.max(3000, text.trim().split(/\s+/u).filter(Boolean).length * 300)
@@ -274,7 +275,7 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
       const res = await api.askQuestion(sessionId, questionRequest.current)
       questionRequest.current = null
       acceptSession(res.session)
-      if (alive.current) { setDraft(''); setEditing(false) }
+      if (alive.current) { setDraft('') }
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         questionRequest.current = null
@@ -298,9 +299,9 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
       resumeRequest.current = null
       acceptSession(next)
       if (alive.current) {
-        setDraft(''); setEditing(false); setAskError('')
+        setDraft(''); setAskError('')
         if (hadAnswers) setReturnBeat({
-          text: BACK_TO_LESSON[Math.floor(Math.random() * BACK_TO_LESSON.length)],
+          text: drawCue(`return:${lastTurn?.interactionId ?? 'lesson'}:${returnSeq.current}`, BACK_TO_LESSON),
           seq: ++returnSeq.current,
         })
       }
@@ -427,7 +428,6 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
         {inQuestion && <RaiseHandPanel phase={askPhase} draft={draft} sentQuestion={sentQuestion} hasAsked={hasAsked}
           turnComplete={onFinalBeat} resumeLabel={resumeLabel}
           busy={pending} error={askError} onDraft={setDraft} onSend={() => void sendQuestion()}
-          onEdit={() => { setDraft(sentQuestion); setEditing(true); setAskError('') }}
           onResume={() => void resumeLesson()} />}
       </section>
       <section className="vn-dialogue" aria-label="Dialogue">
@@ -475,7 +475,7 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
             </span>
             <span className="vn-advance-cue" aria-hidden="true">{pending || question && !checkpoint?.checkpointCompleted && !dialogueError && revealed ? '…' : inQuestion ? (onFinalBeat ? '' : '◆') : '◆'}</span>
           </button>
-          {inQuestion && askPhase === 'answered' && lastTurn && onFinalBeat && (
+          {inQuestion && lastTurn && onFinalBeat && (
             <span className="vn-sources">
               {lastTurn.groundingStatus && lastTurn.groundingStatus !== 'supported' && (
                 <span className="vn-source-note">{lastTurn.groundingStatus === 'partial' ? 'Partly supported by your PDF.' : 'Not covered by your PDF — this is a general answer.'}</span>

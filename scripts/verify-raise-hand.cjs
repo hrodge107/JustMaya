@@ -17,7 +17,9 @@ const id = () => crypto.randomUUID()
 // Mirror of src/player/tutorCues.ts pools, extracted so copy edits don't drift.
 const cuesSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'player', 'tutorCues.ts'), 'utf8')
 const cuePool = name => [...cuesSrc.match(new RegExp(`${name}\\s*=\\s*\\[([^\\]]+)\\]`, 's'))[1].matchAll(/'([^']+)'|"([^"]+)"/g)].map(m => m[1] ?? m[2])
-const ASK_MORE = cuePool('ASK_MORE'), BACK_TO_LESSON = cuePool('BACK_TO_LESSON')
+const ASK_MORE = cuePool('ASK_MORE'), BACK_TO_LESSON = cuePool('BACK_TO_LESSON'), STRIP_LABEL = cuePool('STRIP_LABEL')
+const ALL_CUES = [...ASK_MORE, ...BACK_TO_LESSON, ...STRIP_LABEL]
+assert.deepEqual(ASK_MORE.filter(c => STRIP_LABEL.includes(c) || BACK_TO_LESSON.includes(c)).concat(STRIP_LABEL.filter(c => BACK_TO_LESSON.includes(c))), [], 'cue pools must stay disjoint')
 
 async function post(request, endpoint, body) {
   const response = await request.post(`${base}${endpoint}`, { data: body })
@@ -69,8 +71,8 @@ const send = page => page.locator('.vn-ask-send')
 const saved = f => f.state.get(f.session.sessionId)
 const questionPosts = f => f.state.calls.filter(c => c.path.endsWith('/questions'))
 const liveText = page => page.locator('.vn-dialogue .sr-only[aria-live]').textContent()
-// Beats replace per dialogue activation; chrome unlocks on the closing cue.
-async function throughBeats(f, marker = '.vn-ask-edit') {
+// Beats replace per dialogue activation; the fresh input lands on the closing cue.
+async function throughBeats(f, marker = '.vn-ask-input') {
   for (let i = 0; i < 24; i++) {
     if (await f.page.locator(marker).count()) return
     await f.page.locator('.vn-dialogue-target').click()
@@ -116,7 +118,7 @@ async function coreFlow(browser) {
   assert.equal(await f.page.locator('.vn-ask-text').textContent(), 'What does section two cover?')
 
   // Chrome waits for the closing cue beat; the sent strip stays throughout.
-  assert.equal(await f.page.locator('.vn-ask-edit').count(), 0, 'pencil hidden until the closing beat')
+  assert.equal(await input(f.page).count(), 0, 'compose input hidden until the closing beat')
   assert.equal(await f.page.locator('.vn-ask-resume').count(), 0, 'resume strip hidden until the closing beat')
   assert.equal(await f.page.locator('.vn-source-note').count(), 0, 'grounding note hidden until the closing beat')
   await f.page.locator('.vn-dialogue-target').click()
@@ -130,15 +132,15 @@ async function coreFlow(browser) {
   const reply = f.state.questionReplies.get(questionPosts(f)[0].body.request_id)
   assert.ok(!reply.interaction.lines.includes(closing) && !reply.interaction.answer.includes(closing), 'cue text stays out of the persisted interaction')
   await f.page.locator('.vn-ask-resume').waitFor()
-  assert.ok(BACK_TO_LESSON.includes(await f.page.locator('.vn-ask-resume').textContent()), 'resume strip label rotates return-to-lesson copy')
+  const stripLabel = await f.page.locator('.vn-ask-resume').textContent()
+  assert.ok(STRIP_LABEL.includes(stripLabel), 'resume strip label comes from the label pool')
+  assert.equal(await input(f.page).inputValue(), '', 'closing beat lands an empty editable input')
+  assert.equal(await f.page.evaluate(() => document.activeElement === document.querySelector('.vn-ask-input')), true, 'fresh input takes focus')
   assert.equal(await f.page.locator('.vn-source-note').textContent(), 'Partly supported by your PDF.')
   await f.page.getByRole('button', { name: 'Sources', exact: true }).click()
   assert.deepEqual(await f.page.locator('.vn-source-badge').allTextContents(), ['Page 2–3'])
 
-  // Pencil edits the sent question; resending is a new request id, new beats.
-  await f.page.locator('.vn-ask-edit').click()
-  assert.equal(await f.page.evaluate(() => document.activeElement === document.querySelector('.vn-ask-input')), true)
-  assert.equal(await input(f.page).inputValue(), 'What does section two cover?')
+  // The fresh input accepts a follow-up directly; it sends as a new request id.
   await input(f.page).fill('What does section three cover?')
   await send(f.page).click()
   await f.page.waitForFunction(() => document.querySelector('.vn-ask-text')?.textContent === 'What does section three cover?')
@@ -151,6 +153,7 @@ async function coreFlow(browser) {
   await f.page.locator('.vn-ask-resume').click()
   await waitResume
   await waitCue(f.page, BACK_TO_LESSON)
+  assert.notEqual((await liveText(f.page)).replace('Instructor: ', ''), stripLabel, 'spoken return beat never repeats the strip label')
   await f.page.locator('.vn-dialogue-target').click()
   await f.page.locator('.vn-choices .vn-choice').first().waitFor()
   const restored = await saved(f)
@@ -158,7 +161,7 @@ async function coreFlow(browser) {
   assert.equal(restored.sceneId, 'scene-03-checkpoint-1')
   assert.equal(restored.resumeSnapshot, null)
   // The transient return beat is client-only: the persisted session has no trace.
-  assert.ok(restored.interactions.every(i => ![i.answer, ...(i.lines ?? [])].some(l => BACK_TO_LESSON.includes(l))), 'transient cue never reaches persisted state')
+  assert.ok(restored.interactions.every(i => ![i.answer, ...(i.lines ?? [])].some(l => ALL_CUES.includes(l))), 'cue text never reaches persisted state')
   evidence.push({ check: 'raise->compose->send->beat sequence->closing cue->sources->pencil edit->new beats->resume label->transient return beat->checkpoint restored', result: 'PASS' })
   await f.context.close()
 }
@@ -222,12 +225,14 @@ async function faultsAndReload(browser) {
   assert.deepEqual(questionPosts(f)[1].body, questionPosts(f)[0].body, 'retry reuses the frozen request body')
   evidence.push({ check: 'failed send preserves text; retry reuses request id and succeeds', result: 'PASS' })
 
-  // Reload mid-compose restores question mode and listening state.
-  await f.page.locator('.vn-ask-edit').click()
+  // Reload mid-compose restores question mode and listening state; the
+  // unsubmitted draft is client state and does not survive.
+  await input(f.page).fill('unsubmitted draft')
   await f.page.reload()
   await strip(f.page).waitFor()
   assert.equal(await f.page.locator('.mascot').getAttribute('data-emotion'), 'listening')
   assert.equal(await f.page.evaluate(() => document.activeElement === document.querySelector('.vn-ask-input')), true)
+  assert.equal(await input(f.page).inputValue(), '', 'unsubmitted draft does not survive reload')
   assert.equal((await saved(f)).mode, 'question')
 
   // Dialogue activation during question mode reveals text but never advances.
@@ -287,12 +292,12 @@ async function reloadRestoresClosingBeat(browser) {
   await f.page.waitForFunction(() => document.querySelector('.vn-dialogue .sr-only[aria-live]')?.textContent?.startsWith('Instructor: '))
   const before = (await liveText(f.page)).replace('Instructor: ', '')
   assert.ok(ASK_MORE.includes(before), 'first-answer closing cue comes from the ask-more pool')
-  await f.page.locator('.vn-ask-edit').waitFor()
+  await input(f.page).waitFor()
   await f.page.locator('.vn-source-note').waitFor()
   await f.page.locator('.vn-ask-resume').waitFor()
-  assert.equal(await input(f.page).count(), 0, 'answered phase shows no compose input')
+  assert.equal(await input(f.page).inputValue(), '', 'restored closing beat lands the fresh input empty')
   const persisted = await saved(f)
-  assert.ok(![persisted.interactions.at(-1).answer, ...persisted.interactions.at(-1).lines].includes(before), 'persisted lines stay cue-free')
+  assert.ok(![persisted.interactions.at(-1).answer, ...persisted.interactions.at(-1).lines].some(l => ALL_CUES.includes(l)), 'persisted lines stay cue-free')
   await f.page.reload()
   await f.page.waitForFunction(() => document.querySelector('.vn-dialogue .sr-only[aria-live]')?.textContent?.startsWith('Instructor: '))
   assert.equal(await liveText(f.page), `Instructor: ${before}`, 'closing cue is hash-stable across reload')
