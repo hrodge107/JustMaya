@@ -13,7 +13,7 @@ export type Episode = { episodeId: string; title: string; status: string; startS
 export type SessionMode = 'playing' | 'checkpoint' | 'question' | 'completed' | 'discussion' | 'error'
 // Tutor turns may carry citations; scripted VN dialogue never exposes them.
 export type SourceRef = { chunkId: string; documentId: string; pageStart: number; pageEnd: number; sectionId: string | null }
-export type TutorInteraction = { interactionId: string; kind: 'raise_hand' | 'discussion'; userMessage: string; answer: string; sourceRefs: SourceRef[]; createdAt: string; groundingStatus: 'supported' | 'partial' | 'unsupported' | null; requestId: string | null }
+export type TutorInteraction = { interactionId: string; kind: 'raise_hand' | 'discussion'; userMessage: string; answer: string; lines?: string[]; sourceRefs: SourceRef[]; createdAt: string; groundingStatus: 'supported' | 'partial' | 'unsupported' | null; requestId: string | null }
 export type QuestionResponse = { interaction: TutorInteraction; session: Session }
 export type Session = { sessionId: string; episodeId: string; mode: SessionMode; sceneId: string; dialogueIndex: number; version: number; status: 'active' | 'completed' | 'abandoned'; updatedAt: string; checkpoint?: Checkpoint | null; resumeSnapshot?: { sceneId: string; dialogueIndex: number; mode: SessionMode } | null; interactions?: TutorInteraction[]; learningNotes?: string[]; quizAttempts: { questionId: string; selectedOptionId: string; correct: boolean; attemptNumber: number; timestamp: string }[] }
 

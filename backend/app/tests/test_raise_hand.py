@@ -133,7 +133,7 @@ def _client(tmp_path):
 class StubProvider:
     def __init__(self, data=None, error=None, count: int = 10):
         self.data = data or {
-            "answer": "Because reasons.",
+            "lines": ["Because reasons.", "More reasons."],
             "cited_chunk_ids": ["c1"],
             "grounding_status": "supported",
             "learning_note": "reasons",
@@ -182,6 +182,7 @@ def _interaction(request_id="q1") -> TutorInteraction:
         kind="raise_hand",
         userMessage="why?",
         answer="because",
+        lines=["because"],
         createdAt="now",
         groundingStatus="supported",
         requestId=request_id,
@@ -294,12 +295,14 @@ def test_prepare_and_commit_question(tmp_path):
     )
     assert updated.version == 3
     assert updated.interactions[-1].requestId == "q1"
+    assert updated.interactions[-1].lines == ["because"]
     assert updated.learningNotes == ["asked why"]
     assert interaction.answer == "because"
 
     # replay: recorded answer returned, no model call needed
     replayed_session, _, recorded = prepare_question(tmp_path, session.sessionId, request)
     assert recorded.interactionId == "i1"
+    assert recorded.lines == ["because"]
     assert replayed_session.interactions[-1].answer == "because"
 
 
@@ -354,7 +357,7 @@ async def test_answer_question_verifies_citations(tmp_path):
     init_db(tmp_path)
     settings = _settings()
     stub = StubProvider(data={
-        "answer": "grounded",
+        "lines": ["grounded", "with more detail."],
         "cited_chunk_ids": ["c1", "hallucinated", "c1"],
         "grounding_status": "supported",
         "learning_note": "topic x",
@@ -371,6 +374,8 @@ async def test_answer_question_verifies_citations(tmp_path):
         settings=settings,
         retriever=_stub_retriever(_passages("c1", "c2")),
     )
+    assert result.interaction.lines == ["grounded", "with more detail."]
+    assert result.interaction.answer == "grounded\nwith more detail."
     assert [r.chunkId for r in result.interaction.sourceRefs] == ["c1"]
     assert result.interaction.groundingStatus == "supported"
     assert result.interaction.kind == "raise_hand"
@@ -390,7 +395,7 @@ async def test_answer_question_unsupported_when_retrieval_empty(tmp_path):
     init_db(tmp_path)
     settings = _settings()
     stub = StubProvider(data={
-        "answer": "The PDF does not cover that.",
+        "lines": ["The PDF does not cover that."],
         "cited_chunk_ids": ["c9"],
         "grounding_status": "unsupported",
         "learning_note": "",
@@ -409,6 +414,30 @@ async def test_answer_question_unsupported_when_retrieval_empty(tmp_path):
     assert result.interaction.sourceRefs == []
     assert result.interaction.groundingStatus == "unsupported"
     assert "unrelated?" in result.learning_note
+
+
+@pytest.mark.anyio
+async def test_answer_question_empty_lines_falls_back(tmp_path):
+    init_db(tmp_path)
+    settings = _settings()
+    stub = StubProvider(data={
+        "lines": ["  ", ""],
+        "cited_chunk_ids": [],
+        "grounding_status": "unsupported",
+        "learning_note": "",
+    })
+    provider = MeteredProvider(stub, settings, tmp_path)
+    result = await answer_question(
+        provider=provider,
+        session=new_session(_script()),
+        episode=_script(),
+        question="why?",
+        request_id="q1",
+        settings=settings,
+        retriever=_stub_retriever([]),
+    )
+    assert result.interaction.lines == [result.interaction.answer]
+    assert "ask me again" in result.interaction.answer
 
 
 # --- API routes ---
@@ -495,7 +524,8 @@ def test_question_endpoint_answers_and_replays(tmp_path):
         )
         assert asked.status_code == 200
         body = asked.json()
-        assert body["interaction"]["answer"] == "Because reasons."
+        assert body["interaction"]["lines"] == ["Because reasons.", "More reasons."]
+        assert body["interaction"]["answer"] == "Because reasons.\nMore reasons."
         assert body["interaction"]["groundingStatus"] == "supported"
         assert body["interaction"]["sourceRefs"][0]["chunkId"] == "c1"
         assert body["session"]["interactions"][-1]["userMessage"] == "why?"
@@ -507,12 +537,15 @@ def test_question_endpoint_answers_and_replays(tmp_path):
             json={"question": "why?", "request_id": "q1", "expected_version": 2},
         )
         assert replayed.status_code == 200
-        assert replayed.json()["interaction"]["answer"] == "Because reasons."
+        assert replayed.json()["interaction"]["answer"] == "Because reasons.\nMore reasons."
         assert len(stub.calls) == 1  # replay skips the model
 
-        # answer survives reload
+        # answer and beats survive reload
         restored = client.get(f"/api/sessions/{sid}").json()
         assert restored["interactions"][-1]["groundingStatus"] == "supported"
+        assert restored["interactions"][-1]["lines"] == [
+            "Because reasons.", "More reasons."
+        ]
 
 
 def test_question_provider_failure_preserves_state_and_retries(tmp_path):
@@ -545,7 +578,7 @@ def test_question_provider_failure_preserves_state_and_retries(tmp_path):
             json={"question": "why?", "request_id": "q1", "expected_version": 2},
         )
         assert retried.status_code == 200
-        assert retried.json()["interaction"]["answer"] == "Because reasons."
+        assert retried.json()["interaction"]["answer"] == "Because reasons.\nMore reasons."
 
 
 def test_question_budget_exceeded_returns_503(tmp_path):
