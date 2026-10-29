@@ -218,18 +218,22 @@ body:has(.player) { margin: 0; background: #e9e9f1; color: #30304c; color-scheme
   .vn-frame > .vn-menu-rail { grid-area: 1 / 1; z-index: 3; justify-self: end; align-self: start; min-height: 0; padding: 18px 26px; }
 }
 
-/* B03 Raise Hand: the round hand/Play button anchors above the dialogue's
-   right edge; the question strip reuses the choice-strip surface; tutor
-   sources sit along the dialogue's bottom edge, clear of the advance cue. */
+/* B03 Raise Hand: the hand/Play tile floats fully above the dialogue's
+   top-right edge, matching the choice strips' angular-tail signature; the
+   question strip reuses the choice-strip surface; tutor sources sit along
+   the dialogue's bottom edge, clear of the advance cue. */
 .vn-raise {
-  position: absolute; top: -22px; right: 20px; z-index: 4;
+  position: absolute; right: 20px; bottom: calc(100% + 10px); z-index: 4;
   display: grid; place-items: center; width: 48px; height: 48px; min-height: 48px;
-  padding: 0; border: 2px solid #626281; border-radius: 50%;
-  background: var(--paper); color: var(--mint-ink); font-size: 1.15rem; line-height: 1;
-  box-shadow: 0 4px 12px rgb(15 15 29 / .25);
-  transition: transform .18s var(--ease), border-color .18s var(--ease);
+  padding: 0; border: 2px solid #626281; border-radius: 16px 16px 4px 16px;
+  background: var(--paper); color: var(--mint-ink);
+  box-shadow: 0 4px 12px rgb(15 15 29 / .25), 0 0 0 3px rgb(127 229 220 / .35);
+  transition: transform .18s var(--ease), border-color .18s var(--ease), box-shadow .18s var(--ease);
 }
-.vn-raise:hover { transform: translateY(-2px); border-color: var(--mint-ink); }
+.vn-raise::after { content: ''; position: absolute; right: 3px; bottom: 3px; width: 11px; height: 11px; background: var(--mint-ink); clip-path: polygon(100% 0, 100% 100%, 0 100%); }
+.vn-raise svg { width: 24px; height: 24px; }
+.vn-raise:hover { transform: translateY(-2px); border-color: var(--mint-ink); box-shadow: 0 6px 16px rgb(15 15 29 / .3), 0 0 0 3px rgb(127 229 220 / .55); }
+.vn-raise:focus-visible { outline-color: var(--mint-bright); }
 .vn-raise[aria-disabled] { opacity: .7; cursor: progress; }
 
 .vn-ask-overlay { pointer-events: none; }
@@ -242,7 +246,8 @@ body:has(.player) { margin: 0; background: #e9e9f1; color: #30304c; color-scheme
 .vn-ask-send { flex: none; padding: 4px 10px; border: 1.5px solid var(--mint-ink); border-radius: 999px; color: var(--mint-ink); font-size: .78rem; font-weight: 900; letter-spacing: .05em; text-transform: uppercase; }
 .vn-ask-text { flex: 1; min-width: 0; }
 .vn-ask-sent[aria-busy] { opacity: .75; }
-.vn-ask-edit { flex: none; display: grid; place-items: center; width: 44px; min-height: 44px; margin: -6px -12px -6px 0; padding: 0; border-radius: 10px; background: transparent; color: var(--muted); font-size: 1.05rem; }
+.vn-ask-edit { flex: none; display: grid; place-items: center; width: 44px; min-height: 44px; margin: -6px -12px -6px 0; padding: 0; border-radius: 10px; background: transparent; color: var(--muted); }
+.vn-ask-edit svg { width: 20px; height: 20px; }
 .vn-ask-edit:hover { background: var(--wash); color: var(--mint-ink); }
 .vn-choices .vn-ask-strip:focus-visible { outline: 3px solid var(--mint-bright); outline-offset: 2px; }
 
@@ -252,7 +257,11 @@ body:has(.player) { margin: 0; background: #e9e9f1; color: #30304c; color-scheme
 .vn-source-badges { display: inline-flex; flex-wrap: wrap; gap: 4px; }
 .vn-source-badge { padding: 2px 8px; border-radius: 6px; background: #def0ec; color: var(--mint-ink); font-weight: 800; white-space: nowrap; }
 
+/* The raise/resume tile lives in a reserved right rail over the scene, so
+   bottom-anchored strips never slide beneath it on narrow stages. */
+.vn-checkpoint-scene .vn-choices { padding-right: 72px; }
+
 @media (max-height: 500px) {
-  .vn-raise { top: -18px; right: 14px; }
+  .vn-raise { right: 14px; bottom: calc(100% + 8px); }
   .vn-sources { left: 14px; bottom: 8px; }
 }

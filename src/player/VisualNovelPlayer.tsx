@@ -384,7 +384,7 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
           <ol aria-hidden="true">{order.map((s, i) => <li key={s.sceneId} className={i + 1 < sceneNumber ? 'done' : i + 1 === sceneNumber ? 'current' : ''} />)}</ol>
         </div>
       </header>
-      <section className={`vn-scene${question ? ' vn-checkpoint-scene' : ''}`} aria-label="Scene">
+      <section className={`vn-scene${question || inQuestion ? ' vn-checkpoint-scene' : ''}`} aria-label="Scene">
         <div className="vn-stage">
           {mascot}
           {mode === 'completed' && <div className="vn-prompt"><p className="vn-prompt-label">Episode complete</p><p className="vn-prompt-text">{episode.title}</p></div>}
@@ -401,7 +401,16 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
           <button type="button" className="vn-raise" aria-label={inQuestion ? 'Resume the lesson' : 'Raise your hand to ask a question'}
             aria-disabled={pending || undefined} aria-busy={pending || undefined}
             onClick={() => { if (pending) return; if (inQuestion) void resumeLesson(); else void raiseHand() }}>
-            {inQuestion ? '▶' : '✋'}
+            {inQuestion ? (
+              <svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="8 5 19 12 8 19" fill="currentColor" stroke="currentColor" strokeWidth="2.4" strokeLinejoin="round" /></svg>
+            ) : (
+              <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2" />
+                <path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v6" />
+                <path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8" />
+                <path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" />
+              </svg>
+            )}
           </button>
         )}
         {(mode === 'playing' && line) || question || inQuestion ? <>
