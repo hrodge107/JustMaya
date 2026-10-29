@@ -16,8 +16,22 @@ const clamp = (v: number) => Math.max(-1, Math.min(1, v))
 
 export default function MascotStage({ emotion, isSpeaking, nodTrigger, customAnimationTrigger, lookTargetOffset, enablePointerTracking }: MascotStageProps) {
   const ref = useRef<HTMLElement>(null)
+  const body = useRef<HTMLDivElement>(null)
+  const previousNod = useRef(nodTrigger)
   const lookX = lookTargetOffset?.x
   const lookY = lookTargetOffset?.y
+
+  useEffect(() => {
+    if (nodTrigger > previousNod.current && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      const animation = body.current?.animate([
+        { transform: 'none' }, { transform: 'translateY(7px) rotate(2deg)', offset: .35 },
+        { transform: 'translateY(-2px)', offset: .7 }, { transform: 'none' },
+      ], { duration: 420, easing: 'ease-out' })
+      previousNod.current = nodTrigger
+      return () => animation?.cancel()
+    }
+    previousNod.current = nodTrigger
+  }, [nodTrigger])
 
   // Gaze goes straight to CSS variables: pointer moves never re-render React.
   useEffect(() => {
@@ -35,9 +49,8 @@ export default function MascotStage({ emotion, isSpeaking, nodTrigger, customAni
     return () => window.removeEventListener('pointermove', onMove)
   }, [lookX, lookY, enablePointerTracking])
 
-  return <figure className="mascot" ref={ref} data-emotion={emotion} data-speaking={isSpeaking || undefined} aria-label={`Instructor stand-in, ${emotion}${isSpeaking ? ', speaking' : ''}`}>
-    {/* Remounting on nodTrigger replays the one-shot nod; 0 means "never nodded". */}
-    <div className={nodTrigger > 0 ? 'mascot-body nod' : 'mascot-body'} key={nodTrigger} aria-hidden="true">
+  return <figure className="mascot" ref={ref} data-emotion={emotion} data-nod-trigger={nodTrigger} data-speaking={isSpeaking || undefined} aria-label={`Instructor stand-in, ${emotion}${isSpeaking ? ', speaking' : ''}`}>
+    <div className="mascot-body" ref={body} aria-hidden="true">
       <div className="mascot-face">
         <span className="brow" />
         <span className="eye left" /><span className="eye right" />

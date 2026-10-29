@@ -43,6 +43,7 @@ def _question(question_id="q-1", **kwargs):
            "correctOptionId": "a",
            "correctExplanation": "Because.",
            "incorrectExplanation": "Try again.",
+           "feedback": {"firstIncorrect": "Think about the lesson.", "correct": "Because.", "finalIncorrect": "The answer is A."},
            "sourceRefs": [_ref()],
            **kwargs}
     )

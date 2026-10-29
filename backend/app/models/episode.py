@@ -10,7 +10,7 @@ the refusal channel; envelope fields are filled by code, never by the model.
 from collections import deque
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 Emotion = Literal["idle", "talking", "thinking", "happy", "confused"]
 SceneKind = Literal["dialogue", "checkpoint", "ending"]
@@ -43,6 +43,19 @@ class AnswerOption(BaseModel):
     label: str
 
 
+class CheckpointFeedback(BaseModel):
+    firstIncorrect: str = Field(min_length=1)
+    correct: str = Field(min_length=1)
+    finalIncorrect: str = Field(min_length=1)
+
+    @field_validator("firstIncorrect", "correct", "finalIncorrect")
+    @classmethod
+    def nonblank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Feedback must not be blank")
+        return value
+
+
 class RecallQuestion(BaseModel):
     questionId: str
     prompt: str
@@ -51,9 +64,15 @@ class RecallQuestion(BaseModel):
     correctOptionId: str
     correctExplanation: str
     incorrectExplanation: str
+    feedback: CheckpointFeedback | None = None
     sourceRefs: list[EpisodeSourceRef] = []
     webRefs: list[WebRef] = []
     maxAttempts: int = Field(default=2, ge=1)
+
+
+class GeneratedRecallQuestion(RecallQuestion):
+    feedback: CheckpointFeedback
+    maxAttempts: Literal[2] = 2
 
 
 class EpisodeScene(BaseModel):
@@ -62,6 +81,10 @@ class EpisodeScene(BaseModel):
     dialogue: list[DialogueLine] = []
     question: RecallQuestion | None = None
     nextSceneId: str | None = None
+
+
+class GeneratedEpisodeScene(EpisodeScene):
+    question: GeneratedRecallQuestion | None = None
 
 
 class EpisodeScript(BaseModel):
@@ -79,7 +102,7 @@ class EpisodeScript(BaseModel):
 class GeneratedEpisode(BaseModel):
     """Model-facing generation shape: scenes plus the refusal channel."""
 
-    scenes: list[EpisodeScene] = Field(min_length=1)
+    scenes: list[GeneratedEpisodeScene] = Field(min_length=1)
     problems: list[str] = []
 
 

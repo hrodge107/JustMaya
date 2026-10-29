@@ -33,7 +33,7 @@ from app.storage.episodes import (
 )
 
 VALIDATION_STAGE = "validation"
-CACHE_KEY = "episode-validation-v1"
+CACHE_KEY = "episode-validation-v2"
 
 # Learner-facing text must never render citation artifacts: internal field
 # names, or the generated chunk-id shape (`{doc}-p0004-001`).
@@ -64,6 +64,8 @@ def _learner_texts(script: EpisodeScript) -> list[tuple[str, str]]:
             pairs.append((f"{question.questionId}.{option.optionId}", option.label))
         pairs.append((f"{question.questionId}.correct", question.correctExplanation))
         pairs.append((f"{question.questionId}.incorrect", question.incorrectExplanation))
+        if question.feedback:
+            pairs.extend((f"{question.questionId}.{key}", value) for key, value in question.feedback.model_dump().items())
     return pairs
 
 
@@ -141,6 +143,7 @@ def _script_view(script: EpisodeScript) -> dict:
                 "correctOptionId": scene.question.correctOptionId,
                 "correctExplanation": scene.question.correctExplanation,
                 "incorrectExplanation": scene.question.incorrectExplanation,
+                "feedback": scene.question.feedback.model_dump() if scene.question.feedback else None,
             }
         scenes.append(item)
     return {
@@ -160,6 +163,8 @@ _REVIEW_SYSTEM = (
     "coherent, instructional claims are supported by the supplied context "
     "and passages, checkpoint questions assess previously taught material "
     "with constructive feedback, and the voice fits the instructor persona. "
+    "For structured feedback, firstIncorrect must scaffold a retry without "
+    "revealing the answer; correct and finalIncorrect must explain it. "
     "Do not review style polish. Return verdict 'pass' with no violations "
     "when the script is instructionally faithful; otherwise 'fail' with an "
     "itemized violation list naming each check and its detail."

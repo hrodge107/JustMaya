@@ -48,6 +48,17 @@ class QuizAttempt(BaseModel):
     timestamp: str
 
 
+class CheckpointState(BaseModel):
+    questionId: str
+    attemptsUsed: int = Field(ge=0, le=2)
+    attemptsRemaining: int = Field(ge=0, le=2)
+    isCorrect: bool | None = None
+    checkpointCompleted: bool = False
+    selectedOptionId: str | None = None
+    feedback: str | None = None
+    correctOptionId: str | None = None
+
+
 class TutorInteraction(BaseModel):
     interactionId: str
     kind: Literal["raise_hand", "discussion"]
@@ -65,6 +76,7 @@ class LearnerSession(BaseModel):
     dialogueIndex: int = Field(ge=0)
     resumeSnapshot: Position | None = None
     quizAttempts: list[QuizAttempt] = []
+    checkpoint: CheckpointState | None = None
     interactions: list[TutorInteraction] = []
     learningNotes: list[str] = []
     version: int = Field(ge=1)
@@ -75,3 +87,18 @@ class LearnerSession(BaseModel):
 class AdvanceRequest(BaseModel):
     request_id: str = Field(min_length=1)
     expected_version: int = Field(ge=1)
+
+
+class AnswerRequest(BaseModel):
+    questionId: str = Field(min_length=1)
+    optionId: str = Field(min_length=1)
+    request_id: str = Field(min_length=1)
+    expected_version: int = Field(ge=1)
+
+
+def learner_session_view(session: LearnerSession) -> dict:
+    """Only a completed checkpoint may serialize the answer identifier."""
+    data = session.model_dump()
+    if data["checkpoint"] and not data["checkpoint"]["checkpointCompleted"]:
+        data["checkpoint"].pop("correctOptionId", None)
+    return data
