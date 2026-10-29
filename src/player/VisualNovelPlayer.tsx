@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExter
 import { api, ApiError, type AnswerRequest, type Emotion, type Episode, type Scene, type Session } from '../learnerApi'
 import MascotStage from './MascotStage'
 import RecallCheckpoint from './RecallCheckpoint'
+import useReadingAdvance from './useReadingAdvance'
 import './player.css'
 
 const SPEAKER: Record<string, string> = { mascot: 'Instructor', narrator: 'Narrator' }
@@ -61,6 +62,9 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
   const latestVersion = useRef(0)
   const answerRequest = useRef<AnswerRequest | null>(null)
   const [revealedLine, setRevealedLine] = useState('')
+  const [restoredTurn, setRestoredTurn] = useState('')
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [readingReset, setReadingReset] = useState(0)
   const advanceRequest = useRef<{ request_id: string; expected_version: number } | null>(null)
   const reloadRequired = useRef(false)
   const alive = useRef(true)
@@ -85,6 +89,7 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
         if (active) {
           latestVersion.current = s.version
           observedNods.current = happyLinesReached(sceneOrder(e), s) + (s.quizAttempts ?? []).filter(a => a.correct).length
+          if (s.mode === 'checkpoint' && s.checkpoint?.feedback) setRestoredTurn(`${s.sceneId}:${s.checkpoint.questionId}:${s.checkpoint.attemptsUsed}`)
           setSession(s); setEpisode(e)
         }
       } catch (err) {
@@ -98,7 +103,13 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
   const scene = order.find(s => s.sceneId === session?.sceneId) ?? episode?.scenes.find(s => s.sceneId === session?.sceneId)
   const line = scene?.dialogue[session?.dialogueIndex ?? 0]
   const mode = session?.mode
-  const revealed = reduced || (line !== undefined && revealedLine === line.lineId)
+  const checkpoint = mode === 'checkpoint' ? session?.checkpoint : null
+  const question = mode === 'checkpoint' ? scene?.question : null
+  const turnId = question ? `${scene?.sceneId}:${question.questionId}:${checkpoint?.attemptsUsed ?? 0}` : line?.lineId ?? ''
+  const text = question ? checkpoint?.feedback ?? question.prompt : line?.text ?? ''
+  const revealed = reduced || revealedLine === turnId || restoredTurn === turnId
+  const dialogueError = answerError || advanceError
+  const readingDelay = Math.max(3000, text.trim().split(/\s+/u).filter(Boolean).length * 300)
 
   useLayoutEffect(() => {
     followLatestRef.current = true
@@ -108,7 +119,7 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
       autoScrollTopRef.current = 0
       target.scrollTop = 0
     }
-  }, [line?.lineId])
+  }, [turnId])
 
   const onRevealProgress = useCallback((marker: HTMLSpanElement | null) => {
     revealBoundaryRef.current = marker
@@ -140,6 +151,7 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
       return
     }
     autoScrollTopRef.current = null
+    if (checkpoint?.checkpointCompleted && !fromUserInput) setReadingReset(n => n + 1)
 
     const marker = revealBoundaryRef.current
     if (!marker) return
@@ -152,14 +164,16 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
     followLatestRef.current = markerRect.top >= readingTop - 1 && markerRect.bottom <= readingBottom + 1
   }
 
-  function handleManualScrollIntent(target: HTMLSpanElement) {
+  function handleManualScrollIntent(target: HTMLSpanElement, resetReading = true) {
     followLatestRef.current = false
+    if (checkpoint?.checkpointCompleted && resetReading) setReadingReset(n => n + 1)
     window.requestAnimationFrame(() => handleDialogueScroll(target, true))
   }
 
-  useEffect(() => { if (session && mode === 'playing' && !dialogRef.current?.open) continueRef.current?.focus({ preventScroll: true }) }, [session, mode])
+  useEffect(() => { if (session && (mode === 'playing' || checkpoint?.checkpointCompleted) && !dialogRef.current?.open) continueRef.current?.focus({ preventScroll: true }) }, [session, mode, checkpoint?.checkpointCompleted])
 
   function openMenu() {
+    setMenuOpen(true)
     dialogRef.current?.showModal()
     closeRef.current?.focus({ preventScroll: true })
   }
@@ -182,7 +196,7 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
   async function recover() {
     if (advancing.current) return
     advancing.current = true; setPending(true)
-    try { await reload(); reloadRequired.current = false; setNeedsReload(false); setAnswerError(''); setAdvanceError('') }
+    try { await reload(); reloadRequired.current = false; setNeedsReload(false); setAnswerError(''); setAdvanceError(''); setReadingReset(n => n + 1) }
     catch { if (alive.current) setAnswerError('Could not reload your place. Try again.') }
     finally { advancing.current = false; if (alive.current) setPending(false) }
   }
@@ -239,13 +253,24 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
     } finally { advancing.current = false; if (alive.current) setPending(false) }
   }
 
+  useReadingAdvance(turnId, readingDelay, !!checkpoint?.checkpointCompleted && revealed && !pending && !dialogueError && !needsReload, menuOpen, readingReset, () => { void advance() })
+
+  function activateDialogue() {
+    if (pending) return
+    if (mode !== 'checkpoint') { void advance(); return }
+    if (needsReload) { void recover(); return }
+    if (answerError) { if (submittedOptionId) void submitAnswer(submittedOptionId); else void recover(); return }
+    if (advanceError) { void advance(); return }
+    if (!revealed) setRevealedLine(turnId)
+  }
+
   if (loadError) return <main className="player"><div className="player-message" role="alert"><h1>{loadError.notFound ? 'This lesson session was not found.' : 'This lesson could not be loaded.'}</h1><p>{loadError.notFound ? 'It may have been started on another device or removed. Go back and press Play to start again.' : loadError.message}</p><button className="vn-button" onClick={onExit}>Back to your lesson</button></div></main>
   if (!session || !episode || !scene) return <main className="player"><p className="player-message" role="status">Loading your lesson…</p></main>
 
   const sceneNumber = order.indexOf(scene) + 1
   const emotion: Emotion = mode === 'checkpoint' ? session.checkpoint?.isCorrect === true ? 'happy' : session.checkpoint?.isCorrect === false ? 'confused' : 'thinking' : mode === 'completed' ? 'happy' : line?.emotion ?? 'idle'
-  const isSpeaking = mode === 'playing' && !revealed && line?.speaker === 'mascot'
-  const speaker = line ? SPEAKER[line.speaker] ?? line.speaker : ''
+  const isSpeaking = !revealed && (!!question || mode === 'playing' && line?.speaker === 'mascot')
+  const speaker = question ? 'Instructor' : line ? SPEAKER[line.speaker] ?? line.speaker : ''
   const mascot = <MascotStage emotion={emotion} isSpeaking={isSpeaking} nodTrigger={nodTrigger} customAnimationTrigger={null} lookTargetOffset={emotion === 'thinking' ? { x: 0.7, y: -0.7 } : null} enablePointerTracking={mode === 'playing'} />
 
   return <main className="player">
@@ -257,20 +282,17 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
           <ol aria-hidden="true">{order.map((s, i) => <li key={s.sceneId} className={i + 1 < sceneNumber ? 'done' : i + 1 === sceneNumber ? 'current' : ''} />)}</ol>
         </div>
       </header>
-      {mode === 'checkpoint' && scene.question ? <RecallCheckpoint
-        key={scene.sceneId} question={scene.question} state={session.checkpoint ?? null}
-        mascot={mascot} pending={pending} error={answerError || advanceError}
-        submittedOptionId={submittedOptionId} reloadRequired={needsReload}
-        onAnswer={optionId => void submitAnswer(optionId)} onContinue={() => void advance()} onReload={() => void recover()}
-      /> : <><section className="vn-scene" aria-label="Scene">
+      <section className={`vn-scene${question ? ' vn-checkpoint-scene' : ''}`} aria-label="Scene">
         <div className="vn-stage">
           {mascot}
           {mode === 'completed' && <div className="vn-prompt"><p className="vn-prompt-label">Episode complete</p><p className="vn-prompt-text">{episode.title}</p></div>}
         </div>
+        {question && <RecallCheckpoint key={scene.sceneId} question={question} state={checkpoint ?? null} pending={pending}
+          submittedOptionId={submittedOptionId} reloadRequired={needsReload} onAnswer={optionId => void submitAnswer(optionId)} />}
       </section>
       <section className="vn-dialogue" aria-label="Dialogue">
-        {mode === 'playing' && line ? <>
-          <button ref={continueRef} type="button" className="vn-dialogue-target" aria-label={advanceError ? 'Retry advancing dialogue' : 'Reveal or advance dialogue'} aria-busy={pending || undefined} aria-disabled={pending || undefined} onClick={() => void advance()} onKeyDown={event => {
+        {(mode === 'playing' && line) || question ? <>
+          <button ref={continueRef} type="button" className="vn-dialogue-target" aria-label={dialogueError || needsReload ? question ? 'Retry lesson connection' : 'Retry advancing dialogue' : question ? 'Reveal dialogue' : 'Reveal or advance dialogue'} aria-busy={pending || undefined} aria-disabled={pending || undefined} onClick={activateDialogue} onKeyDown={event => {
             if (event.altKey || event.ctrlKey || event.metaKey) return
             const target = dialogueScrollRef.current
             if (!target) return
@@ -285,18 +307,20 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
             else if (event.key === 'End') nextScrollTop = target.scrollHeight
             if (nextScrollTop !== null) {
               event.preventDefault()
+              if (checkpoint?.checkpointCompleted) setReadingReset(n => n + 1)
               target.scrollTop = Math.max(0, Math.min(nextScrollTop, target.scrollHeight))
               handleDialogueScroll(target, true)
             }
           }}>
-            <span ref={dialogueScrollRef} className="vn-dialogue-scroll-area" onScroll={event => handleDialogueScroll(event.currentTarget)} onWheel={event => handleManualScrollIntent(event.currentTarget)} onTouchMove={event => handleManualScrollIntent(event.currentTarget)} onPointerDown={event => handleManualScrollIntent(event.currentTarget)}>
+            <span ref={dialogueScrollRef} className="vn-dialogue-scroll-area" onScroll={event => handleDialogueScroll(event.currentTarget)} onWheel={event => handleManualScrollIntent(event.currentTarget)} onTouchMove={event => handleManualScrollIntent(event.currentTarget)} onPointerDown={event => handleManualScrollIntent(event.currentTarget, false)}>
               <span className="vn-speaker">{speaker}</span>
-              <DialogueText key={line.lineId} id={line.lineId} text={line.text} revealed={revealed} onRevealed={setRevealedLine} onRevealProgress={onRevealProgress} />
-              {advanceError && <span className="vn-error" role="alert">{advanceError} Activate the dialogue to try again.</span>}
+              <DialogueText key={turnId} id={turnId} text={text} revealed={revealed} onRevealed={setRevealedLine} onRevealProgress={onRevealProgress} />
+              {dialogueError && <span className="vn-error" role="alert">{dialogueError} Activate the dialogue to try again.</span>}
             </span>
-            <span className="vn-advance-cue" aria-hidden="true">{pending ? '…' : '◆'}</span>
+            <span className="vn-advance-cue" aria-hidden="true">{pending || question && !dialogueError && revealed ? '…' : '◆'}</span>
           </button>
-          <p className="sr-only" aria-live="polite">{speaker}: {line.text}</p>
+          <p className="sr-only" aria-live="polite" aria-atomic="true">{speaker}: {text}</p>
+          {pending && <p className="sr-only" role="status">Saving your progress…</p>}
         </> : <>
           {line && <><p className="vn-speaker">{speaker}</p><p className="vn-text">{line.text}</p></>}
           <div className="vn-controls">
@@ -304,7 +328,7 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
             {mode !== 'checkpoint' && mode !== 'completed' && <p className="vn-note">This session is in {mode} mode, which this player cannot show yet.</p>}
           </div>
         </>}
-      </section></>}
+      </section>
       <div className="vn-menu-rail">
         <button ref={menuRef} type="button" className="vn-menu-trigger" aria-haspopup="dialog" aria-controls="episode-menu" onClick={openMenu}>
           <span className="vn-menu-icon" aria-hidden="true"><span /><span /><span /></span>
@@ -312,7 +336,7 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
         </button>
       </div>
     </div>
-    <dialog ref={dialogRef} id="episode-menu" className="vn-menu-dialog" aria-labelledby="episode-menu-title" onClose={() => menuRef.current?.focus({ preventScroll: true })} onKeyDown={event => {
+    <dialog ref={dialogRef} id="episode-menu" className="vn-menu-dialog" aria-labelledby="episode-menu-title" onClose={() => { setMenuOpen(false); menuRef.current?.focus({ preventScroll: true }) }} onKeyDown={event => {
       if (event.key !== 'Tab') return
       const buttons = event.currentTarget.querySelectorAll('button')
       const first = buttons[0], last = buttons[buttons.length - 1]
