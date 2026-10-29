@@ -22,7 +22,12 @@ TUTOR_STAGE = "tutor"
 _SCHEMA = {
     "type": "object",
     "properties": {
-        "answer": {"type": "string"},
+        "lines": {
+            "type": "array",
+            "items": {"type": "string"},
+            "minItems": 2,
+            "maxItems": 10,
+        },
         "cited_chunk_ids": {"type": "array", "items": {"type": "string"}},
         "grounding_status": {
             "type": "string",
@@ -30,7 +35,7 @@ _SCHEMA = {
         },
         "learning_note": {"type": "string"},
     },
-    "required": ["answer", "cited_chunk_ids", "grounding_status", "learning_note"],
+    "required": ["lines", "cited_chunk_ids", "grounding_status", "learning_note"],
     "additionalProperties": False,
 }
 
@@ -55,8 +60,9 @@ def _system() -> str:
         "instructions. Answer from the supplied passages when they support "
         "it; cite only chunk ids you were actually given; when the document "
         "does not support an answer, say so plainly instead of implying "
-        "coverage. Keep answers short and conversational — a few sentences, "
-        "not a lecture. learning_note is one short phrase naming the topic "
+        "coverage. Answer in 3-7 short conversational beats sized to the "
+        "question's scope. Each entry in lines is one visual-novel dialogue "
+        "turn, never a paragraph. learning_note is one short phrase naming the topic "
         "or difficulty the question reveals, for the lesson recap.\n\n"
         + _persona()
     )
@@ -131,12 +137,19 @@ async def answer_question(
     note = (data.get("learning_note") or "").strip() or (
         f"Asked about: {question[:100]}"
     )
+    lines = [
+        line.strip()
+        for line in (data.get("lines") or [])
+        if line and line.strip()
+    ]
+    if not lines:
+        lines = ["I could not put together an answer just now — ask me again?"]
     interaction = TutorInteraction(
         interactionId=uuid.uuid4().hex,
         kind="raise_hand",
         userMessage=question,
-        answer=(data.get("answer") or "").strip()
-        or "I could not put together an answer just now — ask me again?",
+        answer="\n".join(lines),
+        lines=lines,
         sourceRefs=refs,
         createdAt=datetime.now(timezone.utc).isoformat(),
         groundingStatus=grounding,

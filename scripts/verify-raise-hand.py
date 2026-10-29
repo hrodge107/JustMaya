@@ -35,7 +35,11 @@ class StubProvider:
         self.calls += 1
         return StructuredResult(
             data={
-                "answer": "Maya explains the verification topic.",
+                "lines": [
+                    "Maya explains the verification topic.",
+                    "A second beat keeps the pacing honest.",
+                    "And a third closes the thought.",
+                ],
                 "cited_chunk_ids": ["chunk-a", "hallucinated"],
                 "grounding_status": "partial",
                 "learning_note": "verification topic",
@@ -92,7 +96,12 @@ def main():
 
         # grounded question -> verified citations, persisted interaction, session-scoped usage
         asked = post(f"/api/sessions/{sid}/questions", {"question": "What does the source say?", "request_id": "verify-q1", "expected_version": raised["version"]})
-        assert asked["interaction"]["answer"] == "Maya explains the verification topic."
+        assert asked["interaction"]["lines"] == [
+            "Maya explains the verification topic.",
+            "A second beat keeps the pacing honest.",
+            "And a third closes the thought.",
+        ]
+        assert asked["interaction"]["answer"] == "\n".join(asked["interaction"]["lines"])
         assert asked["interaction"]["groundingStatus"] == "partial"
         assert [r["chunkId"] for r in asked["interaction"]["sourceRefs"]] == ["chunk-a"]
         assert asked["interaction"]["sourceRefs"][0]["pageStart"] == 2
@@ -127,7 +136,17 @@ def main():
         assert conflict.status_code == 409 and conflict.json()["error"]["code"] == "SESSION_CONFLICT"
         evidence.append({"check": "blank/overlong questions 422; cross-kind request id conflicts", "result": "PASS"})
 
-    manifest = {"dataDir": str(staged), "episode": episode, "evidence": evidence, "modelCalls": stub.calls}
+        # a second session parked in question mode with a real persisted,
+        # beat-structured answer lets the browser script verify reload restore
+        parked_session = post(f"/api/episodes/{episode['episodeId']}/sessions")
+        parked_sid = parked_session["sessionId"]
+        post(f"/api/sessions/{parked_sid}/raise-hand", {"request_id": "verify-park-h", "expected_version": parked_session["version"]})
+        parked_asked = post(f"/api/sessions/{parked_sid}/questions", {"question": "Parked question?", "request_id": "verify-park-q", "expected_version": parked_session["version"] + 1})
+        assert parked_asked["session"]["mode"] == "question"
+        assert len(parked_asked["interaction"]["lines"]) == 3
+        evidence.append({"check": "persisted beat answer parked in question mode for browser reload checks", "result": "PASS"})
+
+    manifest = {"dataDir": str(staged), "episode": episode, "evidence": evidence, "modelCalls": stub.calls, "questionSessionId": parked_sid, "questionInteraction": parked_asked["interaction"]}
     (staged / "verification.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(json.dumps({"dataDir": str(staged), "episodeId": episode["episodeId"], "checks": len(evidence), "modelCalls": stub.calls}))
 

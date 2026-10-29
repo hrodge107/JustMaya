@@ -64,6 +64,7 @@ class TutorInteraction(BaseModel):
     kind: Literal["raise_hand", "discussion"]
     userMessage: str
     answer: str
+    lines: list[str] = []
     sourceRefs: list[EpisodeSourceRef] = []
     createdAt: str
     groundingStatus: Literal["supported", "partial", "unsupported"] | None = None
