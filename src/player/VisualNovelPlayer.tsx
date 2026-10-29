@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { api, ApiError, type AnswerRequest, type Emotion, type Episode, type Scene, type Session } from '../learnerApi'
 import MascotStage from './MascotStage'
+import RaiseHandPanel from './RaiseHandPanel'
 import RecallCheckpoint from './RecallCheckpoint'
 import useReadingAdvance from './useReadingAdvance'
 import './player.css'
@@ -65,7 +66,16 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
   const [restoredTurn, setRestoredTurn] = useState('')
   const [menuOpen, setMenuOpen] = useState(false)
   const [readingReset, setReadingReset] = useState(0)
+  const [draft, setDraft] = useState('')
+  const [editing, setEditing] = useState(false)
+  const [asking, setAsking] = useState(false)
+  const [sentDraft, setSentDraft] = useState('')
+  const [askError, setAskError] = useState('')
+  const [sourcesFor, setSourcesFor] = useState<string | null>(null)
   const advanceRequest = useRef<{ request_id: string; expected_version: number } | null>(null)
+  const raiseRequest = useRef<{ request_id: string; expected_version: number } | null>(null)
+  const questionRequest = useRef<{ question: string; request_id: string; expected_version: number } | null>(null)
+  const resumeRequest = useRef<{ request_id: string; expected_version: number } | null>(null)
   const reloadRequired = useRef(false)
   const alive = useRef(true)
   const continueRef = useRef<HTMLButtonElement>(null)
@@ -90,6 +100,10 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
           latestVersion.current = s.version
           observedNods.current = happyLinesReached(sceneOrder(e), s) + (s.quizAttempts ?? []).filter(a => a.correct).length
           if (s.mode === 'checkpoint' && s.checkpoint?.feedback) setRestoredTurn(`${s.sceneId}:${s.checkpoint.questionId}:${s.checkpoint.attemptsUsed}`)
+          if (s.mode === 'question') {
+            const last = (s.interactions ?? []).filter(i => i.kind === 'raise_hand').at(-1)
+            if (last) setRestoredTurn(`ask:${last.interactionId}`)
+          }
           setSession(s); setEpisode(e)
         }
       } catch (err) {
@@ -105,8 +119,18 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
   const mode = session?.mode
   const checkpoint = mode === 'checkpoint' ? session?.checkpoint : null
   const question = mode === 'checkpoint' ? scene?.question : null
-  const turnId = question ? `${scene?.sceneId}:${question.questionId}:${checkpoint?.attemptsUsed ?? 0}` : line?.lineId ?? ''
-  const text = question ? checkpoint?.feedback ?? question.prompt : line?.text ?? ''
+  const tutorTurns = (session?.interactions ?? []).filter(i => i.kind === 'raise_hand')
+  const lastTurn = tutorTurns.length ? tutorTurns[tutorTurns.length - 1] : null
+  const inQuestion = mode === 'question'
+  const askPhase = !inQuestion ? 'compose' : asking ? 'pending' : editing || !lastTurn ? 'compose' : 'answered'
+  const sentQuestion = asking ? sentDraft : lastTurn?.userMessage ?? ''
+  const hasAsked = asking || tutorTurns.length > 0
+  const turnId = inQuestion
+    ? asking ? 'ask:pending' : lastTurn ? `ask:${lastTurn.interactionId}` : 'ask:prompt'
+    : question ? `${scene?.sceneId}:${question.questionId}:${checkpoint?.attemptsUsed ?? 0}` : line?.lineId ?? ''
+  const text = inQuestion
+    ? asking ? '…' : lastTurn ? lastTurn.answer : 'What would you like to ask?'
+    : question ? checkpoint?.feedback ?? question.prompt : line?.text ?? ''
   const revealed = reduced || revealedLine === turnId || restoredTurn === turnId
   const dialogueError = answerError || advanceError
   const readingDelay = Math.max(3000, text.trim().split(/\s+/u).filter(Boolean).length * 300)
@@ -201,6 +225,80 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
     finally { advancing.current = false; if (alive.current) setPending(false) }
   }
 
+  async function raiseHand() {
+    if (!session || advancing.current || reloadRequired.current) return
+    advancing.current = true
+    raiseRequest.current ??= { request_id: crypto.randomUUID(), expected_version: session.version }
+    setPending(true); setAdvanceError('')
+    try {
+      const next = await api.raiseHand(sessionId, raiseRequest.current)
+      raiseRequest.current = null
+      acceptSession(next)
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        raiseRequest.current = null
+        reloadRequired.current = true
+        await reload().then(() => { reloadRequired.current = false }).catch(() => { if (alive.current) { setNeedsReload(true); setAdvanceError('Could not reload your place in the lesson. Try again.') } })
+      } else if (alive.current) setAdvanceError(err instanceof Error ? err.message : 'Could not raise your hand.')
+    } finally { advancing.current = false; if (alive.current) setPending(false) }
+  }
+
+  async function sendQuestion() {
+    const question = draft.trim()
+    if (!session || !inQuestion || !question || asking || advancing.current || reloadRequired.current) return
+    advancing.current = true
+    // Same text retries the same request id; edited text is a new request.
+    if (questionRequest.current?.question !== question) {
+      questionRequest.current = { question, request_id: crypto.randomUUID(), expected_version: session.version }
+    }
+    setSentDraft(question)
+    setAsking(true); setPending(true); setAskError('')
+    try {
+      const res = await api.askQuestion(sessionId, questionRequest.current)
+      questionRequest.current = null
+      acceptSession(res.session)
+      if (alive.current) { setDraft(''); setEditing(false) }
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        questionRequest.current = null
+        reloadRequired.current = true
+        await reload().then(() => { reloadRequired.current = false }).catch(() => { if (alive.current) { setNeedsReload(true); setAskError('Could not reload your lesson. Try again.') } })
+      } else if (err instanceof ApiError && err.status === 422) {
+        questionRequest.current = null
+        if (alive.current) setAskError(err.message)
+      } else if (alive.current) setAskError(err instanceof Error ? err.message : 'Could not send your question.')
+    } finally { advancing.current = false; if (alive.current) { setAsking(false); setPending(false) } }
+  }
+
+  async function resumeLesson() {
+    if (!session || !inQuestion || asking || advancing.current || reloadRequired.current) return
+    advancing.current = true
+    resumeRequest.current ??= { request_id: crypto.randomUUID(), expected_version: session.version }
+    setPending(true); setAskError('')
+    try {
+      const next = await api.resume(sessionId, resumeRequest.current)
+      resumeRequest.current = null
+      acceptSession(next)
+      if (alive.current) { setDraft(''); setEditing(false); setAskError('') }
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        resumeRequest.current = null
+        reloadRequired.current = true
+        await reload().then(() => { reloadRequired.current = false }).catch(() => { if (alive.current) { setNeedsReload(true); setAskError('Could not reload your lesson. Try again.') } })
+      } else if (alive.current) setAskError(err instanceof Error ? err.message : 'Could not resume the lesson.')
+    } finally { advancing.current = false; if (alive.current) setPending(false) }
+  }
+
+  useEffect(() => {
+    if (!inQuestion) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || dialogRef.current?.open || asking) return
+      void resumeLesson()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
+
   async function advance() {
     if (!session || !(mode === 'playing' && line || mode === 'checkpoint' && session.checkpoint?.checkpointCompleted)) return
     if (mode === 'playing' && line && !revealed) { setRevealedLine(line.lineId); return }
@@ -257,6 +355,7 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
 
   function activateDialogue() {
     if (pending) return
+    if (inQuestion) { if (!revealed) setRevealedLine(turnId); return }
     if (mode !== 'checkpoint') { void advance(); return }
     if (needsReload) { void recover(); return }
     if (answerError) { if (submittedOptionId) void submitAnswer(submittedOptionId); else void recover(); return }
@@ -269,10 +368,12 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
   if (!session || !episode || !scene) return <main className="player"><p className="player-message" role="status">Loading your lesson…</p></main>
 
   const sceneNumber = order.indexOf(scene) + 1
-  const emotion: Emotion = mode === 'checkpoint' ? session.checkpoint?.isCorrect === true ? 'happy' : session.checkpoint?.isCorrect === false ? 'confused' : 'thinking' : mode === 'completed' ? 'happy' : line?.emotion ?? 'idle'
-  const isSpeaking = !revealed && (!!question || mode === 'playing' && line?.speaker === 'mascot')
-  const speaker = question ? 'Instructor' : line ? SPEAKER[line.speaker] ?? line.speaker : ''
-  const mascot = <MascotStage emotion={emotion} isSpeaking={isSpeaking} nodTrigger={nodTrigger} customAnimationTrigger={null} lookTargetOffset={emotion === 'thinking' ? { x: 0.7, y: -0.7 } : null} enablePointerTracking={mode === 'playing'} />
+  const emotion: Emotion = inQuestion ? asking ? 'thinking' : 'listening' : mode === 'checkpoint' ? session.checkpoint?.isCorrect === true ? 'happy' : session.checkpoint?.isCorrect === false ? 'confused' : 'thinking' : mode === 'completed' ? 'happy' : line?.emotion ?? 'idle'
+  const isSpeaking = !revealed && (!!question || inQuestion && askPhase !== 'pending' || mode === 'playing' && line?.speaker === 'mascot')
+  const speaker = inQuestion || question ? 'Instructor' : line ? SPEAKER[line.speaker] ?? line.speaker : ''
+  const canRaise = mode === 'playing' && !!line || mode === 'checkpoint'
+  const lookTarget = inQuestion ? asking ? { x: 0.7, y: -0.7 } : { x: 0, y: 0.85 } : emotion === 'thinking' ? { x: 0.7, y: -0.7 } : null
+  const mascot = <MascotStage emotion={emotion} isSpeaking={isSpeaking} nodTrigger={nodTrigger} customAnimationTrigger={null} lookTargetOffset={lookTarget} enablePointerTracking={mode === 'playing'} />
 
   return <main className="player">
     <div className={`vn-frame mode-${mode}`}>
@@ -290,10 +391,21 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
         </div>
         {question && <RecallCheckpoint key={scene.sceneId} question={question} state={checkpoint ?? null} pending={pending}
           submittedOptionId={submittedOptionId} reloadRequired={needsReload} onAnswer={optionId => void submitAnswer(optionId)} />}
+        {inQuestion && <RaiseHandPanel phase={askPhase} draft={draft} sentQuestion={sentQuestion} hasAsked={hasAsked}
+          busy={pending} error={askError} onDraft={setDraft} onSend={() => void sendQuestion()}
+          onEdit={() => { setDraft(sentQuestion); setEditing(true); setAskError('') }}
+          onResume={() => void resumeLesson()} />}
       </section>
       <section className="vn-dialogue" aria-label="Dialogue">
-        {(mode === 'playing' && line) || question ? <>
-          <button ref={continueRef} type="button" className="vn-dialogue-target" aria-label={dialogueError || needsReload ? question ? 'Retry lesson connection' : 'Retry advancing dialogue' : question ? checkpoint?.checkpointCompleted && revealed ? 'Advance dialogue' : 'Reveal dialogue' : 'Reveal or advance dialogue'} aria-busy={pending || undefined} aria-disabled={pending || undefined} onClick={activateDialogue} onKeyDown={event => {
+        {(canRaise || inQuestion) && (
+          <button type="button" className="vn-raise" aria-label={inQuestion ? 'Resume the lesson' : 'Raise your hand to ask a question'}
+            aria-disabled={pending || undefined} aria-busy={pending || undefined}
+            onClick={() => { if (pending) return; if (inQuestion) void resumeLesson(); else void raiseHand() }}>
+            {inQuestion ? '▶' : '✋'}
+          </button>
+        )}
+        {(mode === 'playing' && line) || question || inQuestion ? <>
+          <button ref={continueRef} type="button" className="vn-dialogue-target" aria-label={dialogueError || needsReload ? question ? 'Retry lesson connection' : 'Retry advancing dialogue' : inQuestion ? 'Reveal tutor reply' : question ? checkpoint?.checkpointCompleted && revealed ? 'Advance dialogue' : 'Reveal dialogue' : 'Reveal or advance dialogue'} aria-busy={pending || undefined} aria-disabled={pending || undefined} onClick={activateDialogue} onKeyDown={event => {
             if (event.altKey || event.ctrlKey || event.metaKey) return
             const target = dialogueScrollRef.current
             if (!target) return
@@ -318,8 +430,19 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
               <DialogueText key={turnId} id={turnId} text={text} revealed={revealed} onRevealed={setRevealedLine} onRevealProgress={onRevealProgress} />
               {dialogueError && <span className="vn-error" role="alert">{dialogueError} Activate the dialogue to try again.</span>}
             </span>
-            <span className="vn-advance-cue" aria-hidden="true">{pending || question && !checkpoint?.checkpointCompleted && !dialogueError && revealed ? '…' : '◆'}</span>
+            <span className="vn-advance-cue" aria-hidden="true">{pending || question && !checkpoint?.checkpointCompleted && !dialogueError && revealed ? '…' : inQuestion ? '' : '◆'}</span>
           </button>
+          {inQuestion && askPhase === 'answered' && lastTurn && (
+            <span className="vn-sources">
+              {lastTurn.groundingStatus && lastTurn.groundingStatus !== 'supported' && (
+                <span className="vn-source-note">{lastTurn.groundingStatus === 'partial' ? 'Partly supported by your PDF.' : 'Not covered by your PDF — this is a general answer.'}</span>
+              )}
+              {lastTurn.sourceRefs.length > 0 && <>
+                <button type="button" className="vn-sources-toggle" aria-expanded={sourcesFor === turnId} onClick={event => { event.stopPropagation(); setSourcesFor(open => open === turnId ? null : turnId) }}>Sources</button>
+                {sourcesFor === turnId && <span className="vn-source-badges">{[...new Set(lastTurn.sourceRefs.map(r => r.pageStart === r.pageEnd ? `${r.pageStart}` : `${r.pageStart}–${r.pageEnd}`))].map(p => <span key={p} className="vn-source-badge">Page {p}</span>)}</span>}
+              </>}
+            </span>
+          )}
           <p className="sr-only" aria-live="polite" aria-atomic="true">{speaker}: {text}</p>
           {pending && <p className="sr-only" role="status">Saving your progress…</p>}
         </> : <>

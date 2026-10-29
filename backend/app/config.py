@@ -67,6 +67,9 @@ class Settings(BaseSettings):
     validation_max_input_tokens: int = 24_000
     validation_max_tokens: int = 10_000
 
+    # B03 tutor: short answers; reasoning burns budget before content.
+    tutor_max_tokens: int = 4_000
+
 
 def load_settings() -> Settings:
     try:

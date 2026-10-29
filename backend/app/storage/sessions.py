@@ -11,10 +11,22 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app.models.episode import EpisodeScript
-from app.models.session import AnswerRequest, LearnerSession
-from app.services.session_controller import advance as advance_session
-from app.services.session_controller import new_session, restore_checkpoint
+from app.models.session import (
+    MODE_QUESTION,
+    AnswerRequest,
+    LearnerSession,
+    QuestionRequest,
+    TutorInteraction,
+)
+from app.services.session_controller import (
+    InvalidSessionTransition,
+    advance as advance_session,
+    new_session,
+    restore_checkpoint,
+)
 from app.services.session_controller import answer as answer_session
+from app.services.session_controller import raise_hand as raise_hand_session
+from app.services.session_controller import resume as resume_session
 
 
 class SessionConflict(Exception):
@@ -117,15 +129,35 @@ def apply_advance(
 
 
 def apply_answer(data_dir: Path, session_id: str, request: AnswerRequest) -> LearnerSession:
-    return _apply(data_dir, session_id, request.request_id, request.expected_version, request)
+    return _apply(
+        data_dir, session_id, request.request_id, request.expected_version,
+        mutate=lambda s, e: answer_session(s, e, request), kind="answer",
+    )
+
+
+def apply_raise_hand(
+    data_dir: Path, session_id: str, request_id: str, expected_version: int
+) -> LearnerSession:
+    return _apply(
+        data_dir, session_id, request_id, expected_version,
+        mutate=lambda s, _e: raise_hand_session(s), kind="raise_hand",
+    )
+
+
+def apply_resume(
+    data_dir: Path, session_id: str, request_id: str, expected_version: int
+) -> LearnerSession:
+    return _apply(
+        data_dir, session_id, request_id, expected_version,
+        mutate=lambda s, e: resume_session(s, e), kind="resume",
+    )
 
 
 def _apply(
     data_dir: Path, session_id: str, request_id: str, expected_version: int,
-    answer: AnswerRequest | None = None,
+    mutate=None, kind: str = "advance",
 ) -> LearnerSession:
-    """The same transaction owns both versioned learner mutations."""
-    kind = "answer" if answer else "advance"
+    """The same transaction owns every versioned learner mutation."""
     conn = _connect(data_dir)
     try:
         conn.execute("BEGIN IMMEDIATE")
@@ -162,10 +194,119 @@ def _apply(
         if episode_row is None:
             raise LookupError("Episode not found")
         episode = EpisodeScript.model_validate_json(episode_row[0])
-        updated = answer_session(session, episode, answer) if answer else advance_session(session, episode)
+        updated = mutate(session, episode) if mutate else advance_session(session, episode)
         _write(conn, updated)
         conn.commit()
         return updated
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def prepare_question(
+    data_dir: Path, session_id: str, request: QuestionRequest
+) -> tuple[LearnerSession, EpisodeScript | None, TutorInteraction | None]:
+    """Phase 1 for question answering: replay lookup + cheap rejections
+    before any model spend. Returns (session, episode, recorded):
+    `recorded` set means the request is a replay — answer without calling
+    the model; `episode` set means the call may proceed."""
+    conn = _connect(data_dir)
+    try:
+        row = conn.execute(
+            "SELECT payload FROM learner_sessions WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        if row is None:
+            raise LookupError("Session not found")
+        session = LearnerSession.model_validate_json(row[0])
+        existing = conn.execute(
+            "SELECT kind FROM session_requests "
+            "WHERE session_id = ? AND request_id = ?",
+            (session_id, request.request_id),
+        ).fetchone()
+        if existing is not None:
+            if existing[0] != "question":
+                raise SessionConflict("Request ID was used for another operation.")
+            recorded = next(
+                i for i in session.interactions
+                if i.kind == "raise_hand" and i.requestId == request.request_id
+            )
+            return session.model_copy(update={"checkpoint": None}), None, recorded
+        if session.version != request.expected_version:
+            raise SessionConflict("Session version is stale.")
+        if session.mode != MODE_QUESTION:
+            raise InvalidSessionTransition("Session is not in question mode.")
+        episode_row = conn.execute(
+            "SELECT payload FROM episodes WHERE episode_id = ?",
+            (session.episodeId,),
+        ).fetchone()
+        if episode_row is None:
+            raise LookupError("Episode not found")
+        return session, EpisodeScript.model_validate_json(episode_row[0]), None
+    finally:
+        conn.close()
+
+
+def commit_question(
+    data_dir: Path,
+    session_id: str,
+    request: QuestionRequest,
+    interaction: TutorInteraction,
+    learning_note: str | None,
+) -> tuple[LearnerSession, TutorInteraction]:
+    """Phase 3: tombstone + version/mode re-check + append in one commit,
+    serialized against a resume or second question that raced the model."""
+    conn = _connect(data_dir)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT payload FROM learner_sessions WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        if row is None:
+            raise LookupError("Session not found")
+        session = LearnerSession.model_validate_json(row[0])
+        inserted = conn.execute(
+            "INSERT INTO session_requests "
+            "(session_id, request_id, kind, created_at) "
+            "VALUES (?, ?, 'question', ?) "
+            "ON CONFLICT(session_id, request_id) DO NOTHING",
+            (session_id, request.request_id, _now()),
+        )
+        if inserted.rowcount == 0:
+            existing = conn.execute(
+                "SELECT kind FROM session_requests "
+                "WHERE session_id = ? AND request_id = ?",
+                (session_id, request.request_id),
+            ).fetchone()
+            if existing[0] != "question":
+                raise SessionConflict("Request ID was used for another operation.")
+            conn.rollback()
+            fresh = get_session(data_dir, session_id)
+            recorded = next(
+                i for i in fresh.interactions
+                if i.kind == "raise_hand" and i.requestId == request.request_id
+            )
+            return fresh, recorded
+        if session.version != request.expected_version:
+            raise SessionConflict("Session version is stale.")
+        if session.mode != MODE_QUESTION:
+            raise InvalidSessionTransition("Session is not in question mode.")
+        notes = (
+            [*session.learningNotes, learning_note]
+            if learning_note else session.learningNotes
+        )
+        updated = session.model_copy(update={
+            "interactions": [*session.interactions, interaction],
+            "learningNotes": notes,
+            "version": session.version + 1,
+            "updatedAt": _now(),
+        })
+        _write(conn, updated)
+        conn.commit()
+        return updated, interaction
     except Exception:
         conn.rollback()
         raise
