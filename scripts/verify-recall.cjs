@@ -104,14 +104,14 @@ async function liveOutcomes(browser) {
       const state = await saved(f)
       await f.page.screenshot({ path: path.join(output, `${outcome}-${sceneId}.png`), fullPage: true })
       const posts = f.state.calls.length
+      const wait = f.page.waitForResponse(r => r.url().endsWith('/advance') && r.request().method() === 'POST')
       await f.page.locator('.vn-dialogue-target').click()
-      assert.equal(f.state.calls.length, posts, 'completed dialogue activation does not skip reading time')
-      await f.page.clock.runFor(readingDelay(state.checkpoint.feedback) - 100)
-      assert.equal(f.state.calls.length, posts, 'not before length-based delay')
-      const wait = f.page.waitForResponse(r => r.url().endsWith('/advance'))
-      await f.page.clock.runFor(200); await wait
+      await wait
+      assert.equal(f.state.calls.length, posts + 1, 'completed dialogue activation skips the reading delay')
       let current = await saved(f)
       assert.equal(current.sceneId, scenes.get(sceneId).nextSceneId)
+      await f.page.clock.runFor(readingDelay(state.checkpoint.feedback))
+      assert.equal(f.state.calls.length, posts + 1, 'manual advance supersedes the reading timer')
       if (sceneId === 'scene-03-checkpoint-1') {
         while (current.mode === 'playing') {
           await response(f.page, () => f.page.locator('.vn-dialogue-target').click(), '/advance')
@@ -119,7 +119,7 @@ async function liveOutcomes(browser) {
         }
         await f.page.locator('.vn-choices').waitFor()
       }
-      evidence.push({ check: `${sceneId}: ${outcome}, immediate second choice, restore, colors/nod, timed continuation`, result: 'PASS' })
+      evidence.push({ check: `${sceneId}: ${outcome}, immediate second choice, restore, colors/nod, manual advance past reading delay`, result: 'PASS' })
     }
     assert.equal((await saved(f)).learningNotes.length, outcome === 'wrong-wrong' ? 2 : 0)
     await f.context.close()
