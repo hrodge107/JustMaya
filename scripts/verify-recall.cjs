@@ -59,13 +59,26 @@ async function liveOutcomes(browser) {
       const options = outcome === 'correct-first' ? [right] : [wrong, outcome === 'wrong-correct' ? right : wrong]
       for (let attempt = 0; attempt < options.length; attempt++) {
         const option = options[attempt]
-        if (attempt) { await f.page.getByRole('button', { name: 'Retry', exact: true }).click() }
+        if (attempt) {
+          await f.page.getByRole('button', { name: 'Retry', exact: true }).click()
+          assert.equal(await f.page.locator('.vn-choice[data-correct], .vn-choice[data-incorrect]').count(), 0, 'Retry opens neutral choices')
+        }
         const nodBefore = Number(await f.page.locator('.mascot').getAttribute('data-nod-trigger'))
         await response(f.page, () => f.page.getByRole('button', { name: option.label, exact: true }).click(), '/answers')
         await f.page.locator('.vn-feedback p').first().waitFor()
         await f.page.waitForTimeout(60)
         const state = await (await f.context.request.get(`${base}/api/sessions/${session.sessionId}`)).json()
         assert.equal(state.checkpoint.attemptsUsed, attempt + 1)
+        assert.equal(await f.page.locator('.vn-choice[data-incorrect]').count(), option === right ? 0 : 1)
+        assert.equal(await f.page.locator('.vn-choice[data-correct]').count(), state.checkpoint.checkpointCompleted ? 1 : 0)
+        const selectedColor = await f.page.locator('.vn-choice[data-selected]').evaluate(el => getComputedStyle(el).backgroundColor)
+        assert.equal(selectedColor, option === right ? 'rgb(222, 244, 232)' : 'rgb(251, 230, 232)')
+        const contrast = await f.page.locator('.vn-choice[data-selected]').evaluate(el => {
+          const luminance = color => color.match(/[\d.]+/g).slice(0, 3).map(Number).map(v => v / 255).map(v => v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4).reduce((s, v, i) => s + v * [.2126, .7152, .0722][i], 0)
+          const style = getComputedStyle(el), a = luminance(style.color), b = luminance(style.backgroundColor)
+          return (Math.max(a, b) + .05) / (Math.min(a, b) + .05)
+        })
+        assert.ok(contrast >= 4.5, `result text contrast ${contrast}`)
         assert.equal(await f.page.locator('.mascot').getAttribute('data-emotion'), option === right ? 'happy' : 'confused')
         assert.equal(Number(await f.page.locator('.mascot').getAttribute('data-nod-trigger')), nodBefore + (option === right ? 1 : 0))
         if (!state.checkpoint.checkpointCompleted) {
@@ -76,6 +89,7 @@ async function liveOutcomes(browser) {
         await f.page.reload()
         await f.page.locator('.vn-feedback p').first().waitFor()
         assert.equal(Number(await f.page.locator('.mascot').getAttribute('data-nod-trigger')), 0, 'reload must not replay a historical nod')
+        assert.equal(await f.page.locator('.vn-choice[data-selected]').evaluate(el => el.getAnimations().length), 0, 'restore must not replay choice rebound')
         assert.equal(await f.page.locator('.vn-feedback').innerText().then(t => t.includes(state.checkpoint.feedback)), true)
       }
       await f.page.screenshot({ path: path.join(output, `${outcome}-${sceneId}.png`), fullPage: true })
@@ -105,6 +119,7 @@ async function recovery(browser) {
   await f.page.getByRole('button', { name: wrong.label, exact: true }).click()
   await f.page.getByRole('button', { name: 'Retry submission' }).waitFor({ state: 'visible' })
   await f.page.locator('.vn-error').waitFor()
+  assert.equal(await f.page.locator('.vn-choice[data-correct], .vn-choice[data-incorrect]').count(), 0, 'uncertain transport result stays neutral')
   assert.equal(await f.page.locator('.vn-choice:enabled').count(), 0)
   await response(f.page, () => f.page.getByRole('button', { name: 'Retry submission' }).click(), '/answers')
   assert.deepEqual(f.state.calls[0].body, f.state.calls[1].body)
@@ -115,6 +130,10 @@ async function recovery(browser) {
   let release
   f.state.gate = new Promise(resolve => { release = resolve })
   const right = q.options.find(o => o.optionId === q.correctOptionId)
+  const hoverChoice = f.page.getByRole('button', { name: right.label, exact: true })
+  await hoverChoice.hover(); await f.page.waitForTimeout(180)
+  assert.notEqual(await hoverChoice.evaluate(el => getComputedStyle(el).transform), 'none')
+  await f.page.mouse.move(0, 0)
   await f.page.getByRole('button', { name: right.label, exact: true }).click()
   assert.equal(await f.page.locator('.vn-choice:enabled').count(), 0)
   await f.page.getByRole('button', { name: 'Menu', exact: true }).click()
@@ -153,7 +172,7 @@ async function recovery(browser) {
 }
 async function layouts(browser) {
   for (const viewport of [{ width: 390, height: 844 }, { width: 800, height: 1024 }, { width: 1280, height: 800 }, { width: 320, height: 568 }, { width: 844, height: 390 }]) {
-    const f = await fixture(browser, viewport)
+    const f = await fixture(browser, viewport, 'no-preference')
     const session = await parked(f.context.request)
     await f.page.route('**/api/episodes/*', async route => {
       const response = await route.fetch(); const data = await response.json()
@@ -175,6 +194,8 @@ async function layouts(browser) {
     const last = f.page.locator('.vn-choice').last()
     await last.focus()
     assert.equal(await last.evaluate(el => getComputedStyle(el).outlineStyle), 'solid')
+    await last.hover(); await f.page.waitForTimeout(90)
+    assert.ok(await f.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'hover transform must not overflow')
     const prompt = f.page.locator('#checkpoint-prompt')
     await prompt.scrollIntoViewIfNeeded()
     assert.ok(await prompt.isVisible())
@@ -200,6 +221,11 @@ async function keyboardTouchAndExit(browser) {
   await response(f.page, () => f.page.keyboard.press('Space'), '/answers')
   await f.page.getByRole('button', { name: 'Continue', exact: true }).waitFor()
   assert.ok(await f.page.locator('.mascot-body').evaluate(el => el.getAnimations().length > 0), 'correct answer nod must animate once')
+  assert.ok(await f.page.locator('.vn-choice[data-selected]').evaluate(el => el.getAnimations().length > 0), 'accepted answer must rebound once')
+  const bounds = await f.page.locator('.vn-choice[data-selected]').boundingBox()
+  assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 390, 'rebound stays inside phone width')
+  const siblings = await f.page.locator('.vn-choice').evaluateAll(items => items.map(el => { const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom } }))
+  for (let i = 1; i < siblings.length; i++) assert.ok(siblings[i].top >= siblings[i-1].bottom, 'animated choices must not overlap')
   const headingBefore = await f.page.locator('.vn-checkpoint-heading').boundingBox()
   await f.page.locator('.vn-checkpoint-reading').evaluate(el => { el.scrollTop = el.scrollHeight })
   assert.deepEqual(await f.page.locator('.vn-checkpoint-heading').boundingBox(), headingBefore)
@@ -214,6 +240,7 @@ async function keyboardTouchAndExit(browser) {
   await response(touch.page, () => touch.page.getByRole('button', { name: right.label, exact: true }).tap(), '/answers')
   await touch.page.getByRole('button', { name: 'Continue', exact: true }).waitFor()
   assert.equal(await touch.page.locator('.mascot-body').evaluate(el => el.getAnimations().length), 0)
+  assert.equal(await touch.page.locator('.vn-choice[data-selected]').evaluate(el => el.getAnimations().length), 0)
   await response(touch.page, () => touch.page.getByRole('button', { name: 'Continue', exact: true }).tap(), '/advance')
   evidence.push({ check: 'Touch answer/Continue and reduced-motion nod suppression', result: 'PASS' })
   await touch.context.close()
