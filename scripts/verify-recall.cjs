@@ -183,6 +183,18 @@ async function layouts(browser) {
     })
     await f.go(session)
     await f.page.addStyleTag({ content: 'html { font-size: 20px; }' })
+    const native = await f.page.evaluate(() => {
+      const panel = document.querySelector('.vn-checkpoint-dialogue').getBoundingClientRect()
+      const tag = document.querySelector('.vn-checkpoint-dialogue .vn-speaker').getBoundingClientRect()
+      const prompt = document.querySelector('#checkpoint-prompt')
+      const a = getComputedStyle(prompt), b = getComputedStyle(document.querySelector('.vn-checkpoint-reading'))
+      return { left: tag.left-panel.left, top: tag.top-panel.top, tagWidth: tag.width, panelWidth: panel.width,
+        native: prompt.tagName === 'P' && a.fontSize === b.fontSize && a.fontWeight === b.fontWeight && a.lineHeight === b.lineHeight,
+        headingCount: document.querySelectorAll('.vn-checkpoint-dialogue h2').length }
+    })
+    assert.ok(native.left >= 0 && native.left < 30 && native.top >= 0 && native.top < 30)
+    assert.ok(native.tagWidth < native.panelWidth * .8)
+    assert.ok(native.native && native.headingCount === 0, 'prompt and feedback must use native dialogue text')
     assert.equal(await f.page.locator('.vn-choice').count(), 4)
     const width = await f.page.evaluate(() => document.documentElement.scrollWidth)
     assert.ok(width <= viewport.width + 1, `${width} overflows ${viewport.width}`)
@@ -227,8 +239,13 @@ async function keyboardTouchAndExit(browser) {
   const siblings = await f.page.locator('.vn-choice').evaluateAll(items => items.map(el => { const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom } }))
   for (let i = 1; i < siblings.length; i++) assert.ok(siblings[i].top >= siblings[i-1].bottom, 'animated choices must not overlap')
   const headingBefore = await f.page.locator('.vn-checkpoint-heading').boundingBox()
+  const speakerBefore = await f.page.locator('.vn-checkpoint-dialogue .vn-speaker').boundingBox()
   await f.page.locator('.vn-checkpoint-reading').evaluate(el => { el.scrollTop = el.scrollHeight })
   assert.deepEqual(await f.page.locator('.vn-checkpoint-heading').boundingBox(), headingBefore)
+  assert.deepEqual(await f.page.locator('.vn-checkpoint-dialogue .vn-speaker').boundingBox(), speakerBefore)
+  const beforeReadingClick = f.state.calls.length
+  await f.page.locator('#checkpoint-prompt').click()
+  assert.equal(f.state.calls.length, beforeReadingClick, 'reading-area click must not advance or grade')
   await f.page.getByRole('button', { name: 'Continue', exact: true }).focus()
   await response(f.page, () => f.page.keyboard.press('Enter'), '/advance')
   evidence.push({ check: 'Enter/Space answer, Retry and Continue; one real nod; prompt stays visible during feedback scroll', result: 'PASS' })
