@@ -196,22 +196,21 @@ body:has(.player) { margin: 0; background: #e9e9f1; color: #30304c; color-scheme
 .vn-choice:disabled { cursor: default; }
 .vn-choice[data-selected] { border-color: var(--mint-ink); box-shadow: inset 0 0 0 1px var(--mint-ink); }
 .player { --choice-correct-paper: #def4e8; --choice-correct-ink: #185a38; --choice-correct-border: #2d8052; --choice-wrong-paper: #fbe6e8; --choice-wrong-ink: #8a2537; --choice-wrong-border: #b23b50; }
-.vn-choice[data-correct] { background: var(--choice-correct-paper); color: var(--choice-correct-ink); border-color: var(--choice-correct-border); box-shadow: none; }
-.vn-choice[data-incorrect] { background: var(--choice-wrong-paper); color: var(--choice-wrong-ink); border-color: var(--choice-wrong-border); box-shadow: none; }
+.player .vn-choice[data-correct] { background: var(--choice-correct-paper); color: var(--choice-correct-ink); border-color: var(--choice-correct-border); box-shadow: none; }
+.player .vn-choice[data-incorrect] { background: var(--choice-wrong-paper); color: var(--choice-wrong-ink); border-color: var(--choice-wrong-border); box-shadow: none; }
 .vn-choice[data-correct]::after { background: var(--choice-correct-border); }
 .vn-choice[data-incorrect]::after { background: var(--choice-wrong-border); }
 .vn-choice-status { display: block; font-size: .85rem; color: inherit; }
 @media (prefers-reduced-motion: reduce) { .vn-choice:not(:disabled):hover, .vn-choice:not(:disabled):active { transform: none; } }
 .vn-choices .vn-choice:focus-visible { outline: 3px solid var(--mint-bright); outline-offset: 2px; }
-.vn-dialogue.vn-checkpoint-dialogue { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; block-size: clamp(240px, 38dvh, 360px); gap: 8px; padding: 14px 20px; }
-.vn-checkpoint-heading { min-height: 0; max-height: min(120px, 14dvh); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
-.vn-checkpoint-reading { min-height: 0; max-width: none; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #7f7f96 transparent; padding: 6px; margin: -6px; }
-.vn-checkpoint-attempts { font-size: .8rem; }
-.vn-feedback p { margin: 8px 0 0; }
-.vn-feedback-outcome { font-weight: 850; }
-.vn-checkpoint-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; }
-.vn-checkpoint-actions .vn-note { margin-right: auto; }
-.vn-checkpoint-actions button:disabled { cursor: progress; }
 @media (min-width: 640px) { .mode-checkpoint { height: calc(100dvh - 32px); } }
 @media (min-width: 1000px) { .mode-checkpoint { height: max(620px, calc(100dvh - 60px)); aspect-ratio: auto; } }
-@media (max-height: 500px) { .mode-checkpoint { min-height: 560px; } .vn-dialogue.vn-checkpoint-dialogue { block-size: 240px; } .mode-checkpoint .vn-menu-rail { min-height: 64px; padding-block: 8px; } }
+@media (max-height: 500px) { .mode-checkpoint { min-height: 480px; } .mode-checkpoint .vn-menu-rail { min-height: 64px; padding-block: 8px; } }
+
+@media (min-width: 1000px) {
+  .vn-frame { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(180px, 1fr) auto; padding-bottom: 20px; }
+  .vn-frame > .player-header { grid-area: 1 / 1; min-height: 84px; padding-right: 164px; }
+  .vn-frame > .vn-scene { grid-area: 2 / 1; }
+  .vn-frame > .vn-dialogue { grid-area: 3 / 1; }
+  .vn-frame > .vn-menu-rail { grid-area: 1 / 1; z-index: 3; justify-self: end; align-self: start; min-height: 0; padding: 18px 26px; }
+}

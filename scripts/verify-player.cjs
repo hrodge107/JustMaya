@@ -85,6 +85,13 @@ async function layout(page) {
   })
 }
 
+function assertMenuPlacement(layout) {
+  if (layout.width < 1000) return assert.ok(layout.dialogue.bottom <= layout.rail.y + 1)
+  assert.ok(layout.rail.y - layout.frame.y <= 1, 'desktop Menu is at frame top')
+  assert.ok(Math.abs(layout.rail.right - layout.frame.right) <= 1, 'desktop Menu is at frame right')
+  assert.ok(layout.frame.bottom - layout.dialogue.bottom <= 21, 'desktop has no reserved bottom Menu space')
+}
+
 async function revealBoundary(page) {
   return page.evaluate(() => {
     const target = document.querySelector('.vn-dialogue-scroll-area')
@@ -182,7 +189,7 @@ async function main() {
       if (width === 390) evidence.push({ check: 'computed contrast across stage gradient endpoints', ratios: await contrastCheck(f.page), result: 'PASS' })
       const normal = await layout(f.page)
       if (width === 390) { assert.equal(normal.frame.height, height); assert.equal(normal.frame.x, 0); assert.ok(normal.rail.bottom <= height + 1) }
-      assert.ok(normal.dialogue.bottom <= normal.rail.y + 1)
+      assertMenuPlacement(normal)
       assert.equal(normal.dialogueTarget.overflowY, 'auto')
       if (width === 390) assert.ok(normal.dialogueTarget.scrollHeight <= normal.dialogueTarget.clientHeight + 1, 'A short line should not display an overflow scrollbar')
       await modalCheck(f.page, f.count)
@@ -199,7 +206,7 @@ async function main() {
       assert.ok(long.dialogueTarget.scrollWidth <= long.dialogueTarget.clientWidth + 1, `Horizontal dialogue overflow at ${width}x${height}`)
       assert.equal(long.dialogueTarget.scrollbarWidth, 'thin')
       assert.equal(long.dialogue.height, normal.dialogue.height, `Dialogue height changed with long text at ${width}x${height}`)
-      assert.ok(long.dialogue.bottom <= long.rail.y + 1)
+      assertMenuPlacement(long)
       const viewport = f.page.locator('.vn-dialogue-scroll-area')
       await viewport.evaluate(target => { target.scrollTop = target.scrollHeight })
       const pinned = await viewport.evaluate(target => {
@@ -291,7 +298,7 @@ async function main() {
     assert.equal(await scrollKeys.page.locator('.vn-dialogue-scroll-area').evaluate(target => target.scrollTop), 0, 'A new line should start at the beginning')
     assert.equal(scrollKeys.count(), 1)
     await scrollKeys.page.locator('.vn-dialogue-target').press('Space')
-    await scrollKeys.page.locator('#checkpoint-prompt').waitFor()
+    await scrollKeys.page.locator('.vn-choices').waitFor()
     assert.equal(scrollKeys.count(), 2)
     evidence.push({ check: 'pointer wheel and Arrow/Page/Home/End scrolling, Enter/Space activation, reduced motion and line reset', result: 'PASS' })
     await scrollKeys.context.close()
@@ -364,7 +371,7 @@ async function main() {
     await touch.page.locator('.vn-dialogue-target').press('Enter')
     assert.equal(touch.count(), 1)
     await touch.page.locator('.vn-dialogue-target').press('Space')
-    await touch.page.locator('#checkpoint-prompt').waitFor()
+    await touch.page.locator('.vn-choices').waitFor()
     assert.equal(touch.state.session.mode, 'checkpoint')
     evidence.push({ check: 'normal-motion touch reveal/advance, Enter reveal, Space checkpoint', result: 'PASS' })
     await touch.context.close()
@@ -372,7 +379,7 @@ async function main() {
     for (const mode of ['checkpoint', 'completed']) {
       const f = await fixture(browser, { session: { mode, sceneId: mode === 'checkpoint' ? 'checkpoint' : 'ending', status: mode === 'completed' ? 'completed' : 'active' } })
       await f.go()
-      assert.equal(await f.page.locator('.vn-dialogue-target').count(), 0)
+      assert.equal(await f.page.locator('.vn-dialogue-target').count(), mode === 'checkpoint' ? 1 : 0)
       await modalCheck(f.page, f.count)
       assert.equal(f.count(), 0)
       assert.equal(await f.page.getByRole('button', { name: 'Water and farming' }).count(), mode === 'checkpoint' ? 1 : 0)
@@ -421,7 +428,7 @@ async function main() {
       await sweep.page.setViewportSize({ width, height: 800 })
       const current = await layout(sweep.page)
       assert.ok(current.scrollWidth <= width + 1)
-      assert.ok(current.dialogue.bottom <= current.rail.y + 1)
+      assertMenuPlacement(current)
     }
     evidence.push({ check: 'width sweep including 639/640 and 999/1000 breakpoints', result: 'PASS' })
     await sweep.context.close()
