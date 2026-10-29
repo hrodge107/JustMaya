@@ -15,6 +15,13 @@ export const BACK_TO_LESSON = [
   'Right, back to where we left off.',
   'Shall we pick the story back up?',
   'Good question. Ready to keep going?',
+]
+
+// Button-fit resume labels. Kept disjoint from BACK_TO_LESSON so the strip
+// label and the spoken return beat can never show the same line.
+export const STRIP_LABEL = [
+  'Back to the lesson.',
+  'Continue the lesson.',
   "Let's jump back in.",
 ]
 

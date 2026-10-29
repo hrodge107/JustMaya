@@ -256,9 +256,6 @@ body:has(.player) { margin: 0; background: #e9e9f1; color: #30304c; color-scheme
 .vn-ask-send { flex: none; padding: 4px 10px; border: 1.5px solid var(--mint-ink); border-radius: 999px; color: var(--mint-ink); font-size: .78rem; font-weight: 900; letter-spacing: .05em; text-transform: uppercase; }
 .vn-ask-text { flex: 1; min-width: 0; }
 .vn-ask-sent[aria-busy] { opacity: .75; }
-.vn-ask-edit { flex: none; display: grid; place-items: center; width: 44px; min-height: 44px; margin: -6px -12px -6px 0; padding: 0; border-radius: 10px; background: transparent; color: var(--muted); }
-.vn-ask-edit svg { width: 20px; height: 20px; }
-.vn-ask-edit:hover { background: var(--wash); color: var(--mint-ink); }
 .vn-choices .vn-ask-strip:focus-visible { outline: 3px solid var(--mint-bright); outline-offset: 2px; }
 
 .vn-sources { position: absolute; left: 20px; bottom: 12px; z-index: 2; display: flex; align-items: center; gap: 8px; max-width: calc(100% - 80px); font-size: .78rem; }
