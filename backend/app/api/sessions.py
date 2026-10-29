@@ -5,15 +5,30 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from app.errors import error_body
-from app.models.session import AdvanceRequest, AnswerRequest, learner_session_view
+from app.models.session import (
+    AdvanceRequest,
+    AnswerRequest,
+    QuestionRequest,
+    RaiseHandRequest,
+    ResumeRequest,
+    learner_session_view,
+)
+from app.services.model_provider import MetaProvider, ModelProviderError
+from app.services.retriever import retrieve
 from app.services.session_controller import InvalidSessionTransition
+from app.services.token_budget import MeteredProvider, TokenBudgetError
+from app.services.tutor import answer_question
 from app.storage.sessions import (
     EpisodeNotReady,
     SessionConflict,
     apply_advance,
+    apply_answer,
+    apply_raise_hand,
+    apply_resume,
+    commit_question,
     create_session,
     get_session,
-    apply_answer,
+    prepare_question,
 )
 
 router = APIRouter()
@@ -81,3 +96,76 @@ def advance_session_endpoint(
         InvalidSessionTransition,
     ) as exc:
         return _error(exc)
+
+
+@router.post("/api/sessions/{session_id}/raise-hand")
+def raise_hand_endpoint(session_id: str, body: RaiseHandRequest, request: Request):
+    try:
+        return learner_session_view(apply_raise_hand(
+            request.app.state.data_dir,
+            session_id,
+            body.request_id,
+            body.expected_version,
+        ))
+    except (LookupError, SessionConflict, InvalidSessionTransition) as exc:
+        return _error(exc)
+
+
+@router.post("/api/sessions/{session_id}/resume")
+def resume_endpoint(session_id: str, body: ResumeRequest, request: Request):
+    try:
+        return learner_session_view(apply_resume(
+            request.app.state.data_dir,
+            session_id,
+            body.request_id,
+            body.expected_version,
+        ))
+    except (LookupError, SessionConflict, InvalidSessionTransition) as exc:
+        return _error(exc)
+
+
+@router.post("/api/sessions/{session_id}/questions")
+async def question_endpoint(
+    session_id: str, body: QuestionRequest, request: Request
+):
+    """Pre-check → tutor call outside the write transaction → commit."""
+    data_dir = request.app.state.data_dir
+    try:
+        session, episode, recorded = prepare_question(data_dir, session_id, body)
+        if recorded is not None:
+            return {
+                "interaction": recorded.model_dump(),
+                "session": learner_session_view(session),
+            }
+        provider = getattr(request.app.state, "tutor_provider", None)
+        if provider is None:
+            provider = request.app.state.tutor_provider = MeteredProvider(
+                MetaProvider(request.app.state.settings),
+                request.app.state.settings,
+                data_dir,
+            )
+        answer = await answer_question(
+            provider=provider,
+            session=session,
+            episode=episode,
+            question=body.question,
+            request_id=body.request_id,
+            settings=request.app.state.settings,
+            retriever=getattr(request.app.state, "retriever", retrieve),
+        )
+        updated, interaction = commit_question(
+            data_dir, session_id, body, answer.interaction, answer.learning_note
+        )
+        return {
+            "interaction": interaction.model_dump(),
+            "session": learner_session_view(updated),
+        }
+    except (LookupError, SessionConflict, InvalidSessionTransition, ValueError) as exc:
+        return _error(exc)
+    except TokenBudgetError as exc:
+        return JSONResponse(status_code=503, content=error_body(exc.code, str(exc)))
+    except ModelProviderError as exc:
+        return JSONResponse(
+            status_code=503,
+            content=error_body(exc.code, exc.message, exc.retryable),
+        )

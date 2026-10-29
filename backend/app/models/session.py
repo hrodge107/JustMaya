@@ -6,9 +6,9 @@ constants are the single declaration consumed by the schema CHECK, the
 controller's transition gate, and serialization.
 """
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 from app.models.episode import EpisodeSourceRef
 
@@ -66,6 +66,8 @@ class TutorInteraction(BaseModel):
     answer: str
     sourceRefs: list[EpisodeSourceRef] = []
     createdAt: str
+    groundingStatus: Literal["supported", "partial", "unsupported"] | None = None
+    requestId: str | None = None
 
 
 class LearnerSession(BaseModel):
@@ -92,6 +94,30 @@ class AdvanceRequest(BaseModel):
 class AnswerRequest(BaseModel):
     questionId: str = Field(min_length=1)
     optionId: str = Field(min_length=1)
+    request_id: str = Field(min_length=1)
+    expected_version: int = Field(ge=1)
+
+
+QUESTION_MAX_LENGTH = 500
+
+
+class RaiseHandRequest(BaseModel):
+    request_id: str = Field(min_length=1)
+    expected_version: int = Field(ge=1)
+
+
+class QuestionRequest(BaseModel):
+    question: Annotated[
+        str,
+        StringConstraints(
+            strip_whitespace=True, min_length=1, max_length=QUESTION_MAX_LENGTH
+        ),
+    ]
+    request_id: str = Field(min_length=1)
+    expected_version: int = Field(ge=1)
+
+
+class ResumeRequest(BaseModel):
     request_id: str = Field(min_length=1)
     expected_version: int = Field(ge=1)
 

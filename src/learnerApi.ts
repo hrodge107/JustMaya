@@ -1,7 +1,7 @@
 export type Job = { job_id: string; document_id: string; status: string; stage: string | null; execution_state: string | null; error: string | null; can_run: boolean }
 export type EpisodeOutline = { episode_id: string; title: string; objective_ids: string[]; status: 'selected' | 'planned_only'; estimated_minutes: number; warnings: string[] }
 export type Roadmap = { revision: number; confirmed: boolean; episodes: EpisodeOutline[]; objectives: { id: string; description: string }[]; concepts: { id: string; title: string; uncertainty?: string[] }[]; uncovered_concept_ids: string[]; uncovered_reasons: Record<string, string> }
-export type Emotion = 'idle' | 'talking' | 'thinking' | 'happy' | 'confused'
+export type Emotion = 'idle' | 'talking' | 'thinking' | 'happy' | 'confused' | 'listening'
 // Refs are typed so the wire shape is honest; the player never renders them.
 export type Line = { lineId: string; speaker: 'mascot' | 'narrator'; text: string; emotion: Emotion; sourceRefs?: unknown[]; webRefs?: unknown[] }
 // Learner projection: the server strips answer keys and grading feedback.
@@ -11,7 +11,11 @@ export type AnswerRequest = { questionId: string; optionId: string; request_id: 
 export type Scene = { sceneId: string; kind: 'dialogue' | 'checkpoint' | 'ending'; dialogue: Line[]; question: Question | null; nextSceneId: string | null }
 export type Episode = { episodeId: string; title: string; status: string; startSceneId: string; scenes: Scene[]; learningObjectives: string[]; estimatedMinutes: number }
 export type SessionMode = 'playing' | 'checkpoint' | 'question' | 'completed' | 'discussion' | 'error'
-export type Session = { sessionId: string; episodeId: string; mode: SessionMode; sceneId: string; dialogueIndex: number; version: number; status: 'active' | 'completed' | 'abandoned'; updatedAt: string; checkpoint?: Checkpoint | null; quizAttempts: { questionId: string; selectedOptionId: string; correct: boolean; attemptNumber: number; timestamp: string }[] }
+// Tutor turns may carry citations; scripted VN dialogue never exposes them.
+export type SourceRef = { chunkId: string; documentId: string; pageStart: number; pageEnd: number; sectionId: string | null }
+export type TutorInteraction = { interactionId: string; kind: 'raise_hand' | 'discussion'; userMessage: string; answer: string; sourceRefs: SourceRef[]; createdAt: string; groundingStatus: 'supported' | 'partial' | 'unsupported' | null; requestId: string | null }
+export type QuestionResponse = { interaction: TutorInteraction; session: Session }
+export type Session = { sessionId: string; episodeId: string; mode: SessionMode; sceneId: string; dialogueIndex: number; version: number; status: 'active' | 'completed' | 'abandoned'; updatedAt: string; checkpoint?: Checkpoint | null; resumeSnapshot?: { sceneId: string; dialogueIndex: number; mode: SessionMode } | null; interactions?: TutorInteraction[]; learningNotes?: string[]; quizAttempts: { questionId: string; selectedOptionId: string; correct: boolean; attemptNumber: number; timestamp: string }[] }
 
 export class ApiError extends Error {
   status: number
@@ -40,6 +44,9 @@ export const api = {
   session: (session: string) => request<Session>(`/api/sessions/${id(session)}`),
   advance: (session: string, body: { request_id: string; expected_version: number }) => request<Session>(`/api/sessions/${id(session)}/advance`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   answer: (session: string, body: AnswerRequest) => request<Session>(`/api/sessions/${id(session)}/answers`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  raiseHand: (session: string, body: { request_id: string; expected_version: number }) => request<Session>(`/api/sessions/${id(session)}/raise-hand`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  askQuestion: (session: string, body: { question: string; request_id: string; expected_version: number }) => request<QuestionResponse>(`/api/sessions/${id(session)}/questions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  resume: (session: string, body: { request_id: string; expected_version: number }) => request<Session>(`/api/sessions/${id(session)}/resume`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
 }
 
 // Compile-time guard: the learner Question must never grow grading fields.

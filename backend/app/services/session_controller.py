@@ -13,11 +13,13 @@ from app.models.session import (
     MODE_CHECKPOINT,
     MODE_COMPLETED,
     MODE_PLAYING,
+    MODE_QUESTION,
     STATUS_ACTIVE,
     STATUS_COMPLETED,
     AnswerRequest,
     LearnerSession,
     CheckpointState,
+    Position,
     QuizAttempt,
 )
 
@@ -124,3 +126,34 @@ def answer(session: LearnerSession, episode: EpisodeScript, request: AnswerReque
         "version": session.version + 1, "updatedAt": _now(),
     })
     return restore_checkpoint(updated, episode)
+
+
+def raise_hand(session: LearnerSession) -> LearnerSession:
+    """Snapshot the exact position once and enter question mode."""
+    if session.mode not in (MODE_PLAYING, MODE_CHECKPOINT):
+        raise InvalidSessionTransition(f"Cannot raise hand while session mode is {session.mode!r}.")
+    return session.model_copy(update={
+        "resumeSnapshot": Position(
+            sceneId=session.sceneId,
+            dialogueIndex=session.dialogueIndex,
+            mode=session.mode,
+        ),
+        "mode": MODE_QUESTION,
+        "version": session.version + 1,
+        "updatedAt": _now(),
+    })
+
+
+def resume(session: LearnerSession, episode: EpisodeScript) -> LearnerSession:
+    """Restore the snapshotted position and leave question mode."""
+    snap = session.resumeSnapshot
+    if session.mode != MODE_QUESTION or snap is None:
+        raise InvalidSessionTransition("Session is not in question mode.")
+    return restore_checkpoint(session.model_copy(update={
+        "sceneId": snap.sceneId,
+        "dialogueIndex": snap.dialogueIndex,
+        "mode": snap.mode,
+        "resumeSnapshot": None,
+        "version": session.version + 1,
+        "updatedAt": _now(),
+    }), episode)
