@@ -6,10 +6,9 @@ import './App.css'
 
 const sessionParam = () => new URLSearchParams(location.search).get('session') || ''
 function setSessionParam(id: string, push: boolean) {
-  const params = new URLSearchParams(location.search)
-  if (id) params.set('session', id); else params.delete('session')
-  const query = params.toString()
-  history[push ? 'pushState' : 'replaceState'](null, '', query ? `?${query}` : location.pathname)
+  const url = new URL(location.href)
+  if (id) url.searchParams.set('session', id); else url.searchParams.delete('session')
+  history[push ? 'pushState' : 'replaceState'](null, '', url)
 }
 
 const ACTIVE = new Set(['queued', 'running'])

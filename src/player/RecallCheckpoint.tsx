@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import type { Checkpoint, Question } from '../learnerApi'
+import { reducedMotion } from '../motionPreference'
 
 type Props = {
   question: Question
@@ -21,7 +22,7 @@ export default function RecallCheckpoint({ question, state, pending, submittedOp
   useEffect(() => {
     const fresh = outcomeId && outcomeId !== observedOutcome.current
     observedOutcome.current = outcomeId
-    if (!fresh || matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    if (!fresh || reducedMotion()) return
     const selected = choices.current?.querySelector<HTMLElement>('[data-selected]')
     const animation = selected?.animate([
       { transform: 'scale(.985)' },

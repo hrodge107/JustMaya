@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { api, ApiError, type AnswerRequest, type Emotion, type Episode, type Scene, type Session } from '../learnerApi'
+import { useReducedMotion } from '../motionPreference'
 import MascotStage from './MascotStage'
+import MotionToggle from './MotionToggle'
 import RaiseHandPanel from './RaiseHandPanel'
 import RecallCheckpoint from './RecallCheckpoint'
 import useReadingAdvance from './useReadingAdvance'
@@ -8,10 +10,6 @@ import './player.css'
 
 const SPEAKER: Record<string, string> = { mascot: 'Instructor', narrator: 'Narrator' }
 const REVEAL_MS = 18
-
-const motionQuery = '(prefers-reduced-motion: reduce)'
-const subscribeMotion = (cb: () => void) => { const m = matchMedia(motionQuery); m.addEventListener('change', cb); return () => m.removeEventListener('change', cb) }
-const useReducedMotion = () => useSyncExternalStore(subscribeMotion, () => matchMedia(motionQuery).matches)
 
 // Linear scene order from startSceneId; the server owns transitions, this is display only.
 function sceneOrder(episode: Episode): Scene[] {
@@ -480,6 +478,7 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
       }
     }}>
       <div className="vn-menu-heading"><h2 id="episode-menu-title">Episode menu</h2><button ref={closeRef} type="button" className="vn-quiet" onClick={() => dialogRef.current?.close()}>Close</button></div>
+      <MotionToggle />
       <button type="button" className="vn-button vn-menu-leave" onClick={onExit}>Leave episode</button>
     </dialog>
   </main>

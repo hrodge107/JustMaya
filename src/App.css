@@ -106,6 +106,5 @@ body:has(.learner) { margin: 0; background: #e9e9f1; color: #30304c; color-schem
   .intro h1 { font-size: clamp(2rem, 9vw, 2.6rem); }
   .learner .primary, .learner form button { width: 100%; }
 }
-@media (prefers-reduced-motion: reduce) {
-  .learner * { transition: none !important; animation: none !important; }
-}
+/* Mirrors the effective motion setting (device or the player's menu override). */
+:root[data-motion='reduce'] .learner * { transition: none !important; animation: none !important; }
