@@ -18,8 +18,24 @@ export default function RecallCheckpoint({ question, state, mascot, pending, err
   const [retriedAttempt, setRetriedAttempt] = useState(-1)
   const firstChoice = useRef<HTMLButtonElement>(null)
   const feedback = useRef<HTMLDivElement>(null)
+  const choices = useRef<HTMLDivElement>(null)
+  const outcomeId = state?.attemptsUsed ? `${state.questionId}:${state.attemptsUsed}` : ''
+  const observedOutcome = useRef(outcomeId)
   const complete = state?.checkpointCompleted ?? false
   const choicesOpen = !complete && (!state?.attemptsUsed || retriedAttempt === state.attemptsUsed)
+  const showOutcome = !!state?.attemptsUsed && !choicesOpen && submittedOptionId === null
+  useEffect(() => {
+    const fresh = outcomeId && outcomeId !== observedOutcome.current
+    observedOutcome.current = outcomeId
+    if (!fresh || matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    const selected = choices.current?.querySelector<HTMLElement>('[data-selected]')
+    const animation = selected?.animate([
+      { transform: 'scale(.985)' },
+      { transform: `scale(${state?.isCorrect ? 1.025 : 1.01})`, offset: .5 },
+      { transform: 'scale(1)' },
+    ], { duration: 320, easing: 'cubic-bezier(.22, .8, .3, 1)' })
+    return () => animation?.cancel()
+  }, [outcomeId, state?.isCorrect, choicesOpen])
   useEffect(() => {
     if (document.querySelector('.vn-menu-dialog[open]')) return
     if (choicesOpen) firstChoice.current?.focus({ preventScroll: true })
@@ -31,15 +47,17 @@ export default function RecallCheckpoint({ question, state, mascot, pending, err
     <section className="vn-scene vn-checkpoint-scene" aria-label="Checkpoint choices">
       <div className="vn-stage">{mascot}</div>
       <div className="vn-choice-overlay">
-        <div className="vn-choices" role="group" aria-labelledby="checkpoint-prompt" aria-busy={pending || undefined}>
+        <div ref={choices} className="vn-choices" role="group" aria-labelledby="checkpoint-prompt" aria-busy={pending || undefined}>
           {question.options.map((option, index) => <button
             ref={index === 0 ? firstChoice : undefined} type="button" key={option.optionId}
             className="vn-choice" disabled={!choicesOpen || pending || submittedOptionId !== null || reloadRequired}
             data-selected={option.optionId === (submittedOptionId ?? state?.selectedOptionId) || undefined}
-            data-correct={complete && option.optionId === state?.correctOptionId || undefined}
+            data-correct={showOutcome && (complete && option.optionId === state?.correctOptionId || state?.isCorrect && option.optionId === state.selectedOptionId) || undefined}
+            data-incorrect={showOutcome && state?.isCorrect === false && option.optionId === state.selectedOptionId || undefined}
             onClick={() => onAnswer(option.optionId)}>
             <span>{option.label}</span>
-            {complete && option.optionId === state?.correctOptionId && <span className="vn-choice-status">Correct answer</span>}
+            {showOutcome && complete && option.optionId === state?.correctOptionId && <span className="vn-choice-status">Correct answer</span>}
+            {showOutcome && state?.isCorrect === false && option.optionId === state.selectedOptionId && <span className="vn-choice-status">Incorrect answer</span>}
           </button>)}
         </div>
       </div>
