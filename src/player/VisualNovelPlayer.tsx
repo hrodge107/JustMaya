@@ -261,7 +261,8 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
     if (needsReload) { void recover(); return }
     if (answerError) { if (submittedOptionId) void submitAnswer(submittedOptionId); else void recover(); return }
     if (advanceError) { void advance(); return }
-    if (!revealed) setRevealedLine(turnId)
+    if (!revealed) { setRevealedLine(turnId); return }
+    if (checkpoint?.checkpointCompleted) void advance()
   }
 
   if (loadError) return <main className="player"><div className="player-message" role="alert"><h1>{loadError.notFound ? 'This lesson session was not found.' : 'This lesson could not be loaded.'}</h1><p>{loadError.notFound ? 'It may have been started on another device or removed. Go back and press Play to start again.' : loadError.message}</p><button className="vn-button" onClick={onExit}>Back to your lesson</button></div></main>
@@ -292,7 +293,7 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
       </section>
       <section className="vn-dialogue" aria-label="Dialogue">
         {(mode === 'playing' && line) || question ? <>
-          <button ref={continueRef} type="button" className="vn-dialogue-target" aria-label={dialogueError || needsReload ? question ? 'Retry lesson connection' : 'Retry advancing dialogue' : question ? 'Reveal dialogue' : 'Reveal or advance dialogue'} aria-busy={pending || undefined} aria-disabled={pending || undefined} onClick={activateDialogue} onKeyDown={event => {
+          <button ref={continueRef} type="button" className="vn-dialogue-target" aria-label={dialogueError || needsReload ? question ? 'Retry lesson connection' : 'Retry advancing dialogue' : question ? checkpoint?.checkpointCompleted && revealed ? 'Advance dialogue' : 'Reveal dialogue' : 'Reveal or advance dialogue'} aria-busy={pending || undefined} aria-disabled={pending || undefined} onClick={activateDialogue} onKeyDown={event => {
             if (event.altKey || event.ctrlKey || event.metaKey) return
             const target = dialogueScrollRef.current
             if (!target) return
@@ -317,7 +318,7 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
               <DialogueText key={turnId} id={turnId} text={text} revealed={revealed} onRevealed={setRevealedLine} onRevealProgress={onRevealProgress} />
               {dialogueError && <span className="vn-error" role="alert">{dialogueError} Activate the dialogue to try again.</span>}
             </span>
-            <span className="vn-advance-cue" aria-hidden="true">{pending || question && !dialogueError && revealed ? '…' : '◆'}</span>
+            <span className="vn-advance-cue" aria-hidden="true">{pending || question && !checkpoint?.checkpointCompleted && !dialogueError && revealed ? '…' : '◆'}</span>
           </button>
           <p className="sr-only" aria-live="polite" aria-atomic="true">{speaker}: {text}</p>
           {pending && <p className="sr-only" role="status">Saving your progress…</p>}
