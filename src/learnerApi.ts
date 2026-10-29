@@ -6,10 +6,12 @@ export type Emotion = 'idle' | 'talking' | 'thinking' | 'happy' | 'confused'
 export type Line = { lineId: string; speaker: 'mascot' | 'narrator'; text: string; emotion: Emotion; sourceRefs?: unknown[]; webRefs?: unknown[] }
 // Learner projection: the server strips answer keys and grading feedback.
 export type Question = { questionId: string; prompt: string; objectiveId: string; options: { optionId: string; label: string }[]; maxAttempts: number }
+export type Checkpoint = { questionId: string; attemptsUsed: number; attemptsRemaining: number; isCorrect: boolean | null; checkpointCompleted: boolean; selectedOptionId: string | null; feedback: string | null; correctOptionId?: string }
+export type AnswerRequest = { questionId: string; optionId: string; request_id: string; expected_version: number }
 export type Scene = { sceneId: string; kind: 'dialogue' | 'checkpoint' | 'ending'; dialogue: Line[]; question: Question | null; nextSceneId: string | null }
 export type Episode = { episodeId: string; title: string; status: string; startSceneId: string; scenes: Scene[]; learningObjectives: string[]; estimatedMinutes: number }
 export type SessionMode = 'playing' | 'checkpoint' | 'question' | 'completed' | 'discussion' | 'error'
-export type Session = { sessionId: string; episodeId: string; mode: SessionMode; sceneId: string; dialogueIndex: number; version: number; status: 'active' | 'completed' | 'abandoned'; updatedAt: string }
+export type Session = { sessionId: string; episodeId: string; mode: SessionMode; sceneId: string; dialogueIndex: number; version: number; status: 'active' | 'completed' | 'abandoned'; updatedAt: string; checkpoint?: Checkpoint | null; quizAttempts: { questionId: string; selectedOptionId: string; correct: boolean; attemptNumber: number; timestamp: string }[] }
 
 export class ApiError extends Error {
   status: number
@@ -37,8 +39,9 @@ export const api = {
   createSession: (episode: string) => request<Session>(`/api/episodes/${id(episode)}/sessions`, { method: 'POST' }),
   session: (session: string) => request<Session>(`/api/sessions/${id(session)}`),
   advance: (session: string, body: { request_id: string; expected_version: number }) => request<Session>(`/api/sessions/${id(session)}/advance`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  answer: (session: string, body: AnswerRequest) => request<Session>(`/api/sessions/${id(session)}/answers`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
 }
 
 // Compile-time guard: the learner Question must never grow grading fields.
-type _NoAnswerKey = 'correctOptionId' extends keyof Question ? never : true
+type _NoAnswerKey = Extract<'correctOptionId' | 'correctExplanation' | 'incorrectExplanation' | 'feedback', keyof Question> extends never ? true : never
 export const _learnerProjectionGuard: _NoAnswerKey = true

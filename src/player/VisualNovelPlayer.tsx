@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { api, ApiError, type Emotion, type Episode, type Scene, type Session } from '../learnerApi'
+import { api, ApiError, type AnswerRequest, type Emotion, type Episode, type Scene, type Session } from '../learnerApi'
 import MascotStage from './MascotStage'
+import RecallCheckpoint from './RecallCheckpoint'
 import './player.css'
 
 const SPEAKER: Record<string, string> = { mascot: 'Instructor', narrator: 'Narrator' }
@@ -26,6 +27,7 @@ function happyLinesReached(order: Scene[], session: Session): number {
       if (l.emotion === 'happy') n++
       if (s.sceneId === session.sceneId && i === session.dialogueIndex) return n
     }
+    if (s.sceneId === session.sceneId) return n
   }
   return n
 }
@@ -51,8 +53,15 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
   const [loadError, setLoadError] = useState<{ message: string; notFound: boolean } | null>(null)
   const [pending, setPending] = useState(false)
   const [advanceError, setAdvanceError] = useState('')
+  const [answerError, setAnswerError] = useState('')
+  const [submittedOptionId, setSubmittedOptionId] = useState<string | null>(null)
+  const [needsReload, setNeedsReload] = useState(false)
+  const [nodTrigger, setNodTrigger] = useState(0)
+  const observedNods = useRef(0)
+  const latestVersion = useRef(0)
+  const answerRequest = useRef<AnswerRequest | null>(null)
   const [revealedLine, setRevealedLine] = useState('')
-  const requestId = useRef<string | null>(null)
+  const advanceRequest = useRef<{ request_id: string; expected_version: number } | null>(null)
   const reloadRequired = useRef(false)
   const alive = useRef(true)
   const continueRef = useRef<HTMLButtonElement>(null)
@@ -67,17 +76,22 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
   const reduced = useReducedMotion()
 
   useEffect(() => {
+    let active = true
     alive.current = true
     ;(async () => {
       try {
         const s = await api.session(sessionId)
         const e = await api.episode(s.episodeId)
-        if (alive.current) { setSession(s); setEpisode(e) }
+        if (active) {
+          latestVersion.current = s.version
+          observedNods.current = happyLinesReached(sceneOrder(e), s) + (s.quizAttempts ?? []).filter(a => a.correct).length
+          setSession(s); setEpisode(e)
+        }
       } catch (err) {
-        if (alive.current) setLoadError({ message: err instanceof Error ? err.message : 'Could not load this lesson.', notFound: err instanceof ApiError && err.status === 404 })
+        if (active) setLoadError({ message: err instanceof Error ? err.message : 'Could not load this lesson.', notFound: err instanceof ApiError && err.status === 404 })
       }
     })()
-    return () => { alive.current = false }
+    return () => { active = false; alive.current = false }
   }, [sessionId])
 
   const order = episode ? sceneOrder(episode) : []
@@ -85,7 +99,6 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
   const line = scene?.dialogue[session?.dialogueIndex ?? 0]
   const mode = session?.mode
   const revealed = reduced || (line !== undefined && revealedLine === line.lineId)
-  const nodTrigger = session && line?.emotion === 'happy' ? happyLinesReached(order, session) : 0
 
   useLayoutEffect(() => {
     followLatestRef.current = true
@@ -153,12 +166,30 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
 
   async function reload() {
     const s = await api.session(sessionId)
-    if (alive.current) setSession(s)
+    acceptSession(s)
+  }
+
+  function acceptSession(next: Session) {
+    if (!alive.current || next.version < latestVersion.current) return
+    latestVersion.current = next.version
+    const count = happyLinesReached(order, next) + (next.quizAttempts ?? []).filter(a => a.correct).length
+    const increment = count - observedNods.current
+    if (increment > 0) setNodTrigger(n => n + increment)
+    observedNods.current = count
+    setSession(next)
+  }
+
+  async function recover() {
+    if (advancing.current) return
+    advancing.current = true; setPending(true)
+    try { await reload(); reloadRequired.current = false; setNeedsReload(false); setAnswerError(''); setAdvanceError('') }
+    catch { if (alive.current) setAnswerError('Could not reload your place. Try again.') }
+    finally { advancing.current = false; if (alive.current) setPending(false) }
   }
 
   async function advance() {
-    if (!session || !line || mode !== 'playing') return
-    if (!revealed) { setRevealedLine(line.lineId); return }
+    if (!session || !(mode === 'playing' && line || mode === 'checkpoint' && session.checkpoint?.checkpointCompleted)) return
+    if (mode === 'playing' && line && !revealed) { setRevealedLine(line.lineId); return }
     if (advancing.current) return
     advancing.current = true
     if (reloadRequired.current) {
@@ -170,18 +201,41 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
     }
     // One id per step until the server acknowledges it: a retry of a request
     // that actually landed is deduplicated, never applied twice.
-    requestId.current ??= crypto.randomUUID()
+    advanceRequest.current ??= { request_id: crypto.randomUUID(), expected_version: session.version }
     setPending(true); setAdvanceError('')
     try {
-      const next = await api.advance(sessionId, { request_id: requestId.current, expected_version: session.version })
-      requestId.current = null
-      if (alive.current) setSession(next)
+      const next = await api.advance(sessionId, advanceRequest.current)
+      advanceRequest.current = null
+      acceptSession(next)
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
-        requestId.current = null
+        advanceRequest.current = null
         reloadRequired.current = true
-        await reload().then(() => { reloadRequired.current = false }).catch(() => { if (alive.current) setAdvanceError('Could not reload your place in the lesson. Try again.') })
+        await reload().then(() => { reloadRequired.current = false }).catch(() => { if (alive.current) { setNeedsReload(true); setAdvanceError('Could not reload your place in the lesson. Try again.') } })
       } else if (alive.current) setAdvanceError(err instanceof Error ? err.message : 'Could not continue.')
+    } finally { advancing.current = false; if (alive.current) setPending(false) }
+  }
+
+  async function submitAnswer(optionId: string) {
+    if (!session || !scene?.question || mode !== 'checkpoint' || advancing.current || session.checkpoint?.checkpointCompleted || reloadRequired.current) return
+    advancing.current = true
+    answerRequest.current ??= { questionId: scene.question.questionId, optionId, request_id: crypto.randomUUID(), expected_version: session.version }
+    setSubmittedOptionId(answerRequest.current.optionId)
+    setPending(true); setAnswerError('')
+    try {
+      const next = await api.answer(sessionId, answerRequest.current)
+      answerRequest.current = null
+      if (alive.current) { acceptSession(next); setSubmittedOptionId(null) }
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        answerRequest.current = null
+        if (alive.current) setSubmittedOptionId(null)
+        reloadRequired.current = true
+        await reload().then(() => { reloadRequired.current = false }).catch(() => { if (alive.current) { setNeedsReload(true); setAnswerError('Could not reload your checkpoint. Try again.') } })
+      } else if (err instanceof ApiError && err.status === 422) {
+        answerRequest.current = null
+        if (alive.current) { setSubmittedOptionId(null); setAnswerError(err.message) }
+      } else if (alive.current) setAnswerError(err instanceof Error ? err.message : 'Could not submit your answer.')
     } finally { advancing.current = false; if (alive.current) setPending(false) }
   }
 
@@ -189,9 +243,10 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
   if (!session || !episode || !scene) return <main className="player"><p className="player-message" role="status">Loading your lesson…</p></main>
 
   const sceneNumber = order.indexOf(scene) + 1
-  const emotion: Emotion = mode === 'checkpoint' ? 'thinking' : mode === 'completed' ? 'happy' : line?.emotion ?? 'idle'
+  const emotion: Emotion = mode === 'checkpoint' ? session.checkpoint?.isCorrect === true ? 'happy' : session.checkpoint?.isCorrect === false ? 'confused' : 'thinking' : mode === 'completed' ? 'happy' : line?.emotion ?? 'idle'
   const isSpeaking = mode === 'playing' && !revealed && line?.speaker === 'mascot'
   const speaker = line ? SPEAKER[line.speaker] ?? line.speaker : ''
+  const mascot = <MascotStage emotion={emotion} isSpeaking={isSpeaking} nodTrigger={nodTrigger} customAnimationTrigger={null} lookTargetOffset={emotion === 'thinking' ? { x: 0.7, y: -0.7 } : null} enablePointerTracking={mode === 'playing'} />
 
   return <main className="player">
     <div className={`vn-frame mode-${mode}`}>
@@ -202,10 +257,14 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
           <ol aria-hidden="true">{order.map((s, i) => <li key={s.sceneId} className={i + 1 < sceneNumber ? 'done' : i + 1 === sceneNumber ? 'current' : ''} />)}</ol>
         </div>
       </header>
-      <section className="vn-scene" aria-label="Scene">
+      {mode === 'checkpoint' && scene.question ? <RecallCheckpoint
+        key={scene.sceneId} question={scene.question} state={session.checkpoint ?? null}
+        mascot={mascot} pending={pending} error={answerError || advanceError}
+        submittedOptionId={submittedOptionId} reloadRequired={needsReload}
+        onAnswer={optionId => void submitAnswer(optionId)} onContinue={() => void advance()} onReload={() => void recover()}
+      /> : <><section className="vn-scene" aria-label="Scene">
         <div className="vn-stage">
-          <MascotStage emotion={emotion} isSpeaking={isSpeaking} nodTrigger={nodTrigger} customAnimationTrigger={null} lookTargetOffset={emotion === 'thinking' ? { x: 0.7, y: -0.7 } : null} enablePointerTracking={mode === 'playing'} />
-          {mode === 'checkpoint' && scene.question && <div className="vn-prompt"><p className="vn-prompt-label">Checkpoint</p><p className="vn-prompt-text">{scene.question.prompt}</p></div>}
+          {mascot}
           {mode === 'completed' && <div className="vn-prompt"><p className="vn-prompt-label">Episode complete</p><p className="vn-prompt-text">{episode.title}</p></div>}
         </div>
       </section>
@@ -241,12 +300,11 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
         </> : <>
           {line && <><p className="vn-speaker">{speaker}</p><p className="vn-text">{line.text}</p></>}
           <div className="vn-controls">
-            {mode === 'checkpoint' && <p className="vn-note">You can answer this checkpoint once that part of the lesson is ready. Your place is saved here.</p>}
             {mode === 'completed' && <button className="vn-button" onClick={onExit}>Back to your lesson</button>}
             {mode !== 'checkpoint' && mode !== 'completed' && <p className="vn-note">This session is in {mode} mode, which this player cannot show yet.</p>}
           </div>
         </>}
-      </section>
+      </section></>}
       <div className="vn-menu-rail">
         <button ref={menuRef} type="button" className="vn-menu-trigger" aria-haspopup="dialog" aria-controls="episode-menu" onClick={openMenu}>
           <span className="vn-menu-icon" aria-hidden="true"><span /><span /><span /></span>

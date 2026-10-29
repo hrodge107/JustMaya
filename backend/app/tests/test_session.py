@@ -138,6 +138,7 @@ def test_session_model_serializes_spec_field_names():
         "dialogueIndex",
         "resumeSnapshot",
         "quizAttempts",
+        "checkpoint",
         "interactions",
         "learningNotes",
         "version",

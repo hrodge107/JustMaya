@@ -118,6 +118,7 @@ def _question(question_id="q-1"):
         correctOptionId="a",
         correctExplanation="Because.",
         incorrectExplanation="Try again.",
+        feedback={"firstIncorrect": "Think about the lesson.", "correct": "Because.", "finalIncorrect": "The answer is A."},
         sourceRefs=[_ref()],
     )
 
@@ -245,7 +246,7 @@ async def test_semantic_review_meters_and_parses(settings, data_dir):
     )
     assert verdict.verdict == "pass" and verdict.violations == []
     call = stub.calls[0]
-    assert call["cache_key"] == "episode-validation-v1"
+    assert call["cache_key"] == "episode-validation-v2"
     assert call["max_tokens"] == settings.validation_max_tokens
     assert call["schema"]["properties"]["verdict"]["enum"] == ["pass", "fail"]
     assert "untrusted_script" in call["user"] and "Cuneiform" in call["user"]
@@ -320,6 +321,7 @@ def _generated_payload():
                 "options": [{"optionId": "a", "label": "A"}, {"optionId": "b", "label": "B"}],
                 "correctOptionId": "a", "correctExplanation": "Because.",
                 "incorrectExplanation": "Try again.",
+                "feedback": {"firstIncorrect": "Think about the lesson.", "correct": "Because.", "finalIncorrect": "The answer is A."},
                 "sourceRefs": [{"chunkId": "doc-1-p0001-000", "documentId": "doc-1",
                                 "pageStart": 1, "pageEnd": 1}],
                 "webRefs": [], "maxAttempts": 2}

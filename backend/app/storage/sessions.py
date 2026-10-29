@@ -11,9 +11,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app.models.episode import EpisodeScript
-from app.models.session import LearnerSession
+from app.models.session import AnswerRequest, LearnerSession
 from app.services.session_controller import advance as advance_session
-from app.services.session_controller import new_session
+from app.services.session_controller import new_session, restore_checkpoint
+from app.services.session_controller import answer as answer_session
 
 
 class SessionConflict(Exception):
@@ -96,17 +97,35 @@ def get_session(data_dir: Path, session_id: str) -> LearnerSession:
             "SELECT payload FROM learner_sessions WHERE session_id = ?",
             (session_id,),
         ).fetchone()
+        if row is None:
+            raise LookupError("Session not found")
+        session = LearnerSession.model_validate_json(row[0])
+        episode_row = conn.execute(
+            "SELECT payload FROM episodes WHERE episode_id = ?", (session.episodeId,)
+        ).fetchone()
+        if episode_row is None:
+            raise LookupError("Episode not found")
+        return restore_checkpoint(session, EpisodeScript.model_validate_json(episode_row[0]))
     finally:
         conn.close()
-    if row is None:
-        raise LookupError("Session not found")
-    return LearnerSession.model_validate_json(row[0])
 
 
 def apply_advance(
     data_dir: Path, session_id: str, request_id: str, expected_version: int
 ) -> LearnerSession:
-    """Deduplicated, version-checked advance — one atomic transaction."""
+    return _apply(data_dir, session_id, request_id, expected_version)
+
+
+def apply_answer(data_dir: Path, session_id: str, request: AnswerRequest) -> LearnerSession:
+    return _apply(data_dir, session_id, request.request_id, request.expected_version, request)
+
+
+def _apply(
+    data_dir: Path, session_id: str, request_id: str, expected_version: int,
+    answer: AnswerRequest | None = None,
+) -> LearnerSession:
+    """The same transaction owns both versioned learner mutations."""
+    kind = "answer" if answer else "advance"
     conn = _connect(data_dir)
     try:
         conn.execute("BEGIN IMMEDIATE")
@@ -120,9 +139,9 @@ def apply_advance(
         inserted = conn.execute(
             "INSERT INTO session_requests "
             "(session_id, request_id, kind, created_at) "
-            "VALUES (?, ?, 'advance', ?) "
+            "VALUES (?, ?, ?, ?) "
             "ON CONFLICT(session_id, request_id) DO NOTHING",
-            (session_id, request_id, _now()),
+            (session_id, request_id, kind, _now()),
         )
         if inserted.rowcount == 0:
             existing = conn.execute(
@@ -130,7 +149,7 @@ def apply_advance(
                 "WHERE session_id = ? AND request_id = ?",
                 (session_id, request_id),
             ).fetchone()
-            if existing[0] != "advance":
+            if existing[0] != kind:
                 raise SessionConflict("Request ID was used for another operation.")
             conn.rollback()
             return get_session(data_dir, session_id)
@@ -143,7 +162,7 @@ def apply_advance(
         if episode_row is None:
             raise LookupError("Episode not found")
         episode = EpisodeScript.model_validate_json(episode_row[0])
-        updated = advance_session(session, episode)
+        updated = answer_session(session, episode, answer) if answer else advance_session(session, episode)
         _write(conn, updated)
         conn.commit()
         return updated

@@ -15,7 +15,10 @@ from app.models.session import (
     MODE_PLAYING,
     STATUS_ACTIVE,
     STATUS_COMPLETED,
+    AnswerRequest,
     LearnerSession,
+    CheckpointState,
+    QuizAttempt,
 )
 
 
@@ -41,27 +44,83 @@ def new_session(episode: EpisodeScript) -> LearnerSession:
     )
 
 
+def restore_checkpoint(session: LearnerSession, episode: EpisodeScript) -> LearnerSession:
+    """Derive released feedback from saved history, including pre-B04 payloads."""
+    if session.mode != MODE_CHECKPOINT:
+        return session.model_copy(update={"checkpoint": None})
+    scene = next(s for s in episode.scenes if s.sceneId == session.sceneId)
+    question = scene.question
+    if question is None:
+        raise InvalidSessionTransition("Checkpoint has no question.")
+    history = [a for a in session.quizAttempts if a.questionId == question.questionId]
+    last = history[-1] if history else None
+    attempts = min(len(history), 2)
+    correct = last.correct if last else None
+    completed = correct is True or attempts == 2
+    feedback = None
+    if last:
+        if question.feedback:
+            feedback = (question.feedback.correct if correct else
+                        question.feedback.finalIncorrect if completed else
+                        question.feedback.firstIncorrect)
+        else:
+            feedback = question.correctExplanation if correct else question.incorrectExplanation
+    state = CheckpointState(
+        questionId=question.questionId, attemptsUsed=attempts,
+        attemptsRemaining=2-attempts, isCorrect=correct,
+        checkpointCompleted=completed,
+        selectedOptionId=last.selectedOptionId if last else None,
+        feedback=feedback, correctOptionId=question.correctOptionId if completed else None,
+    )
+    return session.model_copy(update={"checkpoint": state})
+
+
 def advance(session: LearnerSession, episode: EpisodeScript) -> LearnerSession:
-    """Apply one advance event (spec 12.2) and return the updated session."""
-    if session.mode != MODE_PLAYING:
-        raise InvalidSessionTransition(
-            f"Cannot advance while session mode is {session.mode!r}."
-        )
+    """Apply one authoritative dialogue or completed-checkpoint transition."""
+    session = restore_checkpoint(session, episode)
+    checkpoint_done = session.mode == MODE_CHECKPOINT and session.checkpoint.checkpointCompleted
+    if session.mode != MODE_PLAYING and not checkpoint_done:
+        raise InvalidSessionTransition(f"Cannot advance while session mode is {session.mode!r}.")
     scenes = {scene.sceneId: scene for scene in episode.scenes}
     scene = scenes[session.sceneId]
     update: dict = {}
-    if session.dialogueIndex + 1 < len(scene.dialogue):
-        update["dialogueIndex"] = session.dialogueIndex + 1
-    elif scene.kind == "dialogue" and scene.nextSceneId:
+    if checkpoint_done or (scene.kind == "dialogue" and session.dialogueIndex + 1 >= len(scene.dialogue)):
+        if not scene.nextSceneId:
+            raise InvalidSessionTransition("Scene has no next scene.")
         nxt = scenes[scene.nextSceneId]
-        update["sceneId"] = nxt.sceneId
-        update["dialogueIndex"] = 0
-        update["mode"] = MODE_CHECKPOINT if nxt.kind == "checkpoint" else MODE_PLAYING
+        update.update(sceneId=nxt.sceneId, dialogueIndex=0,
+                      mode=MODE_CHECKPOINT if nxt.kind == "checkpoint" else MODE_PLAYING)
+    elif session.dialogueIndex + 1 < len(scene.dialogue):
+        update["dialogueIndex"] = session.dialogueIndex + 1
     elif scene.kind == "ending":
-        update["mode"] = MODE_COMPLETED
-        update["status"] = STATUS_COMPLETED
+        update.update(mode=MODE_COMPLETED, status=STATUS_COMPLETED)
     else:
         raise InvalidSessionTransition("Checkpoint answer required.")
-    update["version"] = session.version + 1
-    update["updatedAt"] = _now()
-    return session.model_copy(update=update)
+    update.update(version=session.version + 1, updatedAt=_now())
+    return restore_checkpoint(session.model_copy(update=update), episode)
+
+
+def answer(session: LearnerSession, episode: EpisodeScript, request: AnswerRequest) -> LearnerSession:
+    if session.mode != MODE_CHECKPOINT:
+        raise InvalidSessionTransition("Session is not at a checkpoint.")
+    session = restore_checkpoint(session, episode)
+    if session.checkpoint.checkpointCompleted:
+        raise InvalidSessionTransition("Checkpoint is already complete.")
+    scene = next(s for s in episode.scenes if s.sceneId == session.sceneId)
+    question = scene.question
+    if question.questionId != request.questionId:
+        raise ValueError("Question is not the active checkpoint.")
+    if request.optionId not in {o.optionId for o in question.options}:
+        raise ValueError("Option is not part of the active checkpoint.")
+    attempts = session.checkpoint.attemptsUsed + 1
+    correct = request.optionId == question.correctOptionId
+    quiz = QuizAttempt(questionId=question.questionId, selectedOptionId=request.optionId,
+                       correct=correct, attemptNumber=attempts, timestamp=_now())
+    notes = session.learningNotes
+    if attempts == 2 and not correct:
+        notes = [*notes, f"Review objective {question.objectiveId}: {question.prompt}"]
+    updated = session.model_copy(update={
+        "quizAttempts": [*session.quizAttempts, quiz], "learningNotes": notes,
+        "version": session.version + 1, "updatedAt": _now(),
+    })
+    return restore_checkpoint(updated, episode)

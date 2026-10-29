@@ -110,6 +110,7 @@ def _script_payload(chunk_id="doc-1-p0001-000"):
             "options": [{"optionId": "a", "label": "A"}, {"optionId": "b", "label": "B"}],
             "correctOptionId": "a", "correctExplanation": "Because.",
             "incorrectExplanation": "Try again.",
+            "feedback": {"firstIncorrect": "Think about the lesson.", "correct": "Because.", "finalIncorrect": "The answer is A."},
             "sourceRefs": [{"chunkId": chunk_id, "documentId": "doc-1",
                             "pageStart": 1, "pageEnd": 1}],
             "webRefs": [], "maxAttempts": 2,
@@ -180,7 +181,7 @@ async def test_generates_and_recounts_minutes(data_dir):
     # 3 dialogue lines x 10 words = 30 words -> 30/140 + 2.0
     assert script.estimatedMinutes == pytest.approx(30 / 140.0 + 2.0)
     call = stub.calls[0]
-    assert call["cache_key"] == "episode-generation-v1"
+    assert call["cache_key"] == "episode-generation-v2"
     assert call["max_tokens"] == settings.generation_max_tokens
     assert "Episode Director" in call["system"] and "Anime Instructor" in call["system"]
     from app.services.token_budget import job_usage

@@ -1,6 +1,6 @@
 // Run against Vite with Playwright available through Node's module search path.
 // All API responses are isolated fixtures; no backend or model requests occur.
-const { chromium } = require('playwright')
+const { chromium } = (() => { try { return require('playwright') } catch { return require('playwright-core') } })()
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -291,7 +291,7 @@ async function main() {
     assert.equal(await scrollKeys.page.locator('.vn-dialogue-scroll-area').evaluate(target => target.scrollTop), 0, 'A new line should start at the beginning')
     assert.equal(scrollKeys.count(), 1)
     await scrollKeys.page.locator('.vn-dialogue-target').press('Space')
-    await scrollKeys.page.locator('.vn-prompt').waitFor()
+    await scrollKeys.page.locator('#checkpoint-prompt').waitFor()
     assert.equal(scrollKeys.count(), 2)
     evidence.push({ check: 'pointer wheel and Arrow/Page/Home/End scrolling, Enter/Space activation, reduced motion and line reset', result: 'PASS' })
     await scrollKeys.context.close()
@@ -364,7 +364,7 @@ async function main() {
     await touch.page.locator('.vn-dialogue-target').press('Enter')
     assert.equal(touch.count(), 1)
     await touch.page.locator('.vn-dialogue-target').press('Space')
-    await touch.page.locator('.vn-prompt').waitFor()
+    await touch.page.locator('#checkpoint-prompt').waitFor()
     assert.equal(touch.state.session.mode, 'checkpoint')
     evidence.push({ check: 'normal-motion touch reveal/advance, Enter reveal, Space checkpoint', result: 'PASS' })
     await touch.context.close()
@@ -375,7 +375,7 @@ async function main() {
       assert.equal(await f.page.locator('.vn-dialogue-target').count(), 0)
       await modalCheck(f.page, f.count)
       assert.equal(f.count(), 0)
-      assert.equal(await f.page.getByRole('button', { name: 'Water and farming' }).count(), 0)
+      assert.equal(await f.page.getByRole('button', { name: 'Water and farming' }).count(), mode === 'checkpoint' ? 1 : 0)
       if (mode === 'completed') { await f.page.getByRole('button', { name: 'Back to your lesson' }).click(); await f.page.locator('.learner').waitFor() }
       evidence.push({ check: `${mode} boundaries and contextual exit`, result: 'PASS' })
       await f.context.close()
