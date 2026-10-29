@@ -426,6 +426,23 @@ async function main() {
     evidence.push({ check: 'width sweep including 639/640 and 999/1000 breakpoints', result: 'PASS' })
     await sweep.context.close()
 
+    for (const viewport of [{width: 320, height: 568}, {width: 390, height: 844}, {width: 800, height: 1024}, {width: 1280, height: 800}, {width: 844, height: 390}]) {
+      const f = await fixture(browser, { context: { viewport }, long: true })
+      await f.go()
+      const tag = f.page.locator('.vn-speaker')
+      const short = await tag.boundingBox(), panel = await f.page.locator('.vn-dialogue').boundingBox()
+      assert.ok(short.x >= panel.x && short.x < panel.x + 45 && short.y >= panel.y && short.y < panel.y + 35)
+      assert.ok(short.width < panel.width * .8, 'short name must not stretch')
+      await tag.evaluate(el => { el.textContent = 'Verification instructor with a long display name' })
+      const before = await tag.boundingBox()
+      await f.page.locator('.vn-dialogue-scroll-area').evaluate(el => { el.scrollTop = el.scrollHeight })
+      const after = await tag.boundingBox()
+      assert.ok(after.x + after.width <= panel.x + panel.width && Math.abs(after.y-before.y) < 1)
+      assert.ok(await f.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1))
+      await f.page.screenshot({ path: path.join(output, `name-tag-${viewport.width}x${viewport.height}.png`), fullPage: true })
+      evidence.push({ check: `${viewport.width}x${viewport.height}: compact top-left short/long speaker tag stays visible while scrolling`, result: 'PASS' })
+      await f.context.close()
+    }
     assert.deepEqual(errors, [])
     fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify({ evidence, errors }, null, 2))
     console.log(JSON.stringify({ passed: evidence.length, errors, output }, null, 2))

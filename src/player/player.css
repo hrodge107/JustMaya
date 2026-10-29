@@ -72,7 +72,7 @@ body:has(.player) { margin: 0; background: #e9e9f1; color: #30304c; color-scheme
 .vn-prompt-label { margin: 0 0 4px; font-size: .8rem; font-weight: 850; letter-spacing: .06em; text-transform: uppercase; color: var(--mint-ink); }
 .vn-prompt-text { margin: 0; font-size: 1.1rem; font-weight: 750; overflow-wrap: anywhere; }
 
-.vn-speaker { margin: 0 0 4px; font-size: clamp(1rem, .92rem + .4vw, 1.2rem); font-weight: 900; }
+.vn-speaker { display: block; width: fit-content; min-width: 0; max-width: 100%; justify-self: start; align-self: flex-start; margin: 0 0 4px; padding: 6px 22px; border: 2px solid #e1e1ed; border-radius: 22px; background: #626281; color: white; text-align: left; overflow-wrap: anywhere; font-size: clamp(1rem, .92rem + .4vw, 1.2rem); line-height: 1.35; font-weight: 900; }
 .vn-text { margin: 0; max-width: 68ch; font-size: clamp(1rem, .92rem + .4vw, 1.2rem); line-height: 1.35; font-weight: 600; overflow-wrap: anywhere; }
 /* The unrevealed remainder holds its space so the box never jumps while typing. */
 .vn-text-rest { visibility: hidden; }
@@ -142,7 +142,7 @@ body:has(.player) { margin: 0; background: #e9e9f1; color: #30304c; color-scheme
 .vn-dialogue-scroll-area::-webkit-scrollbar-track { background: transparent; }
 .vn-dialogue-scroll-area::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 8px; background: #7f7f96; background-clip: padding-box; }
 .vn-dialogue-scroll-area::-webkit-scrollbar-thumb:hover { background: #696982; }
-.vn-dialogue-target .vn-speaker { position: sticky; top: 0; z-index: 1; display: block; min-width: min(40%, 280px); margin: 0 0 12px; padding: 6px 22px; border: 2px solid #e1e1ed; border-radius: 22px; background: #626281; color: white; }
+.vn-dialogue-target .vn-speaker { position: sticky; top: 0; z-index: 1; margin-bottom: 12px; }
 .vn-dialogue-target .vn-text { display: block; max-width: none; }
 .vn-reveal-boundary { display: inline-block; width: 0; height: 1.35em; vertical-align: text-bottom; }
 .vn-advance-cue { position: absolute; right: 24px; bottom: 14px; color: var(--mint-ink); font-size: 1rem; }
@@ -203,10 +203,10 @@ body:has(.player) { margin: 0; background: #e9e9f1; color: #30304c; color-scheme
 .vn-choice-status { display: block; font-size: .85rem; color: inherit; }
 @media (prefers-reduced-motion: reduce) { .vn-choice:not(:disabled):hover, .vn-choice:not(:disabled):active { transform: none; } }
 .vn-choices .vn-choice:focus-visible { outline: 3px solid var(--mint-bright); outline-offset: 2px; }
-.vn-dialogue.vn-checkpoint-dialogue { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; block-size: clamp(180px, 32dvh, 300px); gap: 8px; padding: 16px 20px; }
-.vn-checkpoint-heading { min-height: 0; max-height: min(120px, 14dvh); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; padding-inline: 5px; }
-.vn-checkpoint-reading { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #7f7f96 transparent; overflow-wrap: anywhere; padding: 3px 5px; }
-.vn-checkpoint-heading h2 { margin: 0; overflow-wrap: anywhere; font: 850 clamp(1rem, .92rem + .4vw, 1.2rem)/1.35 'Nunito Variable', 'Nunito', sans-serif; color: var(--ink); letter-spacing: normal; }
+.vn-dialogue.vn-checkpoint-dialogue { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; block-size: clamp(240px, 38dvh, 360px); gap: 8px; padding: 14px 20px; }
+.vn-checkpoint-heading { min-height: 0; max-height: min(120px, 14dvh); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.vn-checkpoint-reading { min-height: 0; max-width: none; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #7f7f96 transparent; padding: 6px; margin: -6px; }
+.vn-checkpoint-attempts { font-size: .8rem; }
 .vn-feedback p { margin: 8px 0 0; }
 .vn-feedback-outcome { font-weight: 850; }
 .vn-checkpoint-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; }
@@ -214,4 +214,4 @@ body:has(.player) { margin: 0; background: #e9e9f1; color: #30304c; color-scheme
 .vn-checkpoint-actions button:disabled { cursor: progress; }
 @media (min-width: 640px) { .mode-checkpoint { height: calc(100dvh - 32px); } }
 @media (min-width: 1000px) { .mode-checkpoint { height: max(620px, calc(100dvh - 60px)); aspect-ratio: auto; } }
-@media (max-height: 500px) { .mode-checkpoint { min-height: 480px; } .vn-dialogue.vn-checkpoint-dialogue { block-size: 180px; } .mode-checkpoint .vn-menu-rail { min-height: 64px; padding-block: 8px; } }
+@media (max-height: 500px) { .mode-checkpoint { min-height: 560px; } .vn-dialogue.vn-checkpoint-dialogue { block-size: 240px; } .mode-checkpoint .vn-menu-rail { min-height: 64px; padding-block: 8px; } }

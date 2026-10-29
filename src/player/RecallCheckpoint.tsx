@@ -63,11 +63,11 @@ export default function RecallCheckpoint({ question, state, mascot, pending, err
       </div>
     </section>
     <section className="vn-dialogue vn-checkpoint-dialogue" aria-label="Checkpoint question and feedback">
+      <p className="vn-speaker">Instructor</p>
       <div className="vn-checkpoint-heading">
-        <p className="vn-prompt-label">Checkpoint{state ? ` · ${state.attemptsUsed} of 2 attempts used` : ''}</p>
-        <h2 id="checkpoint-prompt">{question.prompt}</h2>
+        <p id="checkpoint-prompt" className="vn-text">{question.prompt}</p>
       </div>
-      <div className="vn-checkpoint-reading">
+      <div className="vn-checkpoint-reading vn-text">
         <div ref={feedback} tabIndex={-1} className="vn-feedback" role="status" aria-live="polite" aria-atomic="true">
           {state?.feedback && <><p className="vn-feedback-outcome">{state.isCorrect ? 'Correct.' : complete ? 'Let’s review this one.' : 'Not quite. Here’s a hint.'}</p><p>{state.feedback}</p></>}
           {correctLabel && !state?.isCorrect && <p><strong>Correct answer:</strong> {correctLabel}</p>}
@@ -76,6 +76,7 @@ export default function RecallCheckpoint({ question, state, mascot, pending, err
         {error && <p className="vn-error" role="alert">{error}</p>}
       </div>
       <div className="vn-checkpoint-actions">
+        {state && <p className="vn-note vn-checkpoint-attempts">{state.attemptsUsed} of 2 attempts used</p>}
         {pending && <p className="vn-note" role="status">Saving your progress…</p>}
         {reloadRequired ? <button type="button" className="vn-button" disabled={pending} onClick={onReload}>Reload checkpoint</button>
           : submittedOptionId ? <button type="button" className="vn-button" disabled={pending} onClick={() => onAnswer(submittedOptionId)}>Retry submission</button>
