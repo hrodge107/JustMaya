@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import type { Emotion } from '../learnerApi'
+import { reducedMotion } from '../motionPreference'
 
 // Replaceable presentation adapter. The player and tutor depend only on these
 // props; the priority-23 VRM stage must accept the same contract.
@@ -22,7 +23,7 @@ export default function MascotStage({ emotion, isSpeaking, nodTrigger, customAni
   const lookY = lookTargetOffset?.y
 
   useEffect(() => {
-    if (nodTrigger > previousNod.current && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    if (nodTrigger > previousNod.current && !reducedMotion()) {
       const animation = body.current?.animate([
         { transform: 'none' }, { transform: 'translateY(7px) rotate(2deg)', offset: .35 },
         { transform: 'translateY(-2px)', offset: .7 }, { transform: 'none' },
