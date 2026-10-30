@@ -114,7 +114,8 @@ def _question(question_id="q-1"):
         questionId=question_id,
         prompt="What did we cover?",
         objectiveId="obj-1",
-        options=[AnswerOption(optionId="a", label="A"), AnswerOption(optionId="b", label="B")],
+        options=[AnswerOption(optionId="a", label="A", mistakeResponse="Not A."),
+                 AnswerOption(optionId="b", label="B", mistakeResponse="Not B.")],
         correctOptionId="a",
         correctExplanation="Because.",
         incorrectExplanation="Try again.",
@@ -225,6 +226,18 @@ def test_citation_leak_flagged(settings):
     assert any("line-2" in v and "citation artifact" in v for v in violations)
 
 
+def test_option_responses_reviewed_and_in_view(settings):
+    script = _script()
+    scene = next(s for s in script.scenes if s.question)
+    scene.question.options[0].mistakeResponse = "per chunkId doc-1-p0001-000"
+    violations = deterministic_check(script, CHUNKS, OBJECTIVES, set(), settings)
+    assert any("q-1.a.mistake" in v and "citation artifact" in v for v in violations)
+    from app.services.episode_validator import _script_view
+    view = _script_view(_script())
+    option = next(s for s in view["scenes"] if s.get("question"))["question"]["options"][0]
+    assert option["mistakeResponse"] == "Not A."
+
+
 def test_configurable_checkpoint_count(settings):
     settings.validation_checkpoint_count = 1
     violations = deterministic_check(_script(), CHUNKS, OBJECTIVES, set(), settings)
@@ -246,7 +259,7 @@ async def test_semantic_review_meters_and_parses(settings, data_dir):
     )
     assert verdict.verdict == "pass" and verdict.violations == []
     call = stub.calls[0]
-    assert call["cache_key"] == "episode-validation-v2"
+    assert call["cache_key"] == "episode-validation-v3"
     assert call["max_tokens"] == settings.validation_max_tokens
     assert call["schema"]["properties"]["verdict"]["enum"] == ["pass", "fail"]
     assert "untrusted_script" in call["user"] and "Cuneiform" in call["user"]
@@ -318,13 +331,13 @@ def _generated_payload():
 
     def question(qid):
         return {"questionId": qid, "prompt": "Which?", "objectiveId": "obj-1",
-                "options": [{"optionId": "a", "label": "A"}, {"optionId": "b", "label": "B"}],
+                "options": [{"optionId": "a", "label": "A", "mistakeResponse": "Not A."},
+                            {"optionId": "b", "label": "B", "mistakeResponse": "Not B."}],
                 "correctOptionId": "a", "correctExplanation": "Because.",
                 "incorrectExplanation": "Try again.",
-                "feedback": {"firstIncorrect": "Think about the lesson.", "correct": "Because.", "finalIncorrect": "The answer is A."},
                 "sourceRefs": [{"chunkId": "doc-1-p0001-000", "documentId": "doc-1",
                                 "pageStart": 1, "pageEnd": 1}],
-                "webRefs": [], "maxAttempts": 2}
+                "webRefs": []}
 
     return {"scenes": [
         {"sceneId": "s1", "kind": "dialogue", "dialogue": [line("l1")], "nextSceneId": "s2"},

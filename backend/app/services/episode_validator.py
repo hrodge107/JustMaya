@@ -33,7 +33,7 @@ from app.storage.episodes import (
 )
 
 VALIDATION_STAGE = "validation"
-CACHE_KEY = "episode-validation-v2"
+CACHE_KEY = "episode-validation-v3"
 
 # Learner-facing text must never render citation artifacts: internal field
 # names, or the generated chunk-id shape (`{doc}-p0004-001`).
@@ -62,6 +62,11 @@ def _learner_texts(script: EpisodeScript) -> list[tuple[str, str]]:
         pairs.append((question.questionId, question.prompt))
         for option in question.options:
             pairs.append((f"{question.questionId}.{option.optionId}", option.label))
+            if option.mistakeResponse:
+                pairs.append((
+                    f"{question.questionId}.{option.optionId}.mistake",
+                    option.mistakeResponse,
+                ))
         pairs.append((f"{question.questionId}.correct", question.correctExplanation))
         pairs.append((f"{question.questionId}.incorrect", question.incorrectExplanation))
         if question.feedback:
@@ -137,7 +142,8 @@ def _script_view(script: EpisodeScript) -> dict:
                 "prompt": scene.question.prompt,
                 "objectiveId": scene.question.objectiveId,
                 "options": [
-                    {"optionId": o.optionId, "label": o.label}
+                    {"optionId": o.optionId, "label": o.label,
+                     "mistakeResponse": o.mistakeResponse}
                     for o in scene.question.options
                 ],
                 "correctOptionId": scene.question.correctOptionId,
@@ -163,8 +169,10 @@ _REVIEW_SYSTEM = (
     "coherent, instructional claims are supported by the supplied context "
     "and passages, checkpoint questions assess previously taught material "
     "with constructive feedback, and the voice fits the instructor persona. "
-    "For structured feedback, firstIncorrect must scaffold a retry without "
-    "revealing the answer; correct and finalIncorrect must explain it. "
+    "For checkpoint feedback, each option's mistakeResponse must address why "
+    "that specific choice is wrong and scaffold the next pick without "
+    "revealing the correct answer; correctExplanation must explain the keyed "
+    "answer and incorrectExplanation must stay generic and non-revealing. "
     "Do not review style polish. Return verdict 'pass' with no violations "
     "when the script is instructionally faithful; otherwise 'fail' with an "
     "itemized violation list naming each check and its detail."

@@ -125,6 +125,9 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
   const mode = session?.mode
   const checkpoint = mode === 'checkpoint' ? session?.checkpoint : null
   const question = mode === 'checkpoint' ? scene?.question : null
+  // Eliminated options are derived from the server's saved attempt history —
+  // a wrong pick can never be submitted again.
+  const eliminated = new Set((session?.quizAttempts ?? []).filter(a => a.questionId === question?.questionId && !a.correct).map(a => a.selectedOptionId))
   const tutorTurns = (session?.interactions ?? []).filter(i => i.kind === 'raise_hand')
   const lastTurn = tutorTurns.length ? tutorTurns[tutorTurns.length - 1] : null
   const inQuestion = mode === 'question'
@@ -354,7 +357,7 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
   }
 
   async function submitAnswer(optionId: string) {
-    if (!session || !scene?.question || mode !== 'checkpoint' || advancing.current || session.checkpoint?.checkpointCompleted || reloadRequired.current) return
+    if (!session || !scene?.question || mode !== 'checkpoint' || advancing.current || session.checkpoint?.checkpointCompleted || reloadRequired.current || eliminated.has(optionId)) return
     advancing.current = true
     answerRequest.current ??= { questionId: scene.question.questionId, optionId, request_id: crypto.randomUUID(), expected_version: session.version }
     setSubmittedOptionId(answerRequest.current.optionId)
@@ -424,7 +427,7 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
           {mode === 'completed' && <div className="vn-prompt"><p className="vn-prompt-label">Episode complete</p><p className="vn-prompt-text">{episode.title}</p></div>}
         </div>
         {question && <RecallCheckpoint key={scene.sceneId} question={question} state={checkpoint ?? null} pending={pending}
-          submittedOptionId={submittedOptionId} reloadRequired={needsReload} onAnswer={optionId => void submitAnswer(optionId)} />}
+          submittedOptionId={submittedOptionId} eliminated={eliminated} reloadRequired={needsReload} onAnswer={optionId => void submitAnswer(optionId)} />}
         {inQuestion && <RaiseHandPanel phase={askPhase} draft={draft} sentQuestion={sentQuestion} hasAsked={hasAsked}
           turnComplete={onFinalBeat} resumeLabel={resumeLabel}
           busy={pending} error={askError} onDraft={setDraft} onSend={() => void sendQuestion()}

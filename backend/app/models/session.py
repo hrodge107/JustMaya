@@ -50,8 +50,8 @@ class QuizAttempt(BaseModel):
 
 class CheckpointState(BaseModel):
     questionId: str
-    attemptsUsed: int = Field(ge=0, le=2)
-    attemptsRemaining: int = Field(ge=0, le=2)
+    # Elimination means picks run until the correct option — no upper bound.
+    attemptsUsed: int = Field(ge=0)
     isCorrect: bool | None = None
     checkpointCompleted: bool = False
     selectedOptionId: str | None = None

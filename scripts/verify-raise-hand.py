@@ -122,7 +122,8 @@ def main():
         # resume restores the checkpoint exactly
         resumed = post(f"/api/sessions/{sid}/resume", {"request_id": uuid.uuid4().hex, "expected_version": asked["session"]["version"]})
         assert resumed["mode"] == "checkpoint" and resumed["sceneId"] == "scene-03-checkpoint-1"
-        assert resumed["resumeSnapshot"] is None and resumed["checkpoint"]["attemptsRemaining"] == 2
+        assert resumed["resumeSnapshot"] is None and resumed["checkpoint"]["attemptsUsed"] == 0
+        assert "attemptsRemaining" not in resumed["checkpoint"]
         evidence.append({"check": "resume restores checkpoint position and clears the snapshot", "result": "PASS"})
 
         # failure surfaces leave clean state; validation rejects bad bodies
