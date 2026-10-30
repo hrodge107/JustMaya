@@ -51,7 +51,7 @@ def _resp(move="explain", engagement="engaged", grounding="supported",
           lines=("beat",), note="topic"):
     return {
         "lines": list(lines),
-        "cited_chunk_ids": [],
+        "cited_chunk_ids": ["c1"] if grounding == "supported" else [],
         "grounding_status": grounding,
         "learning_note": note,
         "move": move,

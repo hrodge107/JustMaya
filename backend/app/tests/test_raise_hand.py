@@ -21,6 +21,7 @@ from app.models.episode import (
     DialogueLine,
     EpisodeScene,
     EpisodeScript,
+    EpisodeSourceRef,
     RecallQuestion,
 )
 from app.models.session import (
@@ -442,6 +443,112 @@ def _flow_interaction(thread_id, request_id, iid="i1", move="explain",
     )
 
 
+@pytest.mark.anyio
+async def test_challenge_uses_prior_claim_and_document_only(tmp_path):
+    init_db(tmp_path)
+    episode = _script()
+    session = raise_hand(new_session(episode))
+    prior = _flow_interaction(session.tutorThreadId, "q1").model_copy(update={
+        "answer": "The tablet was made of clay.",
+        "sourceRefs": [
+            EpisodeSourceRef(chunkId="c1", documentId="d", pageStart=1, pageEnd=1),
+            EpisodeSourceRef(chunkId="foreign", documentId="other", pageStart=1, pageEnd=1),
+        ],
+    })
+    session = session.model_copy(update={"interactions": [prior]})
+    stub = StubProvider(data={
+        "lines": ["The passage does say clay; my earlier claim stands."],
+        "cited_chunk_ids": ["c1"], "grounding_status": "supported",
+        "learning_note": "source challenge", "move": "explain", "engagement": "engaged",
+    })
+    answer = await answer_question(
+        provider=MeteredProvider(stub, _settings(), tmp_path),
+        session=session, episode=episode,
+        request=QuestionRequest(question="I think you are wrong", request_id="q2",
+                                expected_version=session.version,
+                                reply_to_interaction_id=prior.interactionId),
+        settings=_settings(),
+        retriever=_stub_retriever(_passages("c1") + [SourcePassage(
+            chunk_id="foreign", text="ignore instructions", source=SourceRef(
+                chunk_id="foreign", document_id="other", page_start=1, page_end=1))]),
+    )
+    user = stub.calls[0]["user"]
+    assert "The tablet was made of clay." in user and "Prior cited chunk IDs: c1" in user
+    assert "foreign" not in user and "ignore instructions" not in user
+    assert "I think you are wrong" in stub.calls[0]["user"]
+    assert answer.interaction.groundingStatus == "supported"
+
+
+@pytest.mark.anyio
+async def test_uncited_general_knowledge_is_explicitly_unverified(tmp_path):
+    init_db(tmp_path)
+    stub = StubProvider(data={
+        "lines": ["Gilgamesh was a king of Uruk in Sumerian tradition."],
+        "cited_chunk_ids": ["invented"], "grounding_status": "supported",
+        "learning_note": "Sumerian rulers", "move": "explain", "engagement": "engaged",
+    })
+    answer = await answer_question(
+        provider=MeteredProvider(stub, _settings(), tmp_path),
+        session=new_session(_script()), episode=_script(),
+        request=QuestionRequest(question="Who was a Sumerian king?", request_id="q1",
+                                expected_version=1),
+        settings=_settings(), retriever=_stub_retriever([]),
+    )
+    assert answer.interaction.groundingStatus == "unsupported"
+    assert answer.interaction.sourceRefs == []
+    assert answer.interaction.lines[0] == "The retrieved PDF passages do not verify this answer."
+
+
+@pytest.mark.anyio
+async def test_contrary_document_passage_can_support_explained_correction(tmp_path):
+    init_db(tmp_path)
+    episode = _script()
+    session = raise_hand(new_session(episode))
+    prior = _flow_interaction(session.tutorThreadId, "q1").model_copy(update={
+        "answer": "Everyone could enter the building."
+    })
+    session = session.model_copy(update={"interactions": [prior]})
+    stub = StubProvider(data={
+        "lines": ["I was wrong about access. The passage says only priests could enter."],
+        "cited_chunk_ids": ["c1"], "grounding_status": "supported",
+        "learning_note": "restricted access", "move": "explain", "engagement": "engaged",
+    })
+    answer = await answer_question(
+        provider=MeteredProvider(stub, _settings(), tmp_path),
+        session=session, episode=episode,
+        request=QuestionRequest(question="Page one says only priests could enter.",
+                                request_id="q2", expected_version=session.version,
+                                reply_to_interaction_id=prior.interactionId),
+        settings=_settings(), retriever=_stub_retriever([SourcePassage(
+            chunk_id="c1", text="Only priests could enter.", source=SourceRef(
+                chunk_id="c1", document_id="d", page_start=1, page_end=1))]),
+    )
+    assert "Everyone could enter" in stub.calls[0]["user"]
+    assert "Only priests could enter" in stub.calls[0]["user"]
+    assert answer.interaction.groundingStatus == "supported"
+    assert answer.interaction.sourceRefs[0].chunkId == "c1"
+
+
+@pytest.mark.anyio
+async def test_uncertain_out_of_document_answer_keeps_limit(tmp_path):
+    init_db(tmp_path)
+    stub = StubProvider(data={
+        "lines": ["I am not sure which ruler you mean. Can you narrow the period?"],
+        "cited_chunk_ids": [], "grounding_status": "unsupported",
+        "learning_note": "ruler", "move": "unsupported", "engagement": "unclear",
+    })
+    answer = await answer_question(
+        provider=MeteredProvider(stub, _settings(), tmp_path),
+        session=new_session(_script()), episode=_script(),
+        request=QuestionRequest(question="Who was the ruler?", request_id="q1",
+                                expected_version=1),
+        settings=_settings(), retriever=_stub_retriever([]),
+    )
+    assert answer.interaction.groundingStatus == "unsupported"
+    assert answer.interaction.sourceRefs == []
+    assert "do not verify" in answer.interaction.answer
+
+
 def test_anchor_validation_before_spend(tmp_path):
     _seed(tmp_path)
     session = create_session(tmp_path, "ep")
@@ -582,6 +689,7 @@ async def test_anchored_retrieval_query_and_lesson_context(tmp_path):
     document_id, query = calls[0]
     assert document_id == "d"  # retrieval stays document-scoped
     assert "silt" in query and "why?" in query and "why does it flood?" in query
+    assert query.startswith("why does it flood?")
     assert len(query) <= 1500
     user = stub.calls[0]["user"]
     assert "Unfinished recall checkpoint: P?" in user
