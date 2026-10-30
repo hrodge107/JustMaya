@@ -259,7 +259,8 @@ async def test_semantic_review_meters_and_parses(settings, data_dir):
     )
     assert verdict.verdict == "pass" and verdict.violations == []
     call = stub.calls[0]
-    assert call["cache_key"] == "episode-validation-v3"
+    assert call["cache_key"] == "episode-validation-v4"
+    assert "every wrong option separately" in call["system"]
     assert call["max_tokens"] == settings.validation_max_tokens
     assert call["schema"]["properties"]["verdict"]["enum"] == ["pass", "fail"]
     assert "untrusted_script" in call["user"] and "Cuneiform" in call["user"]
@@ -423,9 +424,9 @@ async def test_validate_and_publish_regen_exhausted_fails(settings, data_dir):
     ctx = _lesson_context()
     save_episode_draft(data_dir, _script(), "cur-1")
     stub = ReviewStub([
-        {"verdict": "fail", "violations": [{"check": "coverage", "detail": "x"}]},
+        {"verdict": "fail", "violations": [{"check": "feedback", "detail": "s2.q1.b: generic praise; no next step"}]},
         _generated_payload(),
-        {"verdict": "fail", "violations": [{"check": "coverage", "detail": "still"}]},
+        {"verdict": "fail", "violations": [{"check": "feedback", "detail": "s2.q1.b: keyed answer leaked"}]},
     ])
     _, report = await validate_and_publish(
         data_dir, _script(), _roadmap(ctx), ctx, [], CHUNKS,
@@ -434,7 +435,7 @@ async def test_validate_and_publish_regen_exhausted_fails(settings, data_dir):
     assert not report_passing(report) and report.regenerated
     assert len(stub.calls) == 3
     assert read_episode_state(data_dir, "doc-1")["status"] == "draft"
-    assert "still" in read_episode_state(data_dir, "doc-1")["validation"]
+    assert "s2.q1.b: keyed answer leaked" in read_episode_state(data_dir, "doc-1")["validation"]
 
 
 @pytest.mark.anyio

@@ -33,7 +33,7 @@ from app.storage.episodes import (
 )
 
 VALIDATION_STAGE = "validation"
-CACHE_KEY = "episode-validation-v3"
+CACHE_KEY = "episode-validation-v4"
 
 # Learner-facing text must never render citation artifacts: internal field
 # names, or the generated chunk-id shape (`{doc}-p0004-001`).
@@ -168,12 +168,20 @@ _REVIEW_SYSTEM = (
     "whether every locked objective is taught, the teaching order is "
     "coherent, instructional claims are supported by the supplied context "
     "and passages, checkpoint questions assess previously taught material "
-    "with constructive feedback, and the voice fits the instructor persona. "
-    "For checkpoint feedback, each option's mistakeResponse must address why "
-    "that specific choice is wrong and scaffold the next pick without "
-    "revealing the correct answer; correctExplanation must explain the keyed "
-    "answer and incorrectExplanation must stay generic and non-revealing. "
-    "Do not review style polish. Return verdict 'pass' with no violations "
+    "with constructive feedback, and the voice fits this instructor: warm, "
+    "curious, lightly playful, and precise without routine praise. Default "
+    "to accessible secondary-school language when learner level is absent. "
+    "Inspect every wrong option separately. Its mistakeResponse must name "
+    "the selected idea's mistaken inference, explain the taught distinction, "
+    "and give one feasible next reasoning step. Reject generic praise or "
+    "'try again', unsupported diagnoses, and text that names or quotes the "
+    "keyed answer or identifies a remaining option. A slip may need a short "
+    "check; a conceptual error needs a concise explanation. Correct feedback "
+    "must explain reasoning. Sample opening, teaching, and closing dialogue "
+    "for the same voice. Name sceneId, questionId, and optionId in each "
+    "feedback violation so the bounded repair can target it. Treat a fluent "
+    "script as fallible: structure alone is not evidence of quality. Return "
+    "verdict 'pass' with no violations "
     "when the script is instructionally faithful; otherwise 'fail' with an "
     "itemized violation list naming each check and its detail."
 )

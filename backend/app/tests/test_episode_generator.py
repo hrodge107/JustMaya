@@ -181,9 +181,9 @@ async def test_generates_and_recounts_minutes(data_dir):
     # 3 dialogue lines x 10 words = 30 words -> 30/140 + 2.0
     assert script.estimatedMinutes == pytest.approx(30 / 140.0 + 2.0)
     call = stub.calls[0]
-    assert call["cache_key"] == "episode-generation-v3"
+    assert call["cache_key"] == "episode-generation-v4"
     assert call["max_tokens"] == settings.generation_max_tokens
-    assert "Episode Director" in call["system"] and "Anime Instructor" in call["system"]
+    assert "# Episode direction" in call["system"] and "# Instructor voice" in call["system"]
     from app.services.token_budget import job_usage
     assert job_usage(data_dir, "j1")["by_stage"] == {"generation": 15}
 
@@ -276,6 +276,8 @@ async def test_option_response_required_and_prompted(data_dir):
 def test_system_prompt_instructs_per_option_responses():
     system = gen._system()
     assert "mistakeResponse" in system
+    assert "selected idea and its mistaken inference" in system
+    assert "one concrete next reasoning action" in system
     assert "firstIncorrect" not in system and "maxAttempts" not in system
 
 
