@@ -43,6 +43,8 @@ class StubProvider:
                 "cited_chunk_ids": ["chunk-a", "hallucinated"],
                 "grounding_status": "partial",
                 "learning_note": "verification topic",
+                "move": "explain",
+                "engagement": "engaged",
             },
             usage={"prompt_tokens": 12, "completion_tokens": 7, "total_tokens": 19},
         )
@@ -90,9 +92,10 @@ def main():
         raised = post(f"/api/sessions/{sid}/raise-hand", {"request_id": uuid.uuid4().hex, "expected_version": session["version"]})
         assert raised["mode"] == "question"
         assert raised["resumeSnapshot"] == {"sceneId": "scene-03-checkpoint-1", "dialogueIndex": 0, "mode": "checkpoint"}
+        assert raised["tutorThreadId"] == f"{sid}:{raised['version']}"
         nested = client.post(f"/api/sessions/{sid}/raise-hand", json={"request_id": uuid.uuid4().hex, "expected_version": raised["version"]})
         assert nested.status_code == 409 and nested.json()["error"]["code"] == "INVALID_SESSION_TRANSITION"
-        evidence.append({"check": "raise-hand from checkpoint snapshots once; nested raise rejected", "result": "PASS"})
+        evidence.append({"check": "raise-hand from checkpoint snapshots once; nested raise rejected; thread identity assigned", "result": "PASS"})
 
         # grounded question -> verified citations, persisted interaction, session-scoped usage
         asked = post(f"/api/sessions/{sid}/questions", {"question": "What does the source say?", "request_id": "verify-q1", "expected_version": raised["version"]})
@@ -106,12 +109,27 @@ def main():
         assert [r["chunkId"] for r in asked["interaction"]["sourceRefs"]] == ["chunk-a"]
         assert asked["interaction"]["sourceRefs"][0]["pageStart"] == 2
         assert asked["session"]["learningNotes"] == ["verification topic"]
+        flow = asked["interaction"]["flow"]
+        assert flow["threadId"] == raised["tutorThreadId"] and flow["move"] == "explain"
+        assert flow["helpMode"] == "explain" and flow["awaiting"] == "none"
+        assert flow["topicQuestion"] == "What does the source say?"
         replayed = post(f"/api/sessions/{sid}/questions", {"question": "What does the source say?", "request_id": "verify-q1", "expected_version": raised["version"]})
         assert replayed["interaction"]["interactionId"] == asked["interaction"]["interactionId"]
         assert stub.calls == 1
         restored = client.get(f"/api/sessions/{sid}").json()
         assert restored["mode"] == "question" and restored["interactions"][-1]["requestId"] == "verify-q1"
-        evidence.append({"check": "grounded answer verifies citations, persists, replays without a second call", "result": "PASS"})
+        evidence.append({"check": "grounded answer verifies citations, persists with flow metadata, replays without a second call", "result": "PASS"})
+
+        # anchored follow-up inherits the topic; a foreign anchor 422s pre-spend
+        iid = asked["interaction"]["interactionId"]
+        version = asked["session"]["version"]
+        bad_anchor = client.post(f"/api/sessions/{sid}/questions", json={"question": "next?", "request_id": "verify-anchor-422", "expected_version": version, "reply_to_interaction_id": "ghost"})
+        assert bad_anchor.status_code == 422 and stub.calls == 1
+        anchored = post(f"/api/sessions/{sid}/questions", {"question": "and the second part?", "request_id": "verify-q2", "expected_version": version, "reply_to_interaction_id": iid})
+        flow2 = anchored["interaction"]["flow"]
+        assert flow2["replyToInteractionId"] == iid and flow2["topicQuestion"] == "What does the source say?"
+        assert stub.calls == 2
+        evidence.append({"check": "anchored follow-up inherits topic and parent; foreign anchor 422 before spend", "result": "PASS"})
 
         conn = sqlite3.connect(staged / "app.db")
         row = conn.execute("SELECT job_id, stage, total_tokens FROM token_usage ORDER BY usage_id DESC").fetchone()
@@ -120,7 +138,7 @@ def main():
         evidence.append({"check": "tutor usage records under session:{id} scope at stage tutor", "result": "PASS"})
 
         # resume restores the checkpoint exactly
-        resumed = post(f"/api/sessions/{sid}/resume", {"request_id": uuid.uuid4().hex, "expected_version": asked["session"]["version"]})
+        resumed = post(f"/api/sessions/{sid}/resume", {"request_id": uuid.uuid4().hex, "expected_version": anchored["session"]["version"]})
         assert resumed["mode"] == "checkpoint" and resumed["sceneId"] == "scene-03-checkpoint-1"
         assert resumed["resumeSnapshot"] is None and resumed["checkpoint"]["attemptsUsed"] == 0
         assert "attemptsRemaining" not in resumed["checkpoint"]

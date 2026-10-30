@@ -148,6 +148,8 @@ def raise_hand(session: LearnerSession) -> LearnerSession:
             mode=session.mode,
         ),
         "mode": MODE_QUESTION,
+        # Deterministic interrupt identity; resume clears it.
+        "tutorThreadId": f"{session.sessionId}:{session.version + 1}",
         "version": session.version + 1,
         "updatedAt": _now(),
     })
@@ -163,6 +165,7 @@ def resume(session: LearnerSession, episode: EpisodeScript) -> LearnerSession:
         "dialogueIndex": snap.dialogueIndex,
         "mode": snap.mode,
         "resumeSnapshot": None,
+        "tutorThreadId": None,
         "version": session.version + 1,
         "updatedAt": _now(),
     }), episode)

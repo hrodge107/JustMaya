@@ -36,10 +36,14 @@ async function fixture(browser, viewport = { width: 390, height: 844 }, reducedM
   const page = await context.newPage()
   page.on('pageerror', err => errors.push(err.message))
   await page.clock.install(); await page.clock.pauseAt(new Date())
-  const state = { fault: '', calls: [], gate: null, questionReplies: new Map(), get: sid => context.request.get(`${base}/api/sessions/${sid}`).then(r => r.json()) }
+  const state = { fault: '', calls: [], gate: null, questionReplies: new Map(), nextFlow: null, getPatch: null, get: sid => context.request.get(`${base}/api/sessions/${sid}`).then(r => r.json()) }
   await page.route('**/api/sessions/**', async route => {
     const request = route.request()
-    if (request.method() === 'GET') return route.continue()
+    if (request.method() === 'GET') {
+      if (!state.getPatch || !new URL(request.url()).pathname.match(/^\/api\/sessions\/[^/]+$/)) return route.continue()
+      const response = await route.fetch()
+      return route.fulfill({ response, json: state.getPatch(await response.json()) })
+    }
     state.calls.push({ path: new URL(request.url()).pathname, body: request.postDataJSON() })
     if (state.gate) await state.gate
     return route.continue()
@@ -51,10 +55,23 @@ async function fixture(browser, viewport = { width: 390, height: 844 }, reducedM
     if (state.gate) await state.gate
     const fault = state.fault; state.fault = ''
     if (fault === 'unavailable') return route.fulfill({ status: 503, json: { error: { message: 'Verification tutor unavailable.' } } })
+    if (fault === 'anchor') return route.fulfill({ status: 422, json: { error: { message: 'That reply is no longer anchored to the latest tutor turn.' } } })
     if (state.questionReplies.has(req.request_id)) return route.fulfill({ json: state.questionReplies.get(req.request_id) })
     const session = await state.get(new URL(route.request().url()).pathname.split('/')[3])
     const lines = [`Beat one answers "${req.question}".`, 'Beat two carries the middle.', 'Beat three lands the point.']
-    const interaction = { interactionId: `verify-${req.request_id.slice(0, 8)}`, kind: 'raise_hand', userMessage: req.question, answer: lines.join('\n'), lines, sourceRefs: [{ chunkId: 'verify-chunk', documentId: session.episodeId, pageStart: 2, pageEnd: 3, sectionId: null }], createdAt: new Date().toISOString(), groundingStatus: 'partial', requestId: req.request_id }
+    const parent = req.reply_to_interaction_id ? (session.interactions ?? []).find(i => i.interactionId === req.reply_to_interaction_id) : null
+    const override = state.nextFlow; state.nextFlow = null
+    const flow = {
+      threadId: session.tutorThreadId ?? `${session.sessionId}:${session.version}`,
+      topicQuestion: parent?.flow?.topicQuestion ?? parent?.userMessage ?? req.question,
+      replyToInteractionId: req.reply_to_interaction_id ?? null,
+      helpMode: req.help_mode ?? 'explain',
+      move: override?.move ?? (req.help_mode === 'hint' ? 'diagnose' : 'explain'),
+      hintLevel: override?.hintLevel ?? (req.help_mode === 'hint' ? 0 : null),
+      reflection: req.reflection ?? null,
+      awaiting: override?.awaiting ?? (req.help_mode === 'hint' ? 'attempt' : 'none'),
+    }
+    const interaction = { interactionId: `verify-${req.request_id.slice(0, 8)}`, kind: 'raise_hand', userMessage: req.question, answer: lines.join('\n'), lines, sourceRefs: [{ chunkId: 'verify-chunk', documentId: session.episodeId, pageStart: 2, pageEnd: 3, sectionId: null }], createdAt: new Date().toISOString(), groundingStatus: 'partial', requestId: req.request_id, flow }
     // The stubbed write never lands server-side, so the synthesized session
     // keeps the backend's real version — /resume must not 409 on it.
     const body = { interaction, session: { ...session, updatedAt: new Date().toISOString(), interactions: [...(session.interactions ?? []), interaction], learningNotes: [...(session.learningNotes ?? []), 'verify note'] } }
@@ -120,6 +137,9 @@ async function coreFlow(browser) {
   assert.equal(await f.page.locator('.vn-choices .vn-choice').count(), 0, 'every strip disappears once the question echoes')
   assert.equal(questionPosts(f).length, 1)
   assert.equal(questionPosts(f)[0].body.question, 'What does section two cover?')
+  assert.equal(questionPosts(f)[0].body.help_mode, 'explain', 'Explain is the default help mode')
+  assert.equal(questionPosts(f)[0].body.reply_to_interaction_id, null, 'first question opens a new topic')
+  assert.equal(questionPosts(f)[0].body.reflection, null)
   release1(); f.state.gate = null
   await f.page.waitForFunction(() => document.querySelector('.vn-dialogue .sr-only[aria-live]')?.textContent.startsWith('Instructor: Beat one'))
   assert.equal(await input(f.page).count(), 0, 'compose input hidden until the closing beat')
@@ -143,8 +163,10 @@ async function coreFlow(browser) {
   assert.equal(await f.page.locator('.vn-source-note').textContent(), 'Partly supported by your PDF.')
   await f.page.getByRole('button', { name: 'Sources', exact: true }).click()
   assert.deepEqual(await f.page.locator('.vn-source-badge').allTextContents(), ['Page 2–3'])
+  assert.equal(await f.page.locator('.vn-ask-new').count(), 1, 'New question control appears once a flow turn anchors the thread')
 
-  // The fresh input accepts a follow-up directly; it sends as a new request id.
+  // The fresh input accepts a follow-up directly; it sends as a new request id
+  // anchored to the latest tutor turn.
   await input(f.page).fill('What does section three cover?')
   let release2
   f.state.gate = new Promise(resolve => { release2 = resolve })
@@ -152,6 +174,8 @@ async function coreFlow(browser) {
   await f.page.waitForFunction(() => document.querySelector('.vn-dialogue .sr-only[aria-live]')?.textContent === 'You: What does section three cover?')
   assert.equal(questionPosts(f).length, 2)
   assert.notEqual(questionPosts(f)[1].body.request_id, questionPosts(f)[0].body.request_id)
+  const firstId = f.state.questionReplies.get(questionPosts(f)[0].body.request_id).interaction.interactionId
+  assert.equal(questionPosts(f)[1].body.reply_to_interaction_id, firstId, 'follow-up anchors to the latest tutor turn')
   release2(); f.state.gate = null
   await throughBeats(f)
 
@@ -241,6 +265,21 @@ async function faultsAndReload(browser) {
   assert.deepEqual(questionPosts(f)[1].body, questionPosts(f)[0].body, 'retry reuses the frozen request body')
   evidence.push({ check: 'failed send preserves text; retry reuses request id and succeeds', result: 'PASS' })
 
+  // Same text with a different help mode is a new action, not a replay: the
+  // mode-edited send mints a new request id, and its own retry reuses it.
+  f.state.fault = 'unavailable'
+  await f.page.getByRole('button', { name: 'Hint', exact: true }).click()
+  await input(f.page).fill('Will this retry as a hint?')
+  await send(f.page).click()
+  await f.page.locator('.vn-error').waitFor()
+  const editedPost = questionPosts(f).at(-1).body
+  assert.notEqual(editedPost.request_id, questionPosts(f)[1].body.request_id, 'edited mode mints a new request identity')
+  assert.equal(editedPost.help_mode, 'hint')
+  await send(f.page).click()
+  await throughBeats(f)
+  assert.equal(questionPosts(f).at(-1).body.request_id, editedPost.request_id, 'retry of the edited action reuses its id')
+  evidence.push({ check: 'help-mode edit before retry is a new action; its retry replays the new identity', result: 'PASS' })
+
   // Reload mid-compose restores question mode and listening state; the
   // unsubmitted draft is client state and does not survive.
   await input(f.page).fill('unsubmitted draft')
@@ -321,9 +360,159 @@ async function reloadRestoresClosingBeat(browser) {
   await f.context.close()
 }
 
+async function helpModesAndFlow(browser) {
+  // Explain/Hint selector, anchored continuations, reflection field, New
+  // question reset, invalid-anchor recovery, and resuming mid-hint.
+  const f = await fixture(browser)
+  f.session = await parked(f.context.request)
+  await f.go(f.session)
+  await raise(f.page).click()
+  await strip(f.page).waitFor()
+  const explainBtn = f.page.getByRole('button', { name: 'Explain', exact: true })
+  const hintBtn = f.page.getByRole('button', { name: 'Hint', exact: true })
+  await explainBtn.waitFor()
+  assert.equal(await explainBtn.getAttribute('aria-pressed'), 'true')
+  assert.equal(await hintBtn.getAttribute('aria-pressed'), 'false')
+  assert.equal(await f.page.locator('.vn-ask-new').count(), 0, 'no New question control before the first turn')
+
+  // Hint send: the diagnose turn lands on its final content beat — the
+  // closing cue stays out while the tutor awaits an attempt.
+  await hintBtn.click()
+  assert.equal(await hintBtn.getAttribute('aria-pressed'), 'true')
+  await input(f.page).fill('How do I answer the checkpoint?')
+  await send(f.page).click()
+  await throughBeats(f)
+  const diagPost = questionPosts(f).at(-1).body
+  assert.equal(diagPost.help_mode, 'hint')
+  assert.equal(diagPost.reply_to_interaction_id, null)
+  assert.equal(diagPost.reflection, null)
+  const diagText = (await liveText(f.page)).replace('Instructor: ', '')
+  assert.ok(diagText.startsWith('Beat three'), 'final beat is the diagnostic prompt')
+  assert.ok(!ALL_CUES.includes(diagText), 'awaiting attempt suppresses the generic closing cue')
+  assert.equal(await input(f.page).getAttribute('placeholder'), 'What have you tried so far?')
+
+  // The attempt reply anchors to the diagnose turn.
+  const diagId = f.state.questionReplies.get(diagPost.request_id).interaction.interactionId
+  f.state.nextFlow = { move: 'hint', awaiting: 'reflection', hintLevel: 1 }
+  await input(f.page).fill('I picked option B and it was eliminated')
+  await send(f.page).click()
+  await throughBeats(f)
+  const attemptPost = questionPosts(f).at(-1).body
+  assert.equal(attemptPost.reply_to_interaction_id, diagId, 'attempt reply anchors to the diagnose turn')
+  assert.equal(attemptPost.reflection, null)
+  assert.equal(await input(f.page).getAttribute('placeholder'), 'What did that tell you?')
+
+  // Awaiting reflection: the typed reply is sent as both message and reflection.
+  f.state.nextFlow = { move: 'hint', awaiting: 'reflection', hintLevel: 2 }
+  await input(f.page).fill('The flood deposits silt that renews the soil')
+  await send(f.page).click()
+  await throughBeats(f)
+  const reflPost = questionPosts(f).at(-1).body
+  assert.equal(reflPost.reply_to_interaction_id, f.state.questionReplies.get(attemptPost.request_id).interaction.interactionId)
+  assert.equal(reflPost.reflection, 'The flood deposits silt that renews the soil')
+  assert.equal(reflPost.question, reflPost.reflection)
+  evidence.push({ check: 'hint mode: diagnose awaits attempt, anchored replies, reflection field, cue suppressed', result: 'PASS' })
+
+  // Invalid anchor: draft survives and the detached retry sends unanchored.
+  f.state.fault = 'anchor'
+  await input(f.page).fill('reply that loses its anchor')
+  await send(f.page).click()
+  await f.page.locator('.vn-error').waitFor()
+  assert.equal(await input(f.page).inputValue(), 'reply that loses its anchor', 'draft survives a rejected anchor')
+  await send(f.page).click()
+  await throughBeats(f)
+  assert.equal(questionPosts(f).at(-1).body.reply_to_interaction_id, null, 'detached retry sends as a new topic')
+  evidence.push({ check: 'invalid anchor surfaces the error, keeps the draft, retries unanchored', result: 'PASS' })
+
+  // New question detaches the thread, clears the draft and resets to Explain.
+  await f.page.locator('.vn-ask-new').click()
+  assert.equal(await input(f.page).inputValue(), '')
+  assert.equal(await explainBtn.getAttribute('aria-pressed'), 'true', 'New question resets the mode to Explain')
+  await input(f.page).fill('brand new topic')
+  await send(f.page).click()
+  await throughBeats(f)
+  const freshPost = questionPosts(f).at(-1).body
+  assert.equal(freshPost.help_mode, 'explain')
+  assert.equal(freshPost.reply_to_interaction_id, null)
+  evidence.push({ check: 'New question clears draft, resets mode, sends the next message unanchored', result: 'PASS' })
+
+  // Resumable mid-hint: raise icon posts resume and the thread closes exactly.
+  const waitResume = f.page.waitForResponse(r => r.url().endsWith('/resume') && r.request().method() === 'POST')
+  await raise(f.page).click()
+  await waitResume
+  await waitCue(f.page, BACK_TO_LESSON)
+  const done = await saved(f)
+  assert.equal(done.mode, 'checkpoint')
+  assert.equal(done.sceneId, 'scene-03-checkpoint-1')
+  assert.equal(done.tutorThreadId, null, 'resume closes the tutor thread')
+  assert.equal(done.resumeSnapshot, null)
+  evidence.push({ check: 'hint exit resumes the exact checkpoint and clears the thread', result: 'PASS' })
+  await f.context.close()
+}
+
+async function earlyAnswerOrder(browser) {
+  // Answer landing while the "You" echo is still revealing: the tutor's
+  // beats hold until the echo completes, then play in order.
+  const f = await fixture(browser, { width: 390, height: 844 }, 'no-preference')
+  f.session = await parked(f.context.request, episode.startSceneId)
+  await f.go(f.session)
+  await raise(f.page).click()
+  await strip(f.page).waitFor()
+  await input(f.page).fill('A question answered faster than its echo types')
+  let release
+  f.state.gate = new Promise(resolve => { release = resolve })
+  await send(f.page).click()
+  await f.page.clock.runFor(50)
+  release(); f.state.gate = null
+  await f.page.waitForResponse(r => r.url().endsWith('/questions'))
+  assert.equal(await liveText(f.page), 'You: A question answered faster than its echo types', 'the landed answer does not cut off the echo')
+  await f.page.clock.runFor(2000)
+  await f.page.waitForFunction(() => document.querySelector('.vn-dialogue .sr-only[aria-live]')?.textContent.startsWith('Instructor: Beat one'))
+  evidence.push({ check: 'early answer: Instructor beats wait for the "You" echo to finish revealing', result: 'PASS' })
+  await f.context.close()
+}
+
+async function reloadRestoresAwaiting(browser) {
+  // A persisted awaiting turn restores its final pedagogical prompt — not a
+  // generic closing cue — across reloads; a legacy turn without flow metadata
+  // keeps the old closing-cue behaviour and hides the New question control.
+  const f = await fixture(browser)
+  f.session = await parked(f.context.request)
+  const raised = await post(f.context.request, `/api/sessions/${f.session.sessionId}/raise-hand`, { request_id: id(), expected_version: f.session.version })
+  const flowTurn = {
+    interactionId: 'verify-flow-turn', kind: 'raise_hand', userMessage: 'stuck on the checkpoint',
+    answer: 'Hint beat one.\nWhat do you think that tells you?', lines: ['Hint beat one.', 'What do you think that tells you?'],
+    sourceRefs: [], createdAt: new Date().toISOString(), groundingStatus: 'supported', requestId: 'verify-flow',
+    flow: { threadId: raised.tutorThreadId, topicQuestion: 'stuck on the checkpoint', replyToInteractionId: null, helpMode: 'hint', move: 'hint', hintLevel: 2, reflection: 'earlier reflection', awaiting: 'reflection' },
+  }
+  f.state.getPatch = s => ({ ...s, interactions: [...(s.interactions ?? []), flowTurn] })
+  await f.go(raised)
+  await f.page.waitForFunction(() => document.querySelector('.vn-dialogue .sr-only[aria-live]')?.textContent?.startsWith('Instructor: '))
+  assert.equal(await liveText(f.page), 'Instructor: What do you think that tells you?', 'restore lands on the final pedagogical prompt')
+  assert.equal(await input(f.page).getAttribute('placeholder'), 'What did that tell you?')
+  await f.page.locator('.vn-ask-new').waitFor()
+  await f.page.reload()
+  await f.page.waitForFunction(() => document.querySelector('.vn-dialogue .sr-only[aria-live]')?.textContent?.startsWith('Instructor: '))
+  assert.equal(await liveText(f.page), 'Instructor: What do you think that tells you?', 'awaiting restore is stable across reload')
+  evidence.push({ check: 'reload restores awaiting flow: final prompt beat, reflection placeholder, New question, no closing cue', result: 'PASS' })
+  await f.context.close()
+
+  const legacy = await fixture(browser)
+  legacy.session = await parked(legacy.context.request)
+  const raised2 = await post(legacy.context.request, `/api/sessions/${legacy.session.sessionId}/raise-hand`, { request_id: id(), expected_version: legacy.session.version })
+  const legacyTurn = { ...flowTurn, interactionId: 'verify-legacy-turn', flow: undefined }
+  legacy.state.getPatch = s => ({ ...s, interactions: [...(s.interactions ?? []), legacyTurn] })
+  await legacy.go(raised2)
+  await waitCue(legacy.page, ASK_MORE)
+  assert.equal(await legacy.page.locator('.vn-ask-new').count(), 0, 'legacy turn renders without the New question control')
+  await input(legacy.page).waitFor()
+  evidence.push({ check: 'legacy interaction without flow metadata keeps the closing cue and old compose behaviour', result: 'PASS' })
+  await legacy.context.close()
+}
+
 async function main() {
   const browser = await chromium.launch({ channel: process.env.PLAYER_VERIFY_BROWSER || 'msedge', headless: true })
-  try { await coreFlow(browser); await pendingAndCancel(browser); await faultsAndReload(browser); await layouts(browser); await touchAndMotion(browser); await reloadRestoresClosingBeat(browser); assert.deepEqual(errors, []) }
+  try { await coreFlow(browser); await pendingAndCancel(browser); await earlyAnswerOrder(browser); await faultsAndReload(browser); await helpModesAndFlow(browser); await reloadRestoresAwaiting(browser); await layouts(browser); await touchAndMotion(browser); await reloadRestoresClosingBeat(browser); assert.deepEqual(errors, []) }
   finally { await browser.close(); fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify({ evidence, errors }, null, 2)) }
   console.log(JSON.stringify({ passed: evidence.length, output, errors }, null, 2))
 }

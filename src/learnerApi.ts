@@ -13,9 +13,15 @@ export type Episode = { episodeId: string; title: string; status: string; startS
 export type SessionMode = 'playing' | 'checkpoint' | 'question' | 'completed' | 'discussion' | 'error'
 // Tutor turns may carry citations; scripted VN dialogue never exposes them.
 export type SourceRef = { chunkId: string; documentId: string; pageStart: number; pageEnd: number; sectionId: string | null }
-export type TutorInteraction = { interactionId: string; kind: 'raise_hand' | 'discussion'; userMessage: string; answer: string; lines?: string[]; sourceRefs: SourceRef[]; createdAt: string; groundingStatus: 'supported' | 'partial' | 'unsupported' | null; requestId: string | null }
+export type HelpMode = 'explain' | 'hint'
+export type TutorMove = 'explain' | 'clarify' | 'diagnose' | 'hint' | 'foundation' | 'unsupported' | 'resolved'
+export type AwaitingKind = 'none' | 'attempt' | 'reflection' | 'clarification'
+// Server-owned dialogue metadata; absent on pre-flow interactions.
+export type TutorFlow = { threadId: string; topicQuestion: string; replyToInteractionId: string | null; helpMode: HelpMode; move: TutorMove; hintLevel: number | null; reflection: string | null; awaiting: AwaitingKind }
+export type TutorInteraction = { interactionId: string; kind: 'raise_hand' | 'discussion'; userMessage: string; answer: string; lines?: string[]; sourceRefs: SourceRef[]; createdAt: string; groundingStatus: 'supported' | 'partial' | 'unsupported' | null; requestId: string | null; flow?: TutorFlow | null }
+export type QuestionBody = { question: string; request_id: string; expected_version: number; help_mode?: HelpMode; reply_to_interaction_id?: string | null; reflection?: string | null }
 export type QuestionResponse = { interaction: TutorInteraction; session: Session }
-export type Session = { sessionId: string; episodeId: string; mode: SessionMode; sceneId: string; dialogueIndex: number; version: number; status: 'active' | 'completed' | 'abandoned'; updatedAt: string; checkpoint?: Checkpoint | null; resumeSnapshot?: { sceneId: string; dialogueIndex: number; mode: SessionMode } | null; interactions?: TutorInteraction[]; learningNotes?: string[]; quizAttempts: { questionId: string; selectedOptionId: string; correct: boolean; attemptNumber: number; timestamp: string }[] }
+export type Session = { sessionId: string; episodeId: string; mode: SessionMode; sceneId: string; dialogueIndex: number; version: number; status: 'active' | 'completed' | 'abandoned'; updatedAt: string; checkpoint?: Checkpoint | null; resumeSnapshot?: { sceneId: string; dialogueIndex: number; mode: SessionMode } | null; interactions?: TutorInteraction[]; learningNotes?: string[]; tutorThreadId?: string | null; quizAttempts: { questionId: string; selectedOptionId: string; correct: boolean; attemptNumber: number; timestamp: string }[] }
 
 export class ApiError extends Error {
   status: number
@@ -45,7 +51,7 @@ export const api = {
   advance: (session: string, body: { request_id: string; expected_version: number }) => request<Session>(`/api/sessions/${id(session)}/advance`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   answer: (session: string, body: AnswerRequest) => request<Session>(`/api/sessions/${id(session)}/answers`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   raiseHand: (session: string, body: { request_id: string; expected_version: number }) => request<Session>(`/api/sessions/${id(session)}/raise-hand`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
-  askQuestion: (session: string, body: { question: string; request_id: string; expected_version: number }) => request<QuestionResponse>(`/api/sessions/${id(session)}/questions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  askQuestion: (session: string, body: QuestionBody) => request<QuestionResponse>(`/api/sessions/${id(session)}/questions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   resume: (session: string, body: { request_id: string; expected_version: number }) => request<Session>(`/api/sessions/${id(session)}/resume`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
 }
 

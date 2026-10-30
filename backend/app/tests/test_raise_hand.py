@@ -25,6 +25,7 @@ from app.models.episode import (
 )
 from app.models.session import (
     AnswerRequest,
+    Position,
     QuestionRequest,
     TutorInteraction,
 )
@@ -137,6 +138,8 @@ class StubProvider:
             "cited_chunk_ids": ["c1"],
             "grounding_status": "supported",
             "learning_note": "reasons",
+            "move": "explain",
+            "engagement": "engaged",
         }
         self.error = error
         self.count = count
@@ -187,6 +190,84 @@ def _interaction(request_id="q1") -> TutorInteraction:
         groundingStatus="supported",
         requestId=request_id,
     )
+
+
+# --- models: additive dialogue-flow fields ---
+
+
+def test_question_request_defaults_and_optional_fields():
+    request = QuestionRequest(
+        question="why?", request_id="q1", expected_version=2
+    )
+    assert request.help_mode == "explain"
+    assert request.reply_to_interaction_id is None
+    assert request.reflection is None
+    request = QuestionRequest(
+        question="more?",
+        request_id="q2",
+        expected_version=3,
+        help_mode="hint",
+        reply_to_interaction_id="i1",
+        reflection="  it points at floods  ",
+    )
+    assert request.help_mode == "hint"
+    assert request.reply_to_interaction_id == "i1"
+    assert request.reflection == "it points at floods"
+    for bad in ("", "   ", "x" * 501):
+        with pytest.raises(Exception):
+            QuestionRequest(
+                question="q", request_id="r", expected_version=1, reflection=bad
+            )
+
+
+def test_session_payload_round_trips_flow_and_thread():
+    from app.models.session import LearnerSession, TutorFlow
+    session = new_session(_script()).model_copy(
+        update={
+            "mode": "question",
+            "tutorThreadId": "s:2",
+            "interactions": [
+                TutorInteraction(
+                    interactionId="i1",
+                    kind="raise_hand",
+                    userMessage="why?",
+                    answer="because",
+                    createdAt="now",
+                    flow=TutorFlow(
+                        threadId="s:2",
+                        topicQuestion="why?",
+                        helpMode="hint",
+                        move="hint",
+                        hintLevel=2,
+                        awaiting="reflection",
+                    ),
+                )
+            ],
+        }
+    )
+    restored = LearnerSession.model_validate_json(session.model_dump_json())
+    assert restored.tutorThreadId == "s:2"
+    flow = restored.interactions[0].flow
+    assert flow.hintLevel == 2 and flow.awaiting == "reflection"
+    assert flow.helpMode == "hint" and flow.topicQuestion == "why?"
+
+
+def test_legacy_payloads_default_to_no_flow_or_thread():
+    import json
+    session = new_session(_script()).model_copy(
+        update={"mode": "question", "interactions": [_interaction()]}
+    )
+    data = json.loads(session.model_dump_json())
+    del data["tutorThreadId"]  # simulate a pre-flow payload
+    del data["interactions"][0]["flow"]
+    from app.models.session import LearnerSession
+    restored = LearnerSession.model_validate(data)
+    assert restored.tutorThreadId is None
+    assert restored.interactions[0].flow is None
+    # Old-reader tolerance: a flow-bearing interaction still exposes the
+    # legacy fields an old consumer used.
+    dumped = json.loads(session.model_dump_json())
+    assert dumped["interactions"][0]["answer"] == "because"
 
 
 # --- controller transitions ---
@@ -334,6 +415,278 @@ def test_commit_question_rechecks_state_after_resume_race(tmp_path):
     assert persisted.interactions == []
 
 
+# --- thread identity and anchors (1.3) ---
+
+
+def test_raise_hand_assigns_thread_and_resume_clears(tmp_path):
+    _seed(tmp_path)
+    session = create_session(tmp_path, "ep")
+    raised = apply_raise_hand(tmp_path, session.sessionId, "h1", 1)
+    assert raised.tutorThreadId == f"{session.sessionId}:2"
+    resumed = apply_resume(tmp_path, session.sessionId, "r1", 2)
+    assert resumed.tutorThreadId is None
+    assert get_session(tmp_path, session.sessionId).tutorThreadId is None
+
+
+def _flow_interaction(thread_id, request_id, iid="i1", move="explain",
+                      awaiting="none", level=None, topic="why?"):
+    from app.models.session import TutorFlow
+    return TutorInteraction(
+        interactionId=iid, kind="raise_hand", userMessage="why?",
+        answer="because", lines=["because"], createdAt="now",
+        requestId=request_id,
+        flow=TutorFlow(
+            threadId=thread_id, topicQuestion=topic, helpMode="explain",
+            move=move, hintLevel=level, awaiting=awaiting,
+        ),
+    )
+
+
+def test_anchor_validation_before_spend(tmp_path):
+    _seed(tmp_path)
+    session = create_session(tmp_path, "ep")
+    raised = apply_raise_hand(tmp_path, session.sessionId, "h1", 1)
+    tid = raised.tutorThreadId
+    first = QuestionRequest(question="why?", request_id="q1",
+                            expected_version=2)
+    commit_question(tmp_path, session.sessionId, first,
+                    _flow_interaction(tid, "q1", iid="i1"), "note")
+
+    # Anchored to the latest thread turn: allowed through precheck.
+    ok = QuestionRequest(question="more?", request_id="q2",
+                         expected_version=3, reply_to_interaction_id="i1")
+    prepared, episode, recorded = prepare_question(
+        tmp_path, session.sessionId, ok)
+    assert recorded is None and episode is not None
+
+    # Missing, superseded and foreign anchors reject before episode load.
+    for anchor in ("ghost", "other-session-interaction"):
+        with pytest.raises(ValueError):
+            prepare_question(tmp_path, session.sessionId,
+                             QuestionRequest(question="x?", request_id="bad",
+                                             expected_version=3,
+                                             reply_to_interaction_id=anchor))
+    commit_question(tmp_path, session.sessionId, ok,
+                    _flow_interaction(tid, "q2", iid="i2"), None)
+    with pytest.raises(ValueError):
+        prepare_question(tmp_path, session.sessionId,
+                         QuestionRequest(question="x?", request_id="stale",
+                                         expected_version=4,
+                                         reply_to_interaction_id="i1"))
+
+
+def test_anchor_rejection_writes_no_tombstone(tmp_path):
+    _seed(tmp_path)
+    session = create_session(tmp_path, "ep")
+    apply_raise_hand(tmp_path, session.sessionId, "h1", 1)
+    with pytest.raises(ValueError):
+        prepare_question(tmp_path, session.sessionId,
+                         QuestionRequest(question="x?", request_id="q1",
+                                         expected_version=2,
+                                         reply_to_interaction_id="nope"))
+    # The same request id retries as a plain question — nothing was recorded.
+    clean = QuestionRequest(question="x?", request_id="q1",
+                            expected_version=2)
+    _, episode, recorded = prepare_question(tmp_path, session.sessionId, clean)
+    assert recorded is None and episode is not None
+
+
+def test_replay_wins_before_anchor_validation(tmp_path):
+    _seed(tmp_path)
+    session = create_session(tmp_path, "ep")
+    apply_raise_hand(tmp_path, session.sessionId, "h1", 1)
+    request = QuestionRequest(question="why?", request_id="q1",
+                            expected_version=2, help_mode="hint")
+    commit_question(tmp_path, session.sessionId, request,
+                    _flow_interaction(f"{session.sessionId}:2", "q1"), None)
+    # Replaying with a now-stale anchor still returns the recorded turn.
+    replay = QuestionRequest(question="why?", request_id="q1",
+                             expected_version=2, help_mode="hint",
+                             reply_to_interaction_id="i1")
+    _, _, recorded = prepare_question(tmp_path, session.sessionId, replay)
+    assert recorded.interactionId == "i1"
+
+
+def test_legacy_question_session_gains_thread_lazily(tmp_path):
+    _seed(tmp_path)
+    session = create_session(tmp_path, "ep")
+    apply_raise_hand(tmp_path, session.sessionId, "h1", 1)
+    # Simulate a pre-flow stored session: strip the thread identity.
+    conn = sqlite3.connect(tmp_path / "app.db")
+    payload = conn.execute(
+        "SELECT payload FROM learner_sessions WHERE session_id = ?",
+        (session.sessionId,)).fetchone()[0]
+    import json as _json
+    data = _json.loads(payload)
+    del data["tutorThreadId"]
+    conn.execute(
+        "UPDATE learner_sessions SET payload = ? WHERE session_id = ?",
+        (_json.dumps(data), session.sessionId))
+    conn.commit()
+    conn.close()
+
+    request = QuestionRequest(question="why?", request_id="q1",
+                              expected_version=2)
+    interaction = _flow_interaction(f"{session.sessionId}:2", "q1")
+    updated, _ = commit_question(tmp_path, session.sessionId, request,
+                                 interaction, None)
+    assert updated.tutorThreadId == f"{session.sessionId}:2"
+    assert updated.interactions[-1].flow.threadId == updated.tutorThreadId
+    assert updated.version == 3  # one write, one increment
+
+
+# --- tutor context assembly and flow metadata (2.2/2.3) ---
+
+
+def _capture_retriever(passages):
+    calls = []
+
+    def retriever(document_id, query, **kw):
+        calls.append((document_id, query))
+        return passages
+
+    return calls, retriever
+
+
+@pytest.mark.anyio
+async def test_anchored_retrieval_query_and_lesson_context(tmp_path):
+    init_db(tmp_path)
+    settings = _settings()
+    stub = StubProvider()
+    provider = MeteredProvider(stub, settings, tmp_path)
+    session = raise_hand(
+        new_session(_script()).model_copy(
+            update={"sceneId": "s2", "dialogueIndex": 0, "mode": "checkpoint"}
+        )
+    )
+    parent = _flow_interaction(session.tutorThreadId, "q0", iid="p1",
+                               topic="silt", move="explain")
+    session = session.model_copy(update={
+        "mode": "question",
+        "interactions": [parent],
+        "resumeSnapshot": Position(
+            sceneId="s2", dialogueIndex=0, mode="checkpoint"),
+    })
+    calls, retriever = _capture_retriever(_passages("c1"))
+    episode = _script()
+    episode.scenes[1].question.correctExplanation = "SECRET-CORRECT-KEY"
+    episode.scenes[1].question.incorrectExplanation = "SECRET-WRONG-KEY"
+    episode.scenes[1].question.options[0].mistakeResponse = "SECRET-MISTAKE"
+    await answer_question(
+        provider=provider, session=session, episode=episode,
+        request=QuestionRequest(
+            question="why does it flood?", request_id="q1",
+            expected_version=2, reply_to_interaction_id="p1"),
+        settings=settings, retriever=retriever,
+    )
+    document_id, query = calls[0]
+    assert document_id == "d"  # retrieval stays document-scoped
+    assert "silt" in query and "why?" in query and "why does it flood?" in query
+    assert len(query) <= 1500
+    user = stub.calls[0]["user"]
+    assert "Unfinished recall checkpoint: P?" in user
+    assert "Options shown to the learner: A, B" in user
+    # Private grading data never reaches the model.
+    for secret in ("SECRET-CORRECT-KEY", "SECRET-WRONG-KEY",
+                   "SECRET-MISTAKE", "correctOptionId"):
+        assert secret not in user
+    assert len(stub.calls) == 1
+
+
+@pytest.mark.anyio
+async def test_dialogue_lesson_context_and_bounded_history(tmp_path):
+    init_db(tmp_path)
+    settings = _settings()
+    stub = StubProvider()
+    provider = MeteredProvider(stub, settings, tmp_path)
+    session = raise_hand(new_session(_script()).model_copy(
+        update={"sceneId": "s1", "dialogueIndex": 1}))
+    tid = session.tutorThreadId
+    long_turns = [
+        _flow_interaction(tid, f"q{i}", iid=f"t{i}", topic="t",
+                          move="explain").model_copy(update={
+            "userMessage": "u" * 300, "answer": "a" * 300})
+        for i in range(8)
+    ]
+    session = session.model_copy(update={
+        "mode": "question",
+        "interactions": long_turns,
+        "resumeSnapshot": Position(
+            sceneId="s1", dialogueIndex=1, mode="playing"),
+    })
+    calls, retriever = _capture_retriever(_passages("c1"))
+    await answer_question(
+        provider=provider, session=session, episode=_script(),
+        request=QuestionRequest(question="next?", request_id="qx",
+                                expected_version=2,
+                                reply_to_interaction_id="t7"),
+        settings=settings, retriever=retriever,
+    )
+    user = stub.calls[0]["user"]
+    assert 'current mascot line: two' in user
+    history = user.split("Earlier turns in this thread:")[1]
+    history = history.split("Retrieved passages:")[0]
+    assert len(history) <= 2100
+    # Older turns drop whole — the suffix never slices mid-message.
+    assert history.strip().startswith("Learner:")
+
+
+@pytest.mark.anyio
+async def test_flow_metadata_stamped_and_reflection_recorded(tmp_path):
+    init_db(tmp_path)
+    settings = _settings()
+    stub = StubProvider(data={
+        "lines": ["What did you try so far?"],
+        "cited_chunk_ids": [],
+        "grounding_status": "supported",
+        "learning_note": "stuck on checkpoint",
+        "move": "diagnose",
+        "engagement": "engaged",
+    })
+    provider = MeteredProvider(stub, settings, tmp_path)
+    session = raise_hand(new_session(_script())).model_copy(
+        update={"mode": "question"})
+    request = QuestionRequest(
+        question="help me", request_id="q1", expected_version=2,
+        help_mode="hint")
+    result = await answer_question(
+        provider=provider, session=session, episode=_script(),
+        request=request, settings=settings,
+        retriever=_stub_retriever(_passages("c1")),
+    )
+    flow = result.interaction.flow
+    assert flow.threadId == session.tutorThreadId
+    assert flow.topicQuestion == "help me"
+    assert flow.replyToInteractionId is None
+    assert (flow.helpMode, flow.move, flow.hintLevel, flow.awaiting) == (
+        "hint", "diagnose", 0, "attempt")
+    assert flow.reflection is None
+    assert result.interaction.lines == ["What did you try so far?"]
+    # One metered call carries every observation — no second model round.
+    schema = stub.calls[0]["schema"]
+    assert set(schema["properties"]) >= {"move", "engagement"}
+    assert schema["properties"]["lines"]["minItems"] == 1
+
+
+@pytest.mark.anyio
+async def test_provider_failure_advances_nothing(tmp_path):
+    init_db(tmp_path)
+    settings = _settings()
+    stub = StubProvider(
+        error=ModelProviderError("HTTP_500", "upstream", retryable=True))
+    provider = MeteredProvider(stub, settings, tmp_path)
+    session = raise_hand(new_session(_script())).model_copy(
+        update={"mode": "question"})
+    with pytest.raises(ModelProviderError):
+        await answer_question(
+            provider=provider, session=session, episode=_script(),
+            request=QuestionRequest(question="q?", request_id="q1",
+                                    expected_version=2, help_mode="hint"),
+            settings=settings, retriever=_stub_retriever([]),
+        )
+    assert session.interactions == []  # no turn, no level movement
+
+
 def test_request_id_kind_conflict_across_operations(tmp_path):
     _seed(tmp_path)
     session = create_session(tmp_path, "ep")
@@ -369,8 +722,9 @@ async def test_answer_question_verifies_citations(tmp_path):
         provider=provider,
         session=session,
         episode=_script(),
-        question="why?",
-        request_id="q1",
+        request=QuestionRequest(
+            question="why?", request_id="q1", expected_version=1
+        ),
         settings=settings,
         retriever=_stub_retriever(_passages("c1", "c2")),
     )
@@ -406,8 +760,9 @@ async def test_answer_question_unsupported_when_retrieval_empty(tmp_path):
         provider=provider,
         session=session,
         episode=_script(),
-        question="unrelated?",
-        request_id="q1",
+        request=QuestionRequest(
+            question="unrelated?", request_id="q1", expected_version=1
+        ),
         settings=settings,
         retriever=_stub_retriever([]),
     )
@@ -431,8 +786,9 @@ async def test_answer_question_empty_lines_falls_back(tmp_path):
         provider=provider,
         session=new_session(_script()),
         episode=_script(),
-        question="why?",
-        request_id="q1",
+        request=QuestionRequest(
+            question="why?", request_id="q1", expected_version=1
+        ),
         settings=settings,
         retriever=_stub_retriever([]),
     )
@@ -546,6 +902,83 @@ def test_question_endpoint_answers_and_replays(tmp_path):
         assert restored["interactions"][-1]["lines"] == [
             "Because reasons.", "More reasons."
         ]
+
+
+def test_question_endpoint_anchor_422_and_flow_round_trip(tmp_path):
+    with _client(tmp_path) as client:
+        stub = StubProvider(data={
+            "lines": ["What have you tried?"],
+            "cited_chunk_ids": [],
+            "grounding_status": "supported",
+            "learning_note": "hint start",
+            "move": "diagnose",
+            "engagement": "engaged",
+        })
+        client.app.state.tutor_provider = MeteredProvider(
+            stub, _settings(), tmp_path
+        )
+        client.app.state.retriever = _stub_retriever(_passages("c1"))
+
+        sid = client.post("/api/episodes/ep/sessions").json()["sessionId"]
+        _raise_hand(client, sid)
+
+        # Anchoring a turn that does not exist rejects 422, before spend.
+        bad = client.post(
+            f"/api/sessions/{sid}/questions",
+            json={
+                "question": "follow up?",
+                "request_id": "qa",
+                "expected_version": 2,
+                "reply_to_interaction_id": "ghost",
+            },
+        )
+        assert bad.status_code == 422
+        assert bad.json()["error"]["code"] == "VALIDATION_ERROR"
+        assert len(stub.calls) == 0
+
+        hinted = client.post(
+            f"/api/sessions/{sid}/questions",
+            json={
+                "question": "help me",
+                "request_id": "q1",
+                "expected_version": 2,
+                "help_mode": "hint",
+            },
+        )
+        assert hinted.status_code == 200
+        flow = hinted.json()["interaction"]["flow"]
+        assert flow["move"] == "diagnose" and flow["hintLevel"] == 0
+        assert flow["awaiting"] == "attempt"
+        assert flow["threadId"] == hinted.json()["session"]["tutorThreadId"]
+        iid = hinted.json()["interaction"]["interactionId"]
+
+        # Anchored follow-up rides the same thread; the envelope is stable.
+        stub.data = {
+            "lines": ["A level-one nudge."],
+            "cited_chunk_ids": [],
+            "grounding_status": "supported",
+            "learning_note": "l1",
+            "move": "hint",
+            "engagement": "engaged",
+        }
+        followed = client.post(
+            f"/api/sessions/{sid}/questions",
+            json={
+                "question": "I tried option B",
+                "request_id": "q2",
+                "expected_version": hinted.json()["session"]["version"],
+                "help_mode": "hint",
+                "reply_to_interaction_id": iid,
+                "reflection": "I tried option B",
+            },
+        )
+        assert followed.status_code == 200
+        flow2 = followed.json()["interaction"]["flow"]
+        assert flow2["replyToInteractionId"] == iid
+        assert flow2["topicQuestion"] == "help me"
+        assert flow2["hintLevel"] == 1 and flow2["awaiting"] == "reflection"
+        assert flow2["reflection"] == "I tried option B"
+        assert len(stub.calls) == 2
 
 
 def test_question_provider_failure_preserves_state_and_retries(tmp_path):

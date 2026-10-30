@@ -141,6 +141,7 @@ def test_session_model_serializes_spec_field_names():
         "checkpoint",
         "interactions",
         "learningNotes",
+        "tutorThreadId",
         "version",
         "status",
         "updatedAt",
