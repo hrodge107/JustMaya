@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { api, ApiError, type AnswerRequest, type Emotion, type Episode, type Scene, type Session } from '../learnerApi'
+import { api, ApiError, type AnswerRequest, type AwaitingKind, type Emotion, type Episode, type HelpMode, type Scene, type Session } from '../learnerApi'
 import { useReducedMotion } from '../motionPreference'
 import MascotStage from './MascotStage'
 import MotionToggle from './MotionToggle'
@@ -72,6 +72,8 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
   const [answerReady, setAnswerReady] = useState(false)
   const [echoDone, setEchoDone] = useState(false)
   const [askError, setAskError] = useState('')
+  const [helpMode, setHelpMode] = useState<HelpMode>('explain')
+  const [newTopic, setNewTopic] = useState(false)
   const [sourcesFor, setSourcesFor] = useState<string | null>(null)
   // Beat position is keyed to its interaction so a new turn restarts at beat 0.
   const [beat, setBeat] = useState({ id: '', index: 0 })
@@ -79,7 +81,7 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
   const returnSeq = useRef(0)
   const advanceRequest = useRef<{ request_id: string; expected_version: number } | null>(null)
   const raiseRequest = useRef<{ request_id: string; expected_version: number } | null>(null)
-  const questionRequest = useRef<{ question: string; request_id: string; expected_version: number } | null>(null)
+  const questionRequest = useRef<{ question: string; help_mode: HelpMode; reply_to_interaction_id: string | null; reflection: string | null; request_id: string; expected_version: number } | null>(null)
   const resumeRequest = useRef<{ request_id: string; expected_version: number } | null>(null)
   const reloadRequired = useRef(false)
   const alive = useRef(true)
@@ -108,7 +110,8 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
           if (s.mode === 'question') {
             const last = (s.interactions ?? []).filter(i => i.kind === 'raise_hand').at(-1)
             if (last) {
-              const lastBeat = (last.lines?.length || 0) > 0 ? last.lines!.length : 1
+              const content = (last.lines?.length || 0) > 0 ? last.lines!.length : 1
+              const lastBeat = content - (last.flow?.awaiting && last.flow.awaiting !== 'none' ? 1 : 0)
               setBeat({ id: last.interactionId, index: lastBeat })
               setRestoredTurn(`ask:${last.interactionId}:${lastBeat}`)
             }
@@ -134,9 +137,15 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
   const tutorTurns = (session?.interactions ?? []).filter(i => i.kind === 'raise_hand')
   const lastTurn = tutorTurns.length ? tutorTurns[tutorTurns.length - 1] : null
   const inQuestion = mode === 'question'
-  // The tutor's content beats plus one frontend-composed closing cue beat.
+  // Flow metadata restored from the persisted session: the live thread
+  // anchor, the awaiting kind (closing cue suppressed while the tutor
+  // expects a learner response), and the current help mode's topic.
+  const awaitingKind: AwaitingKind = lastTurn?.flow?.awaiting ?? 'none'
+  const anchored = !!lastTurn?.flow && !!session?.tutorThreadId && lastTurn.flow.threadId === session.tutorThreadId && !newTopic
+  // The tutor's content beats plus one frontend-composed closing cue beat —
+  // omitted while a turn awaits an attempt, reflection or clarification.
   const contentBeats = lastTurn?.lines?.length ? lastTurn.lines : lastTurn ? [lastTurn.answer] : []
-  const beats = lastTurn ? [...contentBeats, closingCue(lastTurn.interactionId, tutorTurns.length)] : []
+  const beats = lastTurn ? [...contentBeats, ...(awaitingKind === 'none' ? [closingCue(lastTurn.interactionId, tutorTurns.length)] : [])] : []
   const beatIndex = lastTurn && beat.id === lastTurn.interactionId ? beat.index : 0
   const onFinalBeat = beatIndex >= beats.length - 1
   // The sent question displays while beats play; the closing beat lands a
@@ -279,19 +288,29 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
     const question = draft.trim()
     if (!session || !inQuestion || !question || awaiting || advancing.current || reloadRequired.current) return
     advancing.current = true
-    // Same text retries the same request id; edited text is a new request.
-    if (questionRequest.current?.question !== question) {
-      questionRequest.current = { question, request_id: crypto.randomUUID(), expected_version: session.version }
+    // The action is every field: identical retry reuses the request id, any
+    // change to text, mode, anchor or reflection is a new action.
+    const action = {
+      question,
+      help_mode: helpMode,
+      reply_to_interaction_id: anchored ? lastTurn!.interactionId : null,
+      reflection: anchored && awaitingKind === 'reflection' ? question : null,
+    }
+    const prev = questionRequest.current
+    if (!prev || prev.question !== action.question || prev.help_mode !== action.help_mode
+        || prev.reply_to_interaction_id !== action.reply_to_interaction_id || prev.reflection !== action.reflection) {
+      questionRequest.current = { ...action, request_id: crypto.randomUUID(), expected_version: session.version }
     }
     setSentDraft(question)
     setAskSeq(s => s + 1)
     setEchoDone(reduced)
     setAsking(true); setAnswerReady(false); setPending(true); setAskError('')
+    const body = questionRequest.current!
     try {
-      const res = await api.askQuestion(sessionId, questionRequest.current)
+      const res = await api.askQuestion(sessionId, body)
       questionRequest.current = null
       acceptSession(res.session)
-      if (alive.current) { setDraft(''); setAnswerReady(true) }
+      if (alive.current) { setDraft(''); setNewTopic(false); setAnswerReady(true) }
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         questionRequest.current = null
@@ -300,7 +319,8 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
         if (alive.current) setAsking(false)
       } else if (err instanceof ApiError && err.status === 422) {
         questionRequest.current = null
-        if (alive.current) { setAskError(err.message); setAsking(false) }
+        // Anchor rejected: detach so the retry can send as a new topic.
+        if (alive.current) { setNewTopic(true); setAskError(err.message); setAsking(false) }
       } else if (alive.current) { setAskError(err instanceof Error ? err.message : 'Could not send your question.'); setAsking(false) }
     } finally { advancing.current = false; if (alive.current) setPending(false) }
   }
@@ -316,7 +336,7 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
       resumeRequest.current = null
       acceptSession(next)
       if (alive.current) {
-        setDraft(''); setAskError('')
+        setDraft(''); setAskError(''); setNewTopic(false); setHelpMode('explain')
         if (hadAnswers) setReturnBeat({
           text: drawCue(`return:${lastTurn?.interactionId ?? 'lesson'}:${returnSeq.current}`, BACK_TO_LESSON),
           seq: ++returnSeq.current,
@@ -445,8 +465,11 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
           submittedOptionId={submittedOptionId} eliminated={eliminated} reloadRequired={needsReload} onAnswer={optionId => void submitAnswer(optionId)} />}
         {inQuestion && <RaiseHandPanel phase={askPhase} draft={draft} hasAsked={hasAsked}
           turnComplete={onFinalBeat} resumeLabel={resumeLabel}
-          busy={pending} error={askError} onDraft={setDraft} onSend={() => void sendQuestion()}
-          onResume={() => void resumeLesson()} />}
+          busy={pending} error={askError} helpMode={helpMode} anchored={anchored} awaiting={awaitingKind}
+          onDraft={setDraft} onSend={() => void sendQuestion()}
+          onResume={() => void resumeLesson()}
+          onHelpMode={setHelpMode}
+          onNewTopic={() => { setDraft(''); setNewTopic(true); setHelpMode('explain') }} />}
       </section>
       <section className="vn-dialogue" aria-label="Dialogue">
         {(canRaise || inQuestion) && (

@@ -59,6 +59,31 @@ class CheckpointState(BaseModel):
     correctOptionId: str | None = None
 
 
+HELP_MODES = ("explain", "hint")
+TUTOR_MOVES = (
+    "explain",
+    "clarify",
+    "diagnose",
+    "hint",
+    "foundation",
+    "unsupported",
+    "resolved",
+)
+AWAITING_KINDS = ("none", "attempt", "reflection", "clarification")
+
+
+class TutorFlow(BaseModel):
+    """Server-owned dialogue metadata for one tutor turn (additive)."""
+    threadId: str
+    topicQuestion: str = Field(max_length=500)
+    replyToInteractionId: str | None = None
+    helpMode: Literal["explain", "hint"]
+    move: Literal[*TUTOR_MOVES]
+    hintLevel: int | None = Field(default=None, ge=0, le=5)
+    reflection: str | None = Field(default=None, max_length=500)
+    awaiting: Literal[*AWAITING_KINDS] = "none"
+
+
 class TutorInteraction(BaseModel):
     interactionId: str
     kind: Literal["raise_hand", "discussion"]
@@ -69,6 +94,7 @@ class TutorInteraction(BaseModel):
     createdAt: str
     groundingStatus: Literal["supported", "partial", "unsupported"] | None = None
     requestId: str | None = None
+    flow: TutorFlow | None = None
 
 
 class LearnerSession(BaseModel):
@@ -82,6 +108,7 @@ class LearnerSession(BaseModel):
     checkpoint: CheckpointState | None = None
     interactions: list[TutorInteraction] = []
     learningNotes: list[str] = []
+    tutorThreadId: str | None = None
     version: int = Field(ge=1)
     status: Literal[*SESSION_STATUSES]
     updatedAt: str
@@ -100,6 +127,7 @@ class AnswerRequest(BaseModel):
 
 
 QUESTION_MAX_LENGTH = 500
+REFLECTION_MAX_LENGTH = 500
 
 
 class RaiseHandRequest(BaseModel):
@@ -116,6 +144,17 @@ class QuestionRequest(BaseModel):
     ]
     request_id: str = Field(min_length=1)
     expected_version: int = Field(ge=1)
+    # Optional dialogue-flow fields; absent means an explanation on a new topic.
+    help_mode: Literal["explain", "hint"] = "explain"
+    reply_to_interaction_id: str | None = None
+    reflection: Annotated[
+        str | None,
+        StringConstraints(
+            strip_whitespace=True,
+            min_length=1,
+            max_length=REFLECTION_MAX_LENGTH,
+        ),
+    ] = None
 
 
 class ResumeRequest(BaseModel):

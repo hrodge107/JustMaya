@@ -24,6 +24,7 @@ from app.services.session_controller import (
     new_session,
     restore_checkpoint,
 )
+from app.services.tutor_flow import validate_anchor
 from app.services.session_controller import answer as answer_session
 from app.services.session_controller import raise_hand as raise_hand_session
 from app.services.session_controller import resume as resume_session
@@ -238,6 +239,8 @@ def prepare_question(
             raise SessionConflict("Session version is stale.")
         if session.mode != MODE_QUESTION:
             raise InvalidSessionTransition("Session is not in question mode.")
+        # Anchors resolve against the active thread before any spend (422).
+        validate_anchor(session, request.reply_to_interaction_id)
         episode_row = conn.execute(
             "SELECT payload FROM episodes WHERE episode_id = ?",
             (session.episodeId,),
@@ -298,12 +301,19 @@ def commit_question(
             [*session.learningNotes, learning_note]
             if learning_note else session.learningNotes
         )
-        updated = session.model_copy(update={
+        update: dict = {
             "interactions": [*session.interactions, interaction],
             "learningNotes": notes,
             "version": session.version + 1,
             "updatedAt": _now(),
-        })
+        }
+        if session.tutorThreadId is None:
+            # Legacy question-mode sessions gain the interrupt identity
+            # lazily in this same write — no extra write or increment.
+            update["tutorThreadId"] = (
+                f"{session.sessionId}:{session.version}"
+            )
+        updated = session.model_copy(update=update)
         _write(conn, updated)
         conn.commit()
         return updated, interaction

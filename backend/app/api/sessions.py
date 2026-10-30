@@ -148,8 +148,7 @@ async def question_endpoint(
             provider=provider,
             session=session,
             episode=episode,
-            question=body.question,
-            request_id=body.request_id,
+            request=body,
             settings=request.app.state.settings,
             retriever=getattr(request.app.state, "retriever", retrieve),
         )
