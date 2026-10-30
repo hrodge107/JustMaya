@@ -39,7 +39,8 @@ def _question(question_id="q-1", **kwargs):
         **{"questionId": question_id,
            "prompt": "Which?",
            "objectiveId": "obj-1",
-           "options": [AnswerOption(optionId="a", label="A"), AnswerOption(optionId="b", label="B")],
+           "options": [AnswerOption(optionId="a", label="A", mistakeResponse="Not A."),
+                       AnswerOption(optionId="b", label="B", mistakeResponse="Not B.")],
            "correctOptionId": "a",
            "correctExplanation": "Because.",
            "incorrectExplanation": "Try again.",
@@ -127,6 +128,27 @@ def test_invented_chunk_and_web_refs_flagged():
     assert any("chunkId does not resolve" in v for v in violations)
     assert any("webRef url not supplied" in v for v in violations)
     assert any("pages do not match the chunk" in v for v in violations)
+
+
+def test_option_mistake_response_invariant():
+    scenes = _valid_scenes()
+    scenes[1].question.options[0].mistakeResponse = None
+    scenes[1].question.options[1].mistakeResponse = "   "
+    violations = validate_script(_script(scenes), CHUNKS, OBJECTIVES, WEB_URLS)
+    assert any("q-1.a: mistakeResponse required" in v for v in violations)
+    assert any("q-1.b: mistakeResponse required" in v for v in violations)
+    assert any("q-2.a: mistakeResponse" not in v for v in violations)
+
+
+def test_learner_view_strips_option_responses():
+    from app.models.episode import learner_view
+    script = _script(_valid_scenes())
+    question = learner_view(script)["scenes"][1]["question"]
+    for option in question["options"]:
+        assert set(option) == {"optionId", "label"}
+    assert "feedback" not in question and "correctOptionId" not in question
+    persisted = script.model_dump()["scenes"][1]["question"]
+    assert all("mistakeResponse" in o for o in persisted["options"])
 
 
 def test_question_invariants_flagged():

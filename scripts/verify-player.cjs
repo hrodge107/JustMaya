@@ -19,7 +19,7 @@ const episode = {
       { lineId: 'one', speaker: 'mascot', text: 'Rivers shaped the first cities. Let us follow how people learned to work together.', emotion: 'talking', sourceRefs: ['PRIVATE-REFERENCE'] },
       { lineId: 'two', speaker: 'narrator', text: 'Water made farming possible, and shared work supported growing communities.', emotion: 'idle' },
     ] },
-    { sceneId: 'checkpoint', kind: 'checkpoint', nextSceneId: 'ending', dialogue: [], question: { questionId: 'q', prompt: 'Why did early settlements grow near rivers?', options: [{ optionId: 'a', label: 'Water and farming' }, { optionId: 'b', label: 'No shared work' }], maxAttempts: 2 } },
+    { sceneId: 'checkpoint', kind: 'checkpoint', nextSceneId: 'ending', dialogue: [], question: { questionId: 'q', prompt: 'Why did early settlements grow near rivers?', options: [{ optionId: 'a', label: 'Water and farming' }, { optionId: 'b', label: 'No shared work' }] } },
     { sceneId: 'ending', kind: 'ending', nextSceneId: null, question: null, dialogue: [{ lineId: 'end', speaker: 'mascot', text: 'You have reached the end of this episode.', emotion: 'happy' }] },
   ], learningObjectives: [], estimatedMinutes: 1,
 }

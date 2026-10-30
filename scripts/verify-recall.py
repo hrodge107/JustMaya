@@ -1,4 +1,6 @@
-"""Exercise B04 against a SQLite backup of the published Episode 1, zero model calls."""
+"""Exercise the recall-checkpoint contract against a SQLite backup of the
+published Episode 1 — elimination grading, per-option released feedback via
+the compatibility fallback chain, zero model calls."""
 import json
 import os
 from pathlib import Path
@@ -35,28 +37,43 @@ def main():
             result = client.post(path, json=body)
             assert result.status_code == 200, result.text
             return result.json()
-        for outcome in ["correct-first", "wrong-correct", "wrong-wrong"]:
+        for outcome in ["correct-first", "wrong-correct", "all-wrong"]:
             session = post(f"/api/episodes/{episode['episodeId']}/sessions")
+            missed = 0
             for scene_id in required:
                 while session['sceneId'] != scene_id:
                     session = post(f"/api/sessions/{session['sessionId']}/advance", {"request_id": uuid.uuid4().hex, "expected_version": session['version']})
                 question = next(s['question'] for s in episode['scenes'] if s['sceneId'] == scene_id)
-                wrong = next(o['optionId'] for o in question['options'] if o['optionId'] != question['correctOptionId'])
-                options = [question['correctOptionId']] if outcome == 'correct-first' else [wrong, question['correctOptionId'] if outcome == 'wrong-correct' else wrong]
-                for option in options:
+                right = question['correctOptionId']
+                wrongs = [o['optionId'] for o in question['options'] if o['optionId'] != right]
+                if outcome == 'correct-first':
+                    answers = [right]
+                elif outcome == 'wrong-correct':
+                    answers = [wrongs[0], right]
+                else:
+                    answers = [*wrongs, right]
+                missed += bool(wrongs and outcome != 'correct-first')
+                for option in answers:
                     body = {"request_id": uuid.uuid4().hex, "expected_version": session['version'], "questionId": question['questionId'], "optionId": option}
                     session = post(f"/api/sessions/{session['sessionId']}/answers", body)
                     assert post(f"/api/sessions/{session['sessionId']}/answers", body) == session
                     assert client.get(f"/api/sessions/{session['sessionId']}").json() == session
-                    if not session['checkpoint']['checkpointCompleted']:
-                        assert 'correctOptionId' not in session['checkpoint']
-                        assert session['checkpoint']['attemptsRemaining'] == 1
-                assert session['checkpoint']['checkpointCompleted']
-                assert session['checkpoint']['isCorrect'] == (outcome != 'wrong-wrong')
-                assert session['checkpoint']['attemptsUsed'] == len(options)
+                    if option != right:
+                        checkpoint = session['checkpoint']
+                        assert not checkpoint['checkpointCompleted']
+                        assert 'correctOptionId' not in checkpoint
+                        assert checkpoint['feedback']
+                        # an eliminated option is rejected without burning state
+                        repick = client.post(f"/api/sessions/{session['sessionId']}/answers", json={**body, "request_id": uuid.uuid4().hex, "expected_version": session['version']})
+                        assert repick.status_code == 422, repick.text
+                        assert client.get(f"/api/sessions/{session['sessionId']}").json() == session
+                checkpoint = session['checkpoint']
+                assert checkpoint['checkpointCompleted'] and checkpoint['isCorrect'] is True
+                assert checkpoint['correctOptionId'] == right
+                assert checkpoint['attemptsUsed'] == len(answers)
                 evidence.append({"checkpoint": scene_id, "prompt": question['prompt'], "outcome": outcome, "result": "PASS"})
                 session = post(f"/api/sessions/{session['sessionId']}/advance", {"request_id": uuid.uuid4().hex, "expected_version": session['version']})
-            assert len(session['learningNotes']) == (2 if outcome == 'wrong-wrong' else 0)
+            assert len(session['learningNotes']) == missed  # one note per checkpoint missed on
     manifest = {"dataDir": str(staged), "episode": episode, "evidence": evidence, "modelCalls": 0}
     (staged / "verification.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(json.dumps({"dataDir": str(staged), "episodeId": episode['episodeId'], "checks": len(evidence), "modelCalls": 0}))

@@ -107,13 +107,13 @@ def _script_payload(chunk_id="doc-1-p0001-000"):
     def question(qid):
         return {
             "questionId": qid, "prompt": "Which?", "objectiveId": "obj-1",
-            "options": [{"optionId": "a", "label": "A"}, {"optionId": "b", "label": "B"}],
+            "options": [{"optionId": "a", "label": "A", "mistakeResponse": "Not A."},
+                        {"optionId": "b", "label": "B", "mistakeResponse": "Not B."}],
             "correctOptionId": "a", "correctExplanation": "Because.",
             "incorrectExplanation": "Try again.",
-            "feedback": {"firstIncorrect": "Think about the lesson.", "correct": "Because.", "finalIncorrect": "The answer is A."},
             "sourceRefs": [{"chunkId": chunk_id, "documentId": "doc-1",
                             "pageStart": 1, "pageEnd": 1}],
-            "webRefs": [], "maxAttempts": 2,
+            "webRefs": [],
         }
 
     return {
@@ -181,7 +181,7 @@ async def test_generates_and_recounts_minutes(data_dir):
     # 3 dialogue lines x 10 words = 30 words -> 30/140 + 2.0
     assert script.estimatedMinutes == pytest.approx(30 / 140.0 + 2.0)
     call = stub.calls[0]
-    assert call["cache_key"] == "episode-generation-v2"
+    assert call["cache_key"] == "episode-generation-v3"
     assert call["max_tokens"] == settings.generation_max_tokens
     assert "Episode Director" in call["system"] and "Anime Instructor" in call["system"]
     from app.services.token_budget import job_usage
@@ -255,6 +255,28 @@ async def test_twice_invalid_fails_with_violations(data_dir):
             _metered(stub, data_dir, settings), "j1", settings,
         )
     assert len(stub.calls) == 2
+
+
+@pytest.mark.anyio
+async def test_option_response_required_and_prompted(data_dir):
+    settings = _settings()
+    payload = _script_payload()
+    del payload["scenes"][1]["question"]["options"][0]["mistakeResponse"]
+    stub = GenStub([payload, _script_payload()])
+    script = await generate_episode(
+        _roadmap(_lesson_context()), _lesson_context(), [],
+        {"doc-1-p0001-000": (1, 1)}, _metered(stub, data_dir, settings), "j1", settings,
+    )
+    assert len(stub.calls) == 2
+    assert "did not conform to schema" in stub.calls[1]["user"]
+    assert "mistakeResponse" in stub.calls[1]["user"]
+    assert script.startSceneId == "s1"
+
+
+def test_system_prompt_instructs_per_option_responses():
+    system = gen._system()
+    assert "mistakeResponse" in system
+    assert "firstIncorrect" not in system and "maxAttempts" not in system
 
 
 @pytest.mark.anyio

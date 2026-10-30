@@ -47,7 +47,9 @@ def new_session(episode: EpisodeScript) -> LearnerSession:
 
 
 def restore_checkpoint(session: LearnerSession, episode: EpisodeScript) -> LearnerSession:
-    """Derive released feedback from saved history, including pre-B04 payloads."""
+    """Derive released feedback from saved history, including pre-revamp
+    payloads. Completion is the last pick being correct; wrong picks stay
+    eliminated. `finalIncorrect` is never served — it may name the answer."""
     if session.mode != MODE_CHECKPOINT:
         return session.model_copy(update={"checkpoint": None})
     scene = next(s for s in episode.scenes if s.sceneId == session.sceneId)
@@ -56,20 +58,24 @@ def restore_checkpoint(session: LearnerSession, episode: EpisodeScript) -> Learn
         raise InvalidSessionTransition("Checkpoint has no question.")
     history = [a for a in session.quizAttempts if a.questionId == question.questionId]
     last = history[-1] if history else None
-    attempts = min(len(history), 2)
     correct = last.correct if last else None
-    completed = correct is True or attempts == 2
+    completed = correct is True
     feedback = None
     if last:
-        if question.feedback:
-            feedback = (question.feedback.correct if correct else
-                        question.feedback.finalIncorrect if completed else
-                        question.feedback.firstIncorrect)
+        if correct:
+            feedback = (question.feedback.correct if question.feedback else None) \
+                or question.correctExplanation
         else:
-            feedback = question.correctExplanation if correct else question.incorrectExplanation
+            picked = next(
+                (o for o in question.options if o.optionId == last.selectedOptionId),
+                None,
+            )
+            feedback = (picked.mistakeResponse if picked else None) \
+                or (question.feedback.firstIncorrect if question.feedback else None) \
+                or question.incorrectExplanation
     state = CheckpointState(
-        questionId=question.questionId, attemptsUsed=attempts,
-        attemptsRemaining=2-attempts, isCorrect=correct,
+        questionId=question.questionId, attemptsUsed=len(history),
+        isCorrect=correct,
         checkpointCompleted=completed,
         selectedOptionId=last.selectedOptionId if last else None,
         feedback=feedback, correctOptionId=question.correctOptionId if completed else None,
@@ -114,12 +120,15 @@ def answer(session: LearnerSession, episode: EpisodeScript, request: AnswerReque
         raise ValueError("Question is not the active checkpoint.")
     if request.optionId not in {o.optionId for o in question.options}:
         raise ValueError("Option is not part of the active checkpoint.")
+    if request.optionId in {a.selectedOptionId for a in session.quizAttempts
+                            if a.questionId == question.questionId}:
+        raise ValueError("Option was already attempted.")
     attempts = session.checkpoint.attemptsUsed + 1
     correct = request.optionId == question.correctOptionId
     quiz = QuizAttempt(questionId=question.questionId, selectedOptionId=request.optionId,
                        correct=correct, attemptNumber=attempts, timestamp=_now())
     notes = session.learningNotes
-    if attempts == 2 and not correct:
+    if attempts == 1 and not correct:
         notes = [*notes, f"Review objective {question.objectiveId}: {question.prompt}"]
     updated = session.model_copy(update={
         "quizAttempts": [*session.quizAttempts, quiz], "learningNotes": notes,

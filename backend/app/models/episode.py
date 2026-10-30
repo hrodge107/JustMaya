@@ -41,6 +41,21 @@ class DialogueLine(BaseModel):
 class AnswerOption(BaseModel):
     optionId: str
     label: str
+    # Dedicated response released when this option is picked wrong. Grading
+    # data — never leaves the server on learner reads. Optional so episodes
+    # persisted before per-option responses still parse.
+    mistakeResponse: str | None = None
+
+
+class GeneratedAnswerOption(AnswerOption):
+    mistakeResponse: str
+
+    @field_validator("mistakeResponse")
+    @classmethod
+    def nonblank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("mistakeResponse must not be blank")
+        return value
 
 
 class CheckpointFeedback(BaseModel):
@@ -67,12 +82,13 @@ class RecallQuestion(BaseModel):
     feedback: CheckpointFeedback | None = None
     sourceRefs: list[EpisodeSourceRef] = []
     webRefs: list[WebRef] = []
+    # Persisted compat only: elimination means attempts are unbounded until
+    # the correct pick, so stored values are tolerated but never applied.
     maxAttempts: int = Field(default=2, ge=1)
 
 
 class GeneratedRecallQuestion(RecallQuestion):
-    feedback: CheckpointFeedback
-    maxAttempts: Literal[2] = 2
+    options: list[GeneratedAnswerOption] = Field(min_length=2)
 
 
 class EpisodeScene(BaseModel):
@@ -108,13 +124,15 @@ class GeneratedEpisode(BaseModel):
 
 # Grading data never leaves the server on learner-facing episode reads.
 # `feedback` is the structured shape arriving with recall-checkpoints —
-# stripping by name keeps the projection to one mechanism.
+# stripping by name keeps the projection to one mechanism. `maxAttempts`
+# is dead data under elimination (attempts run until the correct pick).
 LEARNER_HIDDEN_QUESTION_FIELDS = frozenset(
     {
         "correctOptionId",
         "correctExplanation",
         "incorrectExplanation",
         "feedback",
+        "maxAttempts",
     }
 )
 
@@ -130,6 +148,8 @@ def learner_view(script: EpisodeScript) -> dict:
             continue
         for field in LEARNER_HIDDEN_QUESTION_FIELDS:
             question.pop(field, None)
+        for option in question.get("options", []):
+            option.pop("mistakeResponse", None)
     return data
 
 
@@ -214,6 +234,11 @@ def validate_script(
         if question is None:
             continue
         question_ids.append(question.questionId)
+        for option in question.options:
+            if not (option.mistakeResponse or "").strip():
+                violations.append(
+                    f"{question.questionId}.{option.optionId}: mistakeResponse required"
+                )
         if len({option.optionId for option in question.options}) != len(question.options):
             violations.append(f"{question.questionId}: duplicate option id")
         if question.correctOptionId not in {option.optionId for option in question.options}:

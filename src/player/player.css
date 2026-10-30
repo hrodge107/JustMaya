@@ -211,6 +211,8 @@ body:has(.player) { margin: 0; background: #e9e9f1; color: #30304c; color-scheme
 .player { --choice-correct-paper: #def4e8; --choice-correct-ink: #185a38; --choice-correct-border: #2d8052; --choice-wrong-paper: #fbe6e8; --choice-wrong-ink: #8a2537; --choice-wrong-border: #b23b50; }
 .player .vn-choice[data-correct] { background: var(--choice-correct-paper); color: var(--choice-correct-ink); border-color: var(--choice-correct-border); box-shadow: none; }
 .player .vn-choice[data-incorrect] { background: var(--choice-wrong-paper); color: var(--choice-wrong-ink); border-color: var(--choice-wrong-border); box-shadow: none; }
+.vn-choice[data-incorrect]:disabled { cursor: not-allowed; }
+.vn-choice[data-incorrect]:not([data-selected]) { opacity: .72; }
 .vn-choice[data-correct]::after { background: var(--choice-correct-border); }
 .vn-choice[data-incorrect]::after { background: var(--choice-wrong-border); }
 .vn-choice-status { display: block; font-size: .85rem; color: inherit; }

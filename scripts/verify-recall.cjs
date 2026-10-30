@@ -67,12 +67,15 @@ async function advanceAfterReading(f, state) {
   await f.page.waitForFunction(() => !document.querySelector('.vn-choices'))
 }
 async function liveOutcomes(browser) {
-  for (const outcome of ['correct-first', 'wrong-correct', 'wrong-wrong']) {
+  for (const outcome of ['correct-first', 'wrong-correct', 'all-wrong']) {
     const f = await start(browser)
+    let missed = 0
     for (const sceneId of ['scene-03-checkpoint-1', 'scene-05-checkpoint-2']) {
       const q = scenes.get(sceneId).question, right = q.correctOptionId
-      const wrong = q.options.find(o => o.optionId !== right).optionId
-      const answers = outcome === 'correct-first' ? [right] : [wrong, outcome === 'wrong-correct' ? right : wrong]
+      const wrongs = q.options.filter(o => o.optionId !== right).map(o => o.optionId)
+      const answers = outcome === 'correct-first' ? [right] : outcome === 'wrong-correct' ? [wrongs[0], right] : [...wrongs, right]
+      if (outcome !== 'correct-first') missed++
+      const eliminated = []
       for (let attempt = 0; attempt < answers.length; attempt++) {
         const chosen = q.options.find(o => o.optionId === answers[attempt])
         const nodBefore = Number(await f.page.locator('.mascot').getAttribute('data-nod-trigger'))
@@ -80,7 +83,9 @@ async function liveOutcomes(browser) {
         const state = await saved(f)
         await waitFeedback(f, state.checkpoint.feedback)
         assert.equal(state.checkpoint.attemptsUsed, attempt + 1)
-        assert.equal(await f.page.locator('.vn-choice[data-incorrect]').count(), answers[attempt] === right ? 0 : 1)
+        if (answers[attempt] !== right) eliminated.push(answers[attempt])
+        assert.equal(await f.page.locator('.vn-choice[data-incorrect]').count(), eliminated.length, 'every wrong pick stays burned')
+        assert.equal(await f.page.locator('.vn-choice[data-incorrect] .vn-choice-status').count(), eliminated.length)
         assert.equal(await f.page.locator('.vn-choice[data-correct]').count(), state.checkpoint.checkpointCompleted ? 1 : 0)
         const rendered = await f.page.locator('.vn-choice[data-selected]').evaluate(el => {
           const luminance = color => color.match(/[\d.]+/g).slice(0, 3).map(Number).map(v => v / 255).map(v => v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4).reduce((sum, v, i) => sum + v * [.2126, .7152, .0722][i], 0)
@@ -91,12 +96,21 @@ async function liveOutcomes(browser) {
         assert.ok(rendered.contrast >= 4.5)
         assert.equal(await f.page.locator('.mascot').getAttribute('data-emotion'), answers[attempt] === right ? 'happy' : 'confused')
         assert.equal(Number(await f.page.locator('.mascot').getAttribute('data-nod-trigger')), nodBefore + (answers[attempt] === right ? 1 : 0))
-        assert.equal(await f.page.locator('.vn-choice:enabled').count(), state.checkpoint.checkpointCompleted ? 0 : q.options.length)
+        assert.equal(await f.page.locator('.vn-choice:enabled').count(), state.checkpoint.checkpointCompleted ? 0 : q.options.length - eliminated.length)
         if (!state.checkpoint.checkpointCompleted) assert.ok(!('correctOptionId' in state.checkpoint))
+        if (answers[attempt] !== right) {
+          const burned = f.page.locator('.vn-choice').filter({ has: f.page.locator('span', { hasText: chosen.label }) })
+          assert.equal(await burned.evaluate(el => el.disabled), true, 'eliminated strip is disabled')
+          const posts = f.state.calls.length
+          await burned.evaluate(el => el.click())
+          await f.page.clock.runFor(200)
+          assert.equal(f.state.calls.length, posts, 'eliminated option sends no answer')
+        }
         assert.equal(await f.page.locator('.vn-checkpoint-dialogue, .vn-checkpoint-heading, .vn-checkpoint-reading, .vn-checkpoint-actions').count(), 0)
         assert.equal(await f.page.getByRole('button', { name: /^(Retry|Continue)$/ }).count(), 0)
         await f.page.reload(); await f.page.locator('.vn-choices').waitFor()
         await waitFeedback(f, state.checkpoint.feedback)
+        assert.equal(await f.page.locator('.vn-choice[data-incorrect]').count(), eliminated.length, 'reload restores eliminated strips')
         assert.equal(await f.page.locator('.vn-text-rest').textContent(), '')
         assert.equal(Number(await f.page.locator('.mascot').getAttribute('data-nod-trigger')), 0)
         assert.equal(await f.page.locator('.vn-choice[data-selected]').evaluate(el => el.getAnimations().length), 0)
@@ -119,9 +133,9 @@ async function liveOutcomes(browser) {
         }
         await f.page.locator('.vn-choices').waitFor()
       }
-      evidence.push({ check: `${sceneId}: ${outcome}, immediate second choice, restore, colors/nod, manual advance past reading delay`, result: 'PASS' })
+      evidence.push({ check: `${sceneId}: ${outcome}, eliminated strips persist/disable/no-send, restore, colors/nod, manual advance past reading delay`, result: 'PASS' })
     }
-    assert.equal((await saved(f)).learningNotes.length, outcome === 'wrong-wrong' ? 2 : 0)
+    assert.equal((await saved(f)).learningNotes.length, missed, 'one note per checkpoint missed on')
     await f.context.close()
   }
 }
@@ -245,7 +259,8 @@ async function timerAndInput(browser) {
   await response(f.page, () => f.page.keyboard.press('Enter'), '/answers')
   let state = await saved(f); await waitFeedback(f, state.checkpoint.feedback)
   assert.ok((await f.page.locator('.vn-text-rest').textContent()).length > 0)
-  assert.equal(await f.page.locator('.vn-choice:enabled').count(), q.options.length)
+  assert.equal(await f.page.locator('.vn-choice:enabled').count(), q.options.length - 1)
+  assert.equal(await f.page.getByRole('button', { name: wrong.label }).evaluate(el => el.disabled), true)
   await f.page.getByRole('button', { name: right.label, exact: true }).focus()
   await response(f.page, () => f.page.keyboard.press('Space'), '/answers')
   state = await saved(f); await waitFeedback(f, state.checkpoint.feedback)

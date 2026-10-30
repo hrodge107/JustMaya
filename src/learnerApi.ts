@@ -5,8 +5,8 @@ export type Emotion = 'idle' | 'talking' | 'thinking' | 'happy' | 'confused' | '
 // Refs are typed so the wire shape is honest; the player never renders them.
 export type Line = { lineId: string; speaker: 'mascot' | 'narrator'; text: string; emotion: Emotion; sourceRefs?: unknown[]; webRefs?: unknown[] }
 // Learner projection: the server strips answer keys and grading feedback.
-export type Question = { questionId: string; prompt: string; objectiveId: string; options: { optionId: string; label: string }[]; maxAttempts: number }
-export type Checkpoint = { questionId: string; attemptsUsed: number; attemptsRemaining: number; isCorrect: boolean | null; checkpointCompleted: boolean; selectedOptionId: string | null; feedback: string | null; correctOptionId?: string }
+export type Question = { questionId: string; prompt: string; objectiveId: string; options: { optionId: string; label: string }[] }
+export type Checkpoint = { questionId: string; attemptsUsed: number; isCorrect: boolean | null; checkpointCompleted: boolean; selectedOptionId: string | null; feedback: string | null; correctOptionId?: string }
 export type AnswerRequest = { questionId: string; optionId: string; request_id: string; expected_version: number }
 export type Scene = { sceneId: string; kind: 'dialogue' | 'checkpoint' | 'ending'; dialogue: Line[]; question: Question | null; nextSceneId: string | null }
 export type Episode = { episodeId: string; title: string; status: string; startSceneId: string; scenes: Scene[]; learningObjectives: string[]; estimatedMinutes: number }
@@ -49,6 +49,7 @@ export const api = {
   resume: (session: string, body: { request_id: string; expected_version: number }) => request<Session>(`/api/sessions/${id(session)}/resume`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
 }
 
-// Compile-time guard: the learner Question must never grow grading fields.
-type _NoAnswerKey = Extract<'correctOptionId' | 'correctExplanation' | 'incorrectExplanation' | 'feedback', keyof Question> extends never ? true : never
+// Compile-time guard: the learner Question and its options must never grow
+// grading fields — per-option mistake responses are server-only too.
+type _NoAnswerKey = Extract<'correctOptionId' | 'correctExplanation' | 'incorrectExplanation' | 'feedback' | 'mistakeResponse' | 'maxAttempts', keyof Question | keyof Question['options'][number]> extends never ? true : never
 export const _learnerProjectionGuard: _NoAnswerKey = true

@@ -19,7 +19,7 @@ const episode = {
       { lineId: 'one', speaker: 'mascot', text: 'Rivers shaped the first cities.', emotion: 'talking' },
       { lineId: 'two', speaker: 'narrator', text: 'Water made farming possible.', emotion: 'idle' },
     ] },
-    { sceneId: 'checkpoint', kind: 'checkpoint', nextSceneId: null, dialogue: [], question: { questionId: 'q', prompt: 'Why did early settlements grow near rivers?', options: [{ optionId: 'a', label: 'Water and farming' }, { optionId: 'b', label: 'No shared work' }], maxAttempts: 2 } },
+    { sceneId: 'checkpoint', kind: 'checkpoint', nextSceneId: null, dialogue: [], question: { questionId: 'q', prompt: 'Why did early settlements grow near rivers?', options: [{ optionId: 'a', label: 'Water and farming' }, { optionId: 'b', label: 'No shared work' }] } },
   ], learningObjectives: [], estimatedMinutes: 1,
 }
 
