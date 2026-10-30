@@ -197,8 +197,10 @@ body:has(.player) { margin: 0; background: #e9e9f1; color: #30304c; color-scheme
    choices from the scene. ENERGY 2 / RHYTHM 1 / MOTION 2, as in the player. */
 .mode-checkpoint { height: 100dvh; min-height: 540px; grid-template-rows: auto minmax(130px, 1fr) auto auto; }
 .vn-checkpoint-scene { min-height: 0; padding-block: 0; isolation: isolate; }
-.vn-checkpoint-scene .vn-stage { position: absolute; inset: 0; padding: 8px; opacity: .35; }
-.vn-checkpoint-scene::before { content: ''; position: absolute; inset: 0; z-index: 1; background: rgb(15 15 29 / .35); pointer-events: none; }
+.vn-checkpoint-scene .vn-stage { position: absolute; inset: 0; padding: 8px; opacity: .35; transition: opacity .25s var(--ease); }
+.vn-checkpoint-scene::before { content: ''; position: absolute; inset: 0; z-index: 1; background: rgb(15 15 29 / .35); pointer-events: none; transition: opacity .25s var(--ease); }
+.vn-checkpoint-scene.vn-undim .vn-stage { opacity: 1; }
+.vn-checkpoint-scene.vn-undim::before { opacity: 0; }
 .vn-choice-overlay { position: relative; z-index: 2; display: flex; align-items: flex-end; justify-content: center; flex: 1; min-height: 0; padding: 12px 0 6px; }
 .vn-choices { display: grid; gap: 12px; width: min(100%, 44rem); max-height: 100%; padding: 8px 16px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--mint-bright) transparent; }
 .player .vn-choice { position: relative; min-height: 48px; padding: 12px 30px 12px 18px; border: 2px solid #626281; border-radius: 2px; background: var(--paper); color: var(--ink); text-align: left; white-space: normal; overflow-wrap: anywhere; font-weight: 800; }
@@ -256,8 +258,6 @@ body:has(.player) { margin: 0; background: #e9e9f1; color: #30304c; color-scheme
 .vn-ask-input:focus { outline: none; }
 .vn-ask-input::placeholder { color: var(--muted); font-weight: 600; }
 .vn-ask-send { flex: none; padding: 4px 10px; border: 1.5px solid var(--mint-ink); border-radius: 999px; color: var(--mint-ink); font-size: .78rem; font-weight: 900; letter-spacing: .05em; text-transform: uppercase; }
-.vn-ask-text { flex: 1; min-width: 0; }
-.vn-ask-sent[aria-busy] { opacity: .75; }
 .vn-choices .vn-ask-strip:focus-visible { outline: 3px solid var(--mint-bright); outline-offset: 2px; }
 
 .vn-sources { position: absolute; left: 20px; bottom: 12px; z-index: 2; display: flex; align-items: center; gap: 8px; max-width: calc(100% - 80px); font-size: .78rem; }

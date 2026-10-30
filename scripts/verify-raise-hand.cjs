@@ -111,13 +111,17 @@ async function coreFlow(browser) {
   await f.page.clock.runFor(200)
   assert.equal(f.state.calls.length, before, 'Enter in the input does not send')
   assert.equal(await input(f.page).inputValue(), 'What does section two cover?', 'typed text is reflected')
+  let release1
+  f.state.gate = new Promise(resolve => { release1 = resolve })
   await send(f.page).click()
-  await f.page.waitForFunction(() => document.querySelector('.vn-dialogue .sr-only[aria-live]')?.textContent.startsWith('Instructor: Beat one'))
+  // Echo: strips disappear simultaneously and the sent question shows as a "You" turn.
+  await f.page.waitForFunction(() => document.querySelector('.vn-dialogue .sr-only[aria-live]')?.textContent === 'You: What does section two cover?')
+  assert.equal(await f.page.locator('.vn-speaker').textContent(), 'You', 'speaker label reads You while the question echoes')
+  assert.equal(await f.page.locator('.vn-choices .vn-choice').count(), 0, 'every strip disappears once the question echoes')
   assert.equal(questionPosts(f).length, 1)
   assert.equal(questionPosts(f)[0].body.question, 'What does section two cover?')
-  assert.equal(await f.page.locator('.vn-ask-text').textContent(), 'What does section two cover?')
-
-  // Chrome waits for the closing cue beat; the sent strip stays throughout.
+  release1(); f.state.gate = null
+  await f.page.waitForFunction(() => document.querySelector('.vn-dialogue .sr-only[aria-live]')?.textContent.startsWith('Instructor: Beat one'))
   assert.equal(await input(f.page).count(), 0, 'compose input hidden until the closing beat')
   assert.equal(await f.page.locator('.vn-ask-resume').count(), 0, 'resume strip hidden until the closing beat')
   assert.equal(await f.page.locator('.vn-source-note').count(), 0, 'grounding note hidden until the closing beat')
@@ -142,10 +146,13 @@ async function coreFlow(browser) {
 
   // The fresh input accepts a follow-up directly; it sends as a new request id.
   await input(f.page).fill('What does section three cover?')
+  let release2
+  f.state.gate = new Promise(resolve => { release2 = resolve })
   await send(f.page).click()
-  await f.page.waitForFunction(() => document.querySelector('.vn-ask-text')?.textContent === 'What does section three cover?')
+  await f.page.waitForFunction(() => document.querySelector('.vn-dialogue .sr-only[aria-live]')?.textContent === 'You: What does section three cover?')
   assert.equal(questionPosts(f).length, 2)
   assert.notEqual(questionPosts(f)[1].body.request_id, questionPosts(f)[0].body.request_id)
+  release2(); f.state.gate = null
   await throughBeats(f)
 
   // Resume restores the checkpoint exactly, behind one transient return beat.
@@ -167,21 +174,30 @@ async function coreFlow(browser) {
 }
 
 async function pendingAndCancel(browser) {
-  // Pending send locks the strip and shows the thinking mascot.
-  const f = await fixture(browser)
+  // Full motion proves the order: echo types as "You" → mascot thinks until
+  // the answer lands → only then do the answer beats begin.
+  const f = await fixture(browser, { width: 390, height: 844 }, 'no-preference')
   f.session = await parked(f.context.request, episode.startSceneId)
   await f.go(f.session)
   await raise(f.page).click()
   await strip(f.page).waitFor()
+  assert.equal(await f.page.evaluate(() => document.querySelector('.vn-scene')?.className.includes('vn-undim')), false, 'stage stays dimmed while composing')
   await input(f.page).fill('Held question')
   let release
   f.state.gate = new Promise(resolve => { release = resolve })
   await send(f.page).click()
-  await f.page.waitForFunction(() => document.querySelector('.vn-ask-sent')?.getAttribute('aria-busy') === 'true')
-  assert.equal(await f.page.locator('.mascot').getAttribute('data-emotion'), 'thinking')
-  assert.equal(await f.page.locator('.vn-ask-text').textContent(), 'Held question')
+  await f.page.waitForFunction(() => document.querySelector('.vn-dialogue .sr-only[aria-live]')?.textContent === 'You: Held question')
+  assert.equal(await f.page.locator('.vn-choices .vn-choice').count(), 0, 'every strip disappears while the question echoes')
+  assert.equal(await f.page.locator('.mascot').getAttribute('data-emotion'), 'listening', 'mascot listens while the echo types')
+  await f.page.clock.runFor(500)
+  await f.page.waitForFunction(() => document.querySelector('.mascot')?.getAttribute('data-emotion') === 'thinking')
+  assert.equal(await liveText(f.page), 'You: Held question', 'the "You" turn stays up while the mascot thinks')
+  assert.equal(await f.page.evaluate(() => document.querySelector('.vn-scene')?.className.includes('vn-undim')), true, 'stage undims for the thinking window')
+  assert.equal(await f.page.locator('.vn-dialogue-target').getAttribute('aria-label'), 'Reveal your message')
   release(); f.state.gate = null
+  await f.page.waitForFunction(() => document.querySelector('.vn-dialogue .sr-only[aria-live]')?.textContent.startsWith('Instructor: Beat one'))
   await throughBeats(f)
+  assert.equal(await f.page.evaluate(() => document.querySelector('.vn-scene')?.className.includes('vn-undim')), false, 'dimming returns with the fresh compose strip')
 
   // Play icon resumes while answered, behind the transient return beat.
   const waitResume = f.page.waitForResponse(r => r.url().endsWith('/resume'))
@@ -189,7 +205,7 @@ async function pendingAndCancel(browser) {
   await waitResume
   await waitCue(f.page, BACK_TO_LESSON)
   assert.equal((await saved(f)).mode, 'playing')
-  evidence.push({ check: 'pending locks strip + thinking mascot; Play icon resumes with return beat', result: 'PASS' })
+  evidence.push({ check: 'echo as "You" -> strips gone -> listening -> thinking undimmed -> beats only after echo -> dimming back in compose; Play icon resumes with return beat', result: 'PASS' })
   await f.context.close()
 
   // Escape equals Play.

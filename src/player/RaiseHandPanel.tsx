@@ -6,10 +6,9 @@ import { useEffect, useRef } from 'react'
 
 export type AskPhase = 'compose' | 'pending' | 'answered'
 
-export default function RaiseHandPanel({ phase, draft, sentQuestion, hasAsked, turnComplete, resumeLabel, busy, error, onDraft, onSend, onResume }: {
+export default function RaiseHandPanel({ phase, draft, hasAsked, turnComplete, resumeLabel, busy, error, onDraft, onSend, onResume }: {
   phase: AskPhase
   draft: string
-  sentQuestion: string
   hasAsked: boolean
   turnComplete: boolean
   resumeLabel: string
@@ -35,7 +34,7 @@ export default function RaiseHandPanel({ phase, draft, sentQuestion, hasAsked, t
 
   return <div className="vn-choice-overlay vn-ask-overlay">
     <div className="vn-choices">
-      {phase === 'compose' ? (
+      {phase === 'compose' && (
         <div className="vn-choice vn-ask-strip" role="button" tabIndex={0}
           aria-disabled={busy || undefined}
           aria-label={canSend ? 'Send your question' : 'Type a question, then select this strip to send it'}
@@ -50,13 +49,9 @@ export default function RaiseHandPanel({ phase, draft, sentQuestion, hasAsked, t
             onClick={event => event.stopPropagation()} />
           {canSend && <span className="vn-ask-send" aria-hidden="true">Send</span>}
         </div>
-      ) : (
-        <div className="vn-choice vn-ask-strip vn-ask-sent" aria-busy={phase === 'pending' || undefined}>
-          <span className="vn-ask-text">{sentQuestion}</span>
-        </div>
       )}
       {error && <p className="vn-error" role="alert">{error}</p>}
-      {hasAsked && turnComplete && <button type="button" className="vn-choice vn-ask-resume" disabled={busy} onClick={onResume}>{resumeLabel}</button>}
+      {phase === 'compose' && hasAsked && turnComplete && <button type="button" className="vn-choice vn-ask-resume" disabled={busy} onClick={onResume}>{resumeLabel}</button>}
     </div>
   </div>
 }
