@@ -30,3 +30,7 @@ If you are developing a production application, we recommend enabling type-aware
 ```
 
 See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+
+### Optional 3D mascot
+
+Set `VITE_MASCOT_VRM_URL` to a URL for a VRM 0 or VRM 1 file you are licensed to use. Set `VITE_MASCOT_IDLE_URL` to a licensed Mixamo FBX idle animation to add a body idle. These Vite variables are read when the frontend is built. With no model, reduced motion, or an unavailable model/WebGL context, Mita uses the built-in stand-in. Only use models and animations whose terms permit your intended use.
