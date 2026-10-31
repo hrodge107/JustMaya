@@ -211,7 +211,7 @@ async function run() {
     assert.ok(calls.some(c => c.path.endsWith('/curriculum/confirm') && c.method === 'POST'), 'roadmap auto-confirmed')
     await advanceTo(page, async () => (await dlgText(page)).includes(EP_TITLE), { timeout: 40000, label: 'read-done turn naming the episode' })
     // The episode persists as the same chip, now a playable card, and Mita
-    // asks once whether to play it — the chip never detaches on success.
+    // asks once whether to play it. The chip never detaches on success.
     await page.locator('.upload-chip.ready').waitFor({ timeout: 10000 })
     await page.locator('.ask-overlay').waitFor({ timeout: 15000 })
     assert.equal(await page.locator('.ask-overlay .vn-choice').count(), 2, 'offer shows Yes/No choices')
@@ -324,7 +324,7 @@ async function run() {
     assert.ok(!callsMock.some(c => c.path.startsWith('/api/jobs')), 'mock never touches jobs')
     await pageMock.locator('.upload-chip.ready').waitFor({ timeout: 10000 })
     await pageMock.locator('.ask-overlay').waitFor({ timeout: 15000 })
-    await pageMock.getByRole('button', { name: /yes — play it/i }).click()
+    await pageMock.getByRole('button', { name: /yes, play it/i }).click()
     await advanceTo(pageMock, async () => (await pageMock.locator('.dlg-name').innerText()) === 'You', { label: 'accept echo' })
     await pageMock.locator('.vn-frame').waitFor({ timeout: 15000 })
     assert.equal(new URL(pageMock.url()).searchParams.get('session'), SESSION_ID, 'Yes starts a session')

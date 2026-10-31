@@ -220,7 +220,7 @@ export default class HomeDialogue {
     void this.ambient(this.seq)
   }
 
-  // The offer's Yes branch: a quick You/Mita handoff beat, then ambient — Home
+  // The offer's Yes branch: a quick You/Mita handoff beat, then ambient. Home
   // mounts the player as soon as this resolves, so ambient rarely gets heard.
   async offerYes() {
     if (this.snap.mode !== 'offer') return

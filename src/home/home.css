@@ -88,7 +88,7 @@ body:has(.home) { margin: 0; overflow: hidden; background: #23233a; color-scheme
 .upload-chip .up-actions { display: flex; gap: 8px; margin-top: 10px; }
 .upload-chip .up-actions .vn-button, .upload-chip .up-actions .vn-quiet { min-height: 34px; padding: 4px 14px; font-size: .78rem; }
 .upload-chip[data-error] .up-fill { background: #8f2d45; }
-/* Ready state: the same chip persists as a playable card — mint ring like
+/* Ready state: the same chip persists as a playable card, mint ring like
    Learn's ready rows, card affordance on hover/press. */
 .upload-chip.ready { cursor: pointer; box-shadow: inset 0 0 0 2px var(--mint-ink), 0 8px 24px #30304c40; transition: transform .15s var(--ease); }
 .upload-chip.ready:hover { transform: translateY(-1px); }

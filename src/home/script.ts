@@ -212,32 +212,32 @@ export function readFailTurn(reason: string): Turn {
 
 /* The ready offer: once an episode lands, Mita asks once whether to jump in.
    Yes gets a short handoff beat before the player mounts; No echoes a rotating
-   learner filler, then Mita answers "it's fine" plus where the episode waits —
+   learner filler, then Mita answers "it's fine" plus where the episode waits:
    the persistent card top-right and the Learn dialog. */
 export const PLAY_ASK: Turn[] = [
-  { t: 'So — want to play it now?', e: 'happy' },
+  { t: 'So, want to play it now?', e: 'happy' },
   { t: "It's ready when you are. Play it now?", e: 'talking' },
   { t: 'All set. Jump in now, or save it for later?', e: 'happy' },
 ]
 export const PLAY_YES_YOU = [
-  "Yes — let's play.",
+  "Yes, let's play.",
   'Yes, play it.',
   'Yep, start it.',
 ]
 export const PLAY_YES_MITA: Turn[] = [
   { t: 'On it. Opening your episode.', e: 'happy' },
-  { t: 'Here we go — enjoy the lesson!', e: 'happy' },
+  { t: 'Here we go. Enjoy the lesson!', e: 'happy' },
 ]
 export const PLAY_NO_YOU = [
-  "No — I'll do it later.",
+  "No, I'll do it later.",
   'No, maybe after a break.',
-  "Not right now — I'll get to it soon.",
+  "Not right now. I'll get to it soon.",
   'No, later. Still poking around.',
 ]
 export const PLAY_NO_MITA: Turn[] = [
-  { t: "No worries. It's pinned in the card up top-right — tap it whenever, or find it under Learn.", e: 'happy' },
+  { t: "No worries. It's pinned in the card up top-right. Tap it whenever, or find it under Learn.", e: 'happy' },
   { t: "That's fine. The episode waits in the corner card, and Learn keeps it listed too.", e: 'talking' },
-  { t: 'All good. It stays in the top-right card — or in Learn — until you want it.', e: 'idle' },
+  { t: 'All good. It stays in the top-right card, or in Learn, until you want it.', e: 'idle' },
 ]
 
 /* Talk routing. Intent-first: each bucket owns its answers; misses escalate
