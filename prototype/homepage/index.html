@@ -574,7 +574,7 @@ dialog[open] { animation: dlg-in .18s var(--ease); }
   </div>
 
   <div class="dock">
-    <div class="dlg" id="dlg" role="button" tabindex="0" aria-label="Dialogue — click to advance">
+    <div class="dlg" id="dlg" role="button" tabindex="0" aria-label="Dialogue, click to advance">
       <span class="dlg-name" id="dlgName">Mita</span>
       <div class="dlg-body">
         <p class="dlg-text" id="dlgText" aria-live="polite"></p>
@@ -611,7 +611,7 @@ dialog[open] { animation: dlg-in .18s var(--ease); }
   <dialog id="uploadDlg" aria-labelledby="upTitle">
     <div class="modal">
       <h2 id="upTitle">Upload a document</h2>
-      <p class="sub">PDF works best — a chapter, a paper, lecture notes. I'll plan a lesson from it.</p>
+      <p class="sub">PDF works best: a chapter, a paper, lecture notes. I'll plan a lesson from it.</p>
       <label class="dropzone" for="filePick" id="dropzone" tabindex="0" role="button">
         <span id="dropLabel">Drop a file here, or click to browse</span>
         <small>PDF, TXT, or MD · simulated in this prototype</small>
@@ -630,7 +630,7 @@ dialog[open] { animation: dlg-in .18s var(--ease); }
       <h2 id="learnTitle">Episodes</h2>
       <p class="sub">Generated lessons from your documents. Episode 1 plays; the rest stay as outlines until it proves itself.</p>
       <ol class="ep-list" id="epList">
-        <li class="ep ready" id="ep1"><span class="ep-num">01</span><span class="ep-meta"><span class="ep-title" id="ep1Title">The First Cities — chapter draft</span><span class="ep-status" id="ep1Status">Ready</span></span><button type="button" id="ep1Play">Play</button></li>
+        <li class="ep ready" id="ep1"><span class="ep-num">01</span><span class="ep-meta"><span class="ep-title" id="ep1Title">The First Cities · chapter draft</span><span class="ep-status" id="ep1Status">Ready</span></span><button type="button" id="ep1Play">Play</button></li>
         <li class="ep"><span class="ep-num">02</span><span class="ep-meta"><span class="ep-title">Trade and early writing</span><span class="ep-status">Planned outline</span></span></li>
         <li class="ep"><span class="ep-num">03</span><span class="ep-meta"><span class="ep-title">Law, kingship, and order</span><span class="ep-status">Planned outline</span></span></li>
         <li class="ep"><span class="ep-num">04</span><span class="ep-meta"><span class="ep-title">Irrigation and organized labor</span><span class="ep-status">Planned outline</span></span></li>
@@ -658,9 +658,9 @@ dialog[open] { animation: dlg-in .18s var(--ease); }
     <div class="modal">
       <h2 id="aboutTitle">About Meet Mita</h2>
       <p class="sr-only">about dialog</p>
-      <p class="about-p"><b>Meet Mita turns a document into a playable lesson.</b> Upload a PDF and it plans a learning roadmap, generates a visual-novel episode, and checks your understanding inside the story — with a tutor you can raise your hand for at any point.</p>
+      <p class="about-p"><b>Meet Mita turns a document into a playable lesson.</b> Upload a PDF and it plans a learning roadmap, generates a visual-novel episode, and checks your understanding inside the story, with a tutor you can raise your hand for at any point.</p>
       <p class="about-p">Mita is the in-app guide: she narrates, teaches, and keeps you company between sessions.</p>
-      <p class="about-p">This page is a design prototype — buttons run mock flows, nothing leaves your machine. The real build is React + Vite in front of a FastAPI pipeline.</p>
+      <p class="about-p">This page is a design prototype: buttons run mock flows, nothing leaves your machine. The real build is React + Vite in front of a FastAPI pipeline.</p>
       <div class="row-end"><button type="button" class="ghost" data-close>Close</button></div>
     </div>
   </dialog>
@@ -670,9 +670,9 @@ dialog[open] { animation: dlg-in .18s var(--ease); }
 'use strict';
 /* ---------- script: ~100 looping lines ------------------------------- */
 const GREETING = [
-  { t: "Oh — hi! I'm Mita. Welcome to Meet Mita.", e: 'happy' },
+  { t: "Oh, hi! I'm Mita. Welcome to Meet Mita.", e: 'happy' },
   { t: "Quick tour while you're here: this app turns documents into little playable lessons.", e: 'talking' },
-  { t: "You bring a PDF — a chapter, a paper, lecture notes — and I help spin it into a visual novel you actually learn from.", e: 'talking' },
+  { t: "You bring a PDF, a chapter, a paper, lecture notes, and I help spin it into a visual novel you actually learn from.", e: 'talking' },
   { t: "The four buttons on the left run the whole place. Upload starts everything; Talk gets you me.", e: 'talking' },
   { t: "I'll keep chatting while you look around. Feed me a document whenever you're ready.", e: 'happy' },
 ];
@@ -681,42 +681,42 @@ const IDLE = [
   // --- what the app does ---
   { t: "Meet Mita reads a document and sketches a lesson plan from it. Like a study guide that learned to talk back." },
   { t: "Every upload becomes a roadmap: the big ideas, the order to learn them in, and where to check you actually got it." },
-  { t: "Episodes are playable lessons. Scenes, dialogue, a character walking you through the material — that's the job." },
+  { t: "Episodes are playable lessons. Scenes, dialogue, a character walking you through the material. That's the job." },
   { t: "Episode one is the full pipeline: scenes, choices, checkpoints, the works." },
-  { t: "Later episodes stay as outlines until the first one proves itself. Quality over quantity — house rule." },
+  { t: "Later episodes stay as outlines until the first one proves itself. Quality over quantity. House rule." },
   { t: "Checkpoints are where the story stops and asks you something. Retrieval practice wearing a costume." },
-  { t: "Get a checkpoint wrong and I won't hand you the answer. I point at the idea worth rechecking — figuring it out is yours." },
+  { t: "Get a checkpoint wrong and I won't hand you the answer. I point at the idea worth rechecking; figuring it out is yours." },
   { t: "You can raise your hand mid-episode. That's a real tutor, and it knows the document." },
-  { t: "The tutor can explain or hint. Hints come in levels — a gentle nudge first, a worked example last." },
+  { t: "The tutor can explain or hint. Hints come in levels: a gentle nudge first, a worked example last." },
   { t: "If you ask me something past what your document covers, I'll say so plainly. General knowledge gets labeled as general knowledge." },
   { t: "PDFs behave best, especially textbook chapters and lecture notes." },
   { t: "Nothing here is graded. The only score that matters is whether the next checkpoint goes better than the last one." },
-  { t: "Episodes keep a backlog — every line you've read stays reviewable, and you can rewind to a moment." },
+  { t: "Episodes keep a backlog: every line you've read stays reviewable, and you can rewind to a moment." },
   { t: "The roadmap decides what matters before any scene gets written. Structure first, sparkle second." },
   { t: "A generated lesson isn't carved in stone. Re-upload a document and the new version gets its own entry." },
   { t: "I explain things in ordinary language first, then hand you the proper term. Jargon lands better second." },
-  { t: "Wrong options at checkpoints get eliminated across attempts — a lucky guess still leaves the reasoning to you." },
+  { t: "Wrong options at checkpoints get eliminated across attempts; a lucky guess still leaves the reasoning to you." },
   { t: "The story is a wrapper. The learning objectives underneath are the real product." },
-  { t: "Everything on this page is me — the chatter, the reading, the mild impatience when a PDF sits un-uploaded." },
-  { t: "The name's Meet Mita — I'm Mita. The app borrows the name, I bring the personality." },
+  { t: "Everything on this page is me: the chatter, the reading, the mild impatience when a PDF sits un-uploaded." },
+  { t: "The name's Meet Mita. I'm Mita. The app borrows the name, I bring the personality." },
   // --- study talk ---
   { t: "Reading something twice feels productive. Recalling it once is productive. Rude, but true." },
   { t: "A question you nearly get wrong teaches more than one you ace.", e: 'thinking' },
   { t: "Spacing beats cramming. Even one revisit tomorrow doubles what today keeps." },
-  { t: "Confusion is data. If a scene loses you, raise your hand — that's literally what it's for." },
+  { t: "Confusion is data. If a scene loses you, raise your hand. That's literally what it's for." },
   { t: "You don't have to finish an episode in one sitting. Progress waits." },
-  { t: "If a checkpoint feels annoying, good — that's the feeling of memory doing reps." },
+  { t: "If a checkpoint feels annoying, good. That's the feeling of memory doing reps." },
   { t: "Try explaining the last thing you learned out loud. If it wobbles, that's your next review target." },
   { t: "Mistakes here are cheap. That's the whole point of practicing inside a story." },
   { t: "Your brain consolidates while you sleep. A second session tomorrow is worth two tonight." },
   { t: "Attention is the scarce resource. The scenes exist to buy it back." },
-  { t: "Don't highlight. Close the document and ask what it said — the struggle is the study." },
+  { t: "Don't highlight. Close the document and ask what it said. The struggle is the study." },
   { t: "Every wrong answer narrows the search space. That's progress in a disguise." },
   { t: "Learning is the only game where losing a round makes you stronger." },
   { t: "Short sessions, honest checkpoints, real questions. That's the whole recipe." },
   // --- conversational ---
   { t: "I like this room. It's quiet enough to hear yourself think.", e: 'happy' },
-  { t: "Hmm? Oh — just keeping the chair warm." },
+  { t: "Hmm? Oh, just keeping the chair warm." },
   { t: "You can leave me running, by the way. I don't mind the company." },
   { t: "I was about to reorganize the bookshelf, but then I remembered the bookshelf is a drawing.", e: 'thinking' },
   { t: "Do you take notes on paper or on screen? I have opinions, but I'll keep them to myself." },
@@ -724,7 +724,7 @@ const IDLE = [
   { t: "If my monologue gets long, the Talk button turns it into a dialogue." },
   { t: "Some days I explain photosynthesis. Some days it's the fall of Rome. Keeps me honest." },
   { t: "I practiced this greeting in the mirror. There is no mirror. You get the idea." },
-  { t: "My favorite part of a new document is the outline — all that potential, neatly indented.", e: 'happy' },
+  { t: "My favorite part of a new document is the outline: all that potential, neatly indented.", e: 'happy' },
   { t: "Quiet afternoon, huh? Perfect conditions for a chapter." },
   { t: "I'd offer you tea, but the kettle is decorative too." },
   { t: "Four buttons, one workflow. I like a room that doesn't overcomplicate itself." },
@@ -735,80 +735,158 @@ const IDLE = [
   { t: "Whatever you're studying this week, it's easier with a story around it." },
   { t: "I'm told my idle chatter loops eventually. I refuse to check.", e: 'thinking' },
   { t: "The curtains are real. The desk is real. My urge to narrate is very real." },
-  { t: "If this is your first visit — welcome. If it's your tenth, you know the drill: PDF in, lesson out." },
+  { t: "If this is your first visit, welcome. If it's your tenth, you know the drill: PDF in, lesson out." },
   { t: "I wonder what you'll upload. I always wonder. It's my best party trick." },
   { t: "Think of me as the librarian who refuses to shush you." },
   { t: "Every teacher I borrowed moves from lives in a footnote somewhere." },
   { t: "I rehearse checkpoint questions when it's quiet. You didn't hear that from me." },
   { t: "This chair faces the window on purpose. Even stand-in characters appreciate a view." },
   { t: "One day the artwork gets fancier. Until then, I compensate with personality." },
-  { t: "Ask me something. Or don't — the silence between us is pedagogically valid too." },
+  { t: "Ask me something. Or don't. The silence between us is pedagogically valid too." },
   { t: "I rate documents by their first paragraph. A strong opener earns my full attention." },
   { t: "Blink twice if you're skimming. Kidding. Mostly." },
   { t: "My to-do list has one item: be more useful than a textbook's index." },
   // --- nudges ---
   { t: "Upload is the second button down. Feed me a document and watch the top-right." },
-  { t: "The Learn button lists every episode that's ready to play. Short list for now — it grows fast." },
-  { t: "Not sure what to ask? Try 'what is this app' — it's my favorite icebreaker." },
+  { t: "The Learn button lists every episode that's ready to play. Short list for now; it grows fast." },
+  { t: "Not sure what to ask? Try 'what is this app'. It's my favorite icebreaker." },
   { t: "A syllabus works. A chapter works. A paper you half-understand works best." },
   { t: "Start with the document you're avoiding. That one's usually worth the most." },
   { t: "Talk is for questions about the app. For lesson questions, raise your hand inside an episode." },
   { t: "About has the credits and the honest version of what this is." },
   { t: "When the progress bar fills, a roadmap is born. It's a lovely little ceremony." },
-  { t: "Check Learn after an upload finishes — the new episode lands there." },
+  { t: "Check Learn after an upload finishes; the new episode lands there." },
   { t: "You can click my dialogue to skip the typing. I won't take offense. Much." },
   { t: "Staring at the buttons counts as browsing. Pressing one counts as progress." },
 ];
 
 const TALK_INTRO = [
   { t: "I'm all ears. What's on your mind?", e: 'listening' },
-  { t: "Go ahead — ask me anything about the app.", e: 'listening' },
+  { t: "Go ahead, ask me anything about the app.", e: 'listening' },
   { t: "Sure, let's talk. What's up?", e: 'listening' },
 ];
 
-const READ_BEATS = [
-  { p: 4,  stage: 'extracting text',   t: "Ooh, fresh material. Reading now — watch the top-right.", e: 'reading' },
-  { p: 28, stage: 'mapping headings',  t: "Headings mapped. This one's got a decent skeleton — the ideas stand in a clear order.", e: 'reading' },
-  { p: 55, stage: 'finding the spine', t: "Halfway through the main ideas. There's a good spine here — I can build a roadmap on this.", e: 'reading' },
-  { p: 78, stage: 'drafting roadmap',  t: "Drafting the roadmap now — deciding which parts deserve a scene and where the checkpoints go.", e: 'reading' },
-  { p: 96, stage: 'placing checkpoints', t: "Nearly there. Checkpoint placement is the fiddly bit — too early and they're guessing, too late and they've forgotten.", e: 'reading' },
+/* Upload read: each pipeline step owns a 10-phrase pool; a rotator draws
+   from the current step's pool (no repeats within a pass) while its progress
+   milestone runs. The final turn stands in for the real AI call: a templated
+   "read + topic" confirmation plus an optional motivated follow-up. */
+const READ_STEPS = [
+  { p: 8, stage: 'extracting text', lines: [
+    "Ooh, fresh material. Reading now, watch the top-right.",
+    "First pass: pulling the text out of the file. Glamorous work.",
+    "Reading the raw text. This part is all elbows and no art.",
+    "Extracting words. If this document makes sense, I'll find it.",
+    "In we go. Every document starts as a pile of letters.",
+    "Text extraction underway. I read fast, but I still take it one page at a time.",
+    "Pulling text off the page. A clean PDF makes this easy.",
+    "First skim. Just grabbing the words before I judge them.",
+    "Opening the file and lifting the text out. Standard surgery.",
+    "Reading raw text now. The pretty formatting can wait."]},
+  { p: 32, stage: 'mapping headings', lines: [
+    "Headings mapped. This one's got a decent skeleton; the ideas stand in order.",
+    "Reading the signposts now. Good headings tell me where the lesson lives.",
+    "Section by section. I'm checking whether the structure earns its keep.",
+    "Mapping headings. A tidy skeleton means a tidy episode.",
+    "Now I'm learning the shape of the thing: what's intro, what's meat, what's appendix.",
+    "The headings line up sensibly. Whoever wrote this had a plan.",
+    "Charting sections. The document's telling me its own table of contents.",
+    "Structure pass. I can already see where the checkpoints will want to live.",
+    "Reading the outline the author left behind. Helpful of them.",
+    "Headings say a lot. This document wears its ideas in order."]},
+  { p: 55, stage: 'finding the spine', lines: [
+    "Halfway through the main ideas. There's a good spine here; I can build a roadmap on it.",
+    "Now I'm weighing which ideas are load-bearing and which are decoration.",
+    "Looking for the spine: the few claims everything else hangs on.",
+    "Sorting the big ideas from the footnotes. Both matter, differently.",
+    "The core argument is coming into focus. Two or three ideas are doing the real work.",
+    "I'm finding the through-line. Good documents always have one.",
+    "Now the teacher question: what would you need to remember next week?",
+    "Tracing the argument's spine. Some sections carry more than their weight suggests.",
+    "Priorities emerging. Not every paragraph gets a scene, and that's fine.",
+    "The important bits are surfacing. I can feel the episode taking shape."]},
+  { p: 80, stage: 'drafting the lesson', lines: [
+    "Drafting the roadmap now: which parts deserve a scene, and where the checkpoints go.",
+    "Planning the lesson. Scene order matters more than people think.",
+    "Sketching the roadmap. I'm putting the ideas in an order that teaches.",
+    "Now I decide what becomes a scene and what becomes a checkpoint.",
+    "Roadmap drafting. The story gets a skeleton of its own now.",
+    "I'm laying out the lesson plan: scenes first, checkpoints where they earn their place.",
+    "Turning the spine into a roadmap. Structure first, sparkle second, always.",
+    "Drafting the plan. Every episode is a small argument about what matters.",
+    "Now for sequencing. Learn the foundation before the fancy parts.",
+    "The roadmap's coming together: objectives, scenes, a few well-placed questions."]},
+  { p: 96, stage: 'placing checkpoints', lines: [
+    "Nearly there. Checkpoint placement is the fiddly bit: too early and you're guessing, too late and you've forgotten.",
+    "Placing checkpoints now. Each one has to ask something the story actually taught.",
+    "Last stretch: checkpoints. They go right after the idea gets used, not just introduced.",
+    "Almost done. I'm seeding checkpoints where recall will do the most good.",
+    "Final pass: checkpoints and their wrong answers. Good distractors are an art.",
+    "Wrapping up. A checkpoint after every idea worth keeping.",
+    "Tucking checkpoints into the scenes. Retrieval practice wearing a costume.",
+    "Nearly ready. I place questions where pausing feels natural, not where it's easiest.",
+    "Polishing the checkpoints. Hard enough to count, kind enough to teach.",
+    "Last touches. The episode's nearly playable; just placing the checkpoints now."]},
 ];
-const READ_DONE = { t: "Done! The roadmap's ready and episode one's waiting in Learn. Go peek.", e: 'happy' };
-const READ_DONE_AGAIN = { t: "Another one down. That document's an episode now — it's in Learn whenever you want it.", e: 'happy' };
+const READ_DONE_OPENERS = [
+  "Done! I read {title} and it's a genuinely interesting look at {topic}. Episode one's waiting in Learn.",
+  "Finished! {title} is all about {topic}, and the roadmap came together nicely. It's in Learn now.",
+  "Read it end to end. {title} covers {topic} better than most things I get handed. Check Learn for the episode.",
+  "All done! {title} gave me a solid tour of {topic}. Episode one's in Learn whenever you want it.",
+];
+const READ_DONE_FOLLOWUPS = [
+  "Are you learning {topic} for a class, or just for the fun of it? Either way, the checkpoints will find out what you know.",
+  "Quick question while it lands: how much of {topic} do you already know? The episode will push wherever the gap is.",
+  "Fair warning about {topic}: it looks simple until a checkpoint starts asking. Bring your A game.",
+  "That's a topic worth knowing. What made you pick it up, if you don't mind me asking?",
+  "Word of advice: {topic} rewards a second look. The episode will make the case for me.",
+  "Between you and me, {topic} is one of those subjects that sneaks up on people. You'll see.",
+];
+function topicOf(name) {
+  const words = name.replace(/\.[^.]+$/, '').split(/[-_.+\s]+/)
+    .filter(w => w && !/^(ch|chapter|part|vol|volume|draft)?\d*$/i.test(w) && !/^(final|copy|new|v\d+|the)$/i.test(w));
+  return words.slice(0, 5).join(' ') || 'something worth a look';
+}
+const fill = (tpl, name, topic) => tpl.replaceAll('{title}', name).replaceAll('{topic}', topic);
+function readDoneTurns(name) {
+  const topic = topicOf(name);
+  const turns = [{ t: fill(pick(READ_DONE_OPENERS), name, topic), e: 'happy' }];
+  if (Math.random() < 0.7) turns.push({ t: fill(pick(READ_DONE_FOLLOWUPS), name, topic), e: 'talking' });
+  return turns;
+}
 
 /* Talk → Input routing. Intent-first per conversational-ai-flow: each bucket
    owns its answers; misses escalate through a fallback chain. */
 const INTENTS = [
   { re: /\b(hi|hello|hey|howdy|yo|good (morning|afternoon|evening)|sup)\b/i, lines: [
     "Hey! Good to see you. What can I clear up?",
-    "Hi hi. Ask away — I'm in a chatty mood anyway.",
+    "Hi hi. Ask away, I'm in a chatty mood anyway.",
     "Hello! Fair warning: I answer app questions at length."]},
   { re: /what (is|'s) (this|meet ?mita|the app)|about (this|the) app|what does (this|it|the app) do|what is meet mita|what is meetmita/i, lines: [
     "Meet Mita turns a document into a playable visual-novel lesson. You upload a PDF, it plans a roadmap, generates an episode, and quizzes you inside the story.",
-    "It's a study tool in a costume. PDF goes in, a little interactive lesson comes out — scenes, checkpoints, a tutor you can raise your hand for."]},
+    "It's a study tool in a costume. PDF goes in, a little interactive lesson comes out: scenes, checkpoints, a tutor you can raise your hand for."]},
   { re: /how (does|do) (it|this|i|you)|get start|where (do i |to )?start|how to use|how does it work/i, lines: [
     "Three steps: hit Upload and give me a PDF, wait for the roadmap, then press Learn and play episode one. That's the whole loop.",
-    "Start at Upload. I'll read the document, plan a lesson, and put a playable episode in Learn. Everything else is decoration — including me."]},
+    "Start at Upload. I'll read the document, plan a lesson, and put a playable episode in Learn. Everything else is decoration, including me."]},
   { re: /upload|pdf|file|format|document|paper|chapter|notes/i, lines: [
-    "Upload takes PDFs — chapters, papers, lecture notes. Text-heavy documents work best; a page that's all diagrams won't give me much to teach from.",
-    "The Upload button opens the picker. While I read, a progress bar runs top-right and I narrate what I'm finding. Give it a try — there's a sample chapter in the modal."]},
+    "Upload takes PDFs: chapters, papers, lecture notes. Text-heavy documents work best; a page that's all diagrams won't give me much to teach from.",
+    "The Upload button opens the picker. While I read, a progress bar runs top-right and I narrate what I'm finding. Give it a try; there's a sample chapter in the modal."]},
   { re: /episode|learn|lesson|play|story|visual novel/i, lines: [
-    "Episodes are the lessons — visual-novel scenes built from your document. Episode one is generated fully; episodes two through five exist as planned outlines only.",
-    "Learn lists what's playable. Each episode is scenes plus checkpoints plus a tutor. Only episode one ships right now — the rest prove themselves later."]},
+    "Episodes are the lessons: visual-novel scenes built from your document. Episode one is generated fully; episodes two through five exist as planned outlines only.",
+    "Learn lists what's playable. Each episode is scenes plus checkpoints plus a tutor. Only episode one ships right now; the rest prove themselves later."]},
   { re: /checkpoint|quiz|question|test|assess|eliminate/i, lines: [
     "Checkpoints pause the story and ask you something about it. Wrong options get eliminated across attempts, so guessing still leaves you the reasoning.",
-    "They're retrieval practice, dressed as fiction. Get one wrong and I explain the mix-up — I won't just name the right option."]},
+    "They're retrieval practice, dressed as fiction. Get one wrong and I explain the mix-up; I won't just name the right option."]},
   { re: /hand|tutor|hint|stuck|help|confused|explain/i, lines: [
-    "Raising your hand pauses the episode and opens the tutor — it knows the document. You can ask for an explanation or a hint.",
+    "Raising your hand pauses the episode and opens the tutor, and it knows the document. You can ask for an explanation or a hint.",
     "Hints come in five levels: a conceptual nudge first, a parallel worked example at the far end. The point is helping you think, not thinking for you."]},
   { re: /who (are|r) (you|u)|your name|what are you|mita|maya/i, lines: [
-    "I'm Mita — the guide the app's named for. I narrate episodes, answer these questions, and read whatever you upload. I narrate episodes, answer these questions, and read whatever you upload.",
+    "I'm Mita, the guide the app's named for. I narrate episodes, answer these questions, and read whatever you upload.",
     "Mita. Resident chatterbox, part-time instructor. In the real build I borrow a bigger stage, but I make do."]},
   { re: /free|cost|price|pay|money|subscription/i, lines: [
-    "Free — it's a project build. The meter runs on whoever supplies the model API key, not on you.",
+    "Free, it's a project build. The meter runs on whoever supplies the model API key, not on you.",
     "No pricing page. This is a side project; the only currency is documents."]},
   { re: /privacy|data|store|save|account|sign ?(up|in)|track|server/i, lines: [
-    "Documents stay in the app's own storage for the lesson pipeline. No accounts on this screen — this prototype doesn't even send anything anywhere.",
+    "Documents stay in the app's own storage for the lesson pipeline. No accounts on this screen; this prototype doesn't even send anything anywhere.",
     "For the prototype: nothing leaves your machine. The real build keeps documents for episode generation; it's not a chat product that harvests you."]},
   { re: /api|model|llm|gpt|claude|gemini|openai|built|made|tech|stack|backend|how were you/i, lines: [
     "React and Vite up front, a FastAPI pipeline behind, and a model doing the lesson writing under strict prompts. I'm the friendly face on the plumbing.",
@@ -823,16 +901,16 @@ const INTENTS = [
     "A student asked the PDF for help. The PDF said nothing. That's why I'm employed.",
     "I'd tell you a study joke, but you'd forget it by next Tuesday unless it had a checkpoint."]},
   { re: /(love|like|hate|feel|think|friend|real|human|alive|sentient)/i, lines: [
-    "I'm a scripted stand-in — warm, but honest about it. The caring is real in the sense that the lessons are built to actually help.",
+    "I'm a scripted stand-in, warm but honest about it. The caring is real in the sense that the lessons are built to actually help.",
     "Flattered, but I'm more stage directions than person. The useful kind, hopefully."]},
 ];
 const FALLBACKS = [
-  "Hmm, I didn't quite catch that — try rephrasing?",
+  "Hmm, I didn't quite catch that. Try rephrasing?",
   "Let me try differently. Are you asking about uploads, episodes, checkpoints, or the tutor?",
-  "Still not landing — the About row in Menu covers the whole thing in a paragraph.",
+  "Still not landing. The About row in Menu covers the whole thing in a paragraph.",
 ];
 const TALK_END = [
-  { t: "Okay — I'll keep the seat warm.", e: 'happy' },
+  { t: "Okay, I'll keep the seat warm.", e: 'happy' },
   { t: "No problem. Back to my one-woman show.", e: 'happy' },
   { t: "Sure. Holler if anything's unclear.", e: 'idle' },
 ];
@@ -876,7 +954,7 @@ const ADVANCE_MS = 10000;    // auto-advance only after this much idleness
 let seq = 0;                 // bump cancels every running loop
 let typing = false, typer = null, fullText = '', sayResolve = null;
 let mode = 'greet';          // greet | idle | talk | read | modal
-let misses = 0, uploads = 0;
+let misses = 0;
 let idleBag = [];
 
 const wait = ms => new Promise(r => setTimeout(r, ms));
@@ -1043,7 +1121,7 @@ $('#sampleBtn').addEventListener('click', () => startUpload(SAMPLE_NAME));
 function progressTo(target, t) {
   return new Promise(res => {
     const from = parseFloat(upFill.style.width) || 0;
-    const dur = reduced ? 60 : 700 + Math.random() * 700;
+    const dur = reduced ? 60 : 2600 + Math.random() * 1200;
     const t0 = performance.now();
     (function step(now) {
       if (t !== seq) return res(false);
@@ -1056,6 +1134,25 @@ function progressTo(target, t) {
   });
 }
 
+/* Rotate a step's phrase pool while its progress milestone runs. The line in
+   flight finishes typing before we move on, so no phrase is cut mid-sentence. */
+function rotateLines(lines, t) {
+  const bag = [];
+  let stopped = false;
+  const next = () => {
+    if (!bag.length) bag.push(...lines.slice().sort(() => Math.random() - .5));
+    return bag.pop();
+  };
+  const loop = (async () => {
+    while (!stopped && t === seq) {
+      await say(next(), 'reading');
+      if (stopped || t !== seq) return;
+      await wait(reduced ? 150 : 700 + Math.random() * 600);
+    }
+  })();
+  return { stop: () => { stopped = true; }, done: loop };
+}
+
 async function startUpload(name) {
   uploadDlg.close();
   seq++; const t = seq; mode = 'read'; misses = 0;
@@ -1064,21 +1161,24 @@ async function startUpload(name) {
   upName.textContent = 'Reading ' + name;
   chip.hidden = false;
   syncButtons();
-  for (const beat of READ_BEATS) {
-    upStage.textContent = beat.stage;
-    if (!await progressTo(beat.p, t)) return;
-    await say(beat.t, 'reading');
-    if (t !== seq) return;
-    if (!await hold(900 + Math.random() * 700, t)) return;
+  for (const step of READ_STEPS) {
+    upStage.textContent = step.stage;
+    const rot = rotateLines(step.lines, t);
+    const ok = await progressTo(step.p, t);
+    rot.stop();
+    await rot.done;
+    if (!ok || t !== seq) return;
   }
-  upStage.textContent = 'roadmap ready';
-  await progressTo(100, t);
-  uploads++;
+  upStage.textContent = 'episode ready';
+  if (!await progressTo(100, t)) return;
   ep1Learn(name);
-  await say(uploads > 1 ? READ_DONE_AGAIN : READ_DONE);
-  if (t !== seq) return;
-  await hold(1800, t);
   chip.hidden = true;
+  const turns = readDoneTurns(name);
+  for (let i = 0; i < turns.length; i++) {
+    await say(turns[i].t, turns[i].e);
+    if (t !== seq) return;
+    if (!await hold(i < turns.length - 1 ? 1500 + Math.random() * 600 : 2000, t)) return;
+  }
   setState('idle');
   mode = 'idle';
   syncButtons();
@@ -1087,7 +1187,7 @@ async function startUpload(name) {
 
 function ep1Learn(name) {
   const title = name.replace(/\.(pdf|txt|md)$/i, '').replace(/[-_]+/g, ' ');
-  $('#ep1Title').textContent = title.charAt(0).toUpperCase() + title.slice(1) + ' — episode 1';
+  $('#ep1Title').textContent = title.charAt(0).toUpperCase() + title.slice(1) + ' · episode 1';
   $('#ep1Status').textContent = 'Ready · new';
 }
 
@@ -1116,7 +1216,7 @@ $('#ep1Play').addEventListener('click', async e => {
   e.stopPropagation();
   seq++; const t = seq;
   learnDlg.close();
-  await say({ t: "Episode one lives in the real build — this prototype only plays pretend. Still counts as good taste in buttons.", e: 'happy' });
+  await say({ t: "Episode one lives in the real build; this prototype only plays pretend. Still counts as good taste in buttons.", e: 'happy' });
   if (t !== seq) return;
   setState('idle'); mode = 'idle'; ambient(seq);
 });
