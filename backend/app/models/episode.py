@@ -88,7 +88,7 @@ class RecallQuestion(BaseModel):
 
 
 class GeneratedRecallQuestion(RecallQuestion):
-    options: list[GeneratedAnswerOption] = Field(min_length=2)
+    options: list[GeneratedAnswerOption] = Field(min_length=3, max_length=3)
 
 
 class EpisodeScene(BaseModel):
@@ -239,6 +239,11 @@ def validate_script(
                 violations.append(
                     f"{question.questionId}.{option.optionId}: mistakeResponse required"
                 )
+        if len(question.options) != 3:
+            violations.append(
+                f"{question.questionId}: expected 3 options, "
+                f"found {len(question.options)}"
+            )
         if len({option.optionId for option in question.options}) != len(question.options):
             violations.append(f"{question.questionId}: duplicate option id")
         if question.correctOptionId not in {option.optionId for option in question.options}:
