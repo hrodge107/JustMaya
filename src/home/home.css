@@ -53,8 +53,9 @@ body:has(.home) { margin: 0; overflow: hidden; background: #23233a; color-scheme
 .dlg-name { position: absolute; top: -15px; left: 26px; z-index: 2; padding: 4px 22px; font-weight: 900; font-size: 1.05rem; background: #626281; color: #fff; border: 2px solid #e1e1ed; border-radius: 22px; }
 .dlg-body { height: 100%; display: flex; flex-direction: column; padding: 30px 28px 18px; }
 .dlg-text { margin: 0; font-size: clamp(1.02rem, .94rem + .45vw, 1.28rem); font-weight: 700; max-width: 72ch; overflow-wrap: anywhere; }
+/* cue-bob keyframes live in player.css — the shared chrome contract file —
+   so home and player cue arrows run the identical motion. */
 .dlg-cue { position: absolute; right: 22px; bottom: 12px; font-size: 1rem; color: var(--mint-ink); animation: cue-bob 1.2s var(--ease) infinite; pointer-events: none; }
-@keyframes cue-bob { 0%, 100% { transform: translateY(0); opacity: .55 } 50% { transform: translateY(4px); opacity: 1 } }
 
 .rail { display: flex; gap: 8px; justify-content: center; }
 .rail button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 8px 18px; font-weight: 800; border-radius: 12px; letter-spacing: .01em; transition: transform .15s var(--ease), background .15s var(--ease), opacity .15s; background: transparent; color: var(--paper); box-shadow: inset 0 0 0 2px #77778b; }
