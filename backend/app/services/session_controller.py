@@ -129,7 +129,7 @@ def answer(session: LearnerSession, episode: EpisodeScript, request: AnswerReque
                        correct=correct, attemptNumber=attempts, timestamp=_now())
     notes = session.learningNotes
     if attempts == 1 and not correct:
-        notes = [*notes, f"Review objective {question.objectiveId}: {question.prompt}"]
+        notes = [*notes, f"Worth revisiting: {question.prompt}"]
     updated = session.model_copy(update={
         "quizAttempts": [*session.quizAttempts, quiz], "learningNotes": notes,
         "version": session.version + 1, "updatedAt": _now(),
