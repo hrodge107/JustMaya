@@ -26,12 +26,16 @@ async function run(browser, variant) {
   await page.goto(`${base}?v=${variant}`, { waitUntil: 'load' })
 
   // Fixed spec: dialogue box, action rail (Talk/Upload/Learn/Menu), mascot.
+  // Talk/Upload/Learn carry SVG icons; Menu is shared app chrome — the
+  // player's vn-menu-trigger identity (paper pill, CSS hamburger).
   await page.waitForSelector('.dlg')
   const rail = await page.$$('.rail button[data-act]')
   assert.equal(rail.length, 4, `[${variant}] rail buttons`)
   const labels = await Promise.all(rail.map(b => b.textContent()))
   assert.deepEqual(labels.map(s => s.trim()), ['Talk', 'Upload', 'Learn', 'Menu'], `[${variant}] rail labels`)
-  for (const b of rail) assert.ok(await b.$('svg.bi'), `[${variant}] rail button icon`)
+  for (const b of rail.slice(0, 3)) assert.ok(await b.$('svg.bi'), `[${variant}] rail button icon`)
+  assert.ok(await rail[3].evaluate(el => el.classList.contains('vn-menu-trigger')), `[${variant}] menu trigger is vn-menu-trigger`)
+  assert.equal((await rail[3].$$('.vn-menu-icon > span')).length, 3, `[${variant}] menu hamburger bars`)
 
   // Display toggle (fixed under the variant bar, not a rail member):
   // cycles on -> off (text only) -> icon (icons only) -> on.
@@ -90,11 +94,15 @@ async function run(browser, variant) {
   await page.waitForFunction(() => document.getElementById('upPct').textContent === '100%', null, { timeout: 30000 })
   await page.waitForSelector('#uploadChip[hidden]', { state: 'attached', timeout: 15000 })
 
-  // Learn: Episode 1 ready (updated by the upload), 2-5 planned outlines.
+  // Learn: per document only episode 1 shows; 2-5 collapse behind a
+  // disclosure the learner must click (they are planned outlines anyway).
   await page.click('[data-act="learn"]')
   await page.waitForSelector('#learnDlg[open]')
-  const eps = await page.$$('#epList .ep')
-  assert.equal(eps.length, 5, `[${variant}] episode rows`)
+  assert.equal((await page.$$('#epList .ep:visible')).length, 1, `[${variant}] only episode 1 visible per chapter`)
+  await page.click('.ep-more > summary')
+  const eps = await page.$$('#epList .ep:visible')
+  assert.equal(eps.length, 5, `[${variant}] disclosure reveals outlines`)
+  assert.match(await page.textContent('#epDocName'), /rivers-and-cities/i, `[${variant}] doc chapter header`)
   assert.match(await page.textContent('#ep1Status'), /Ready/, `[${variant}] ep1 ready`)
   assert.match(await page.textContent('#ep1Title'), /rivers and cities/i, `[${variant}] ep1 took uploaded name`)
   assert.match(await page.textContent('#epList'), /Planned outline/, `[${variant}] outlines present`)

@@ -68,7 +68,9 @@ body:has(.home) { margin: 0; overflow: hidden; background: #23233a; color-scheme
 /* ---------- Talk overlay: vn-ask-strip semantics on the home stage ---------- */
 .ask-overlay { position: absolute; inset: 0; z-index: 8; display: flex; align-items: flex-end; justify-content: center; padding: 12px 16px 18px; }
 .ask-choices { display: grid; gap: 12px; width: min(100%, 44rem); max-height: 100%; overflow-y: auto; }
-.ask-strip, .ask-choice { position: relative; min-height: 48px; padding: 12px 18px; font-weight: 800; text-align: left; background: var(--paper); color: var(--ink); border: 2px solid #626281; border-radius: 2px; }
+/* button.ask-choice must out-tie `.home button { font: inherit }` — the bare
+   class loses, which is why "Nothing" used to render at regular weight. */
+.ask-strip, button.ask-choice { position: relative; min-height: 48px; padding: 12px 18px; font-weight: 800; text-align: left; background: var(--paper); color: var(--ink); border: 2px solid #626281; border-radius: 2px; }
 .ask-strip { display: flex; align-items: center; gap: 10px; cursor: pointer; padding-right: 32px; }
 .ask-choice { display: block; width: 100%; padding-right: 32px; }
 .ask-strip::after, .ask-choice::after { content: ''; position: absolute; right: 0; bottom: 0; width: 14px; height: 14px; background: var(--mint-ink); clip-path: polygon(100% 0, 100% 100%, 0 100%); }
@@ -86,54 +88,63 @@ body:has(.home) { margin: 0; overflow: hidden; background: #23233a; color-scheme
 .upload-chip .up-foot { display: flex; justify-content: space-between; gap: 10px; margin-top: 6px; font-size: .74rem; }
 .upload-chip .up-err { margin: 8px 0 0; font-size: .78rem; font-weight: 800; color: #8f2d45; }
 .upload-chip .up-actions { display: flex; gap: 8px; margin-top: 10px; }
-.upload-chip .up-actions button { min-height: 34px; padding: 4px 14px; border-radius: 8px; font-size: .78rem; font-weight: 850; background: var(--mint-ink); color: var(--paper); }
-.upload-chip .up-actions button.ghost { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 2px #77778b; }
+.upload-chip .up-actions .vn-button, .upload-chip .up-actions .vn-quiet { min-height: 34px; padding: 4px 14px; font-size: .78rem; }
 .upload-chip[data-error] .up-fill { background: #8f2d45; }
 
-/* ---------- modals ---------- */
-.home dialog { border: 0; padding: 0; margin: auto; width: min(430px, calc(100% - 28px)); max-height: calc(100dvh - 40px); overflow: auto; border-radius: 20px; font: inherit; background: var(--paper); color: var(--ink); }
-.home dialog::backdrop { background: rgb(12 12 26 / .55); }
-.home dialog[open] { animation: dlg-in .18s var(--ease); }
-@keyframes dlg-in { from { opacity: 0; transform: translateY(10px) scale(.98) } to { opacity: 1; transform: none } }
-.modal { padding: 24px; }
-.modal h2 { margin: 0 0 6px; font-size: 1.25rem; font-weight: 900; }
+/* ---------- modals ----------
+   Shared chrome: every home dialog uses the player's vn-menu-dialog frame —
+   paper surface, ink text, 20px radius, the same backdrop and enter motion
+   (rules live in player.css). Content modals only widen the shared frame;
+   they never restyle it. */
+#uploadDlg { width: min(560px, calc(100% - 32px)); }
+#learnDlg { width: min(640px, calc(100% - 32px)); }
+#aboutDlg { width: min(480px, calc(100% - 32px)); }
+
+/* The player's :where(.player) button geometry is player-scoped; the shared
+   vn-* chrome restores the same radius under .home. */
+.home .vn-button, .home .vn-quiet, .home .vn-motion, .home .vn-menu-trigger { border-radius: 12px; }
+
+/* Headings pin their surface ink — the index.css global h1/h2 resolves
+   near-white under a dark color-scheme. Same rule the player applies. */
+.modal h2 { margin: 0 0 6px; font-size: 1.25rem; line-height: 1.3; font-weight: 900; font-family: inherit; color: var(--ink); letter-spacing: normal; }
 .modal .sub { margin: 0 0 18px; font-size: .9rem; font-weight: 700; opacity: .75; }
 .modal .row-end { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }
-.modal button { padding: 10px 20px; border-radius: 12px; font-weight: 850; background: var(--mint-ink); color: var(--paper); }
-.modal button.ghost { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 2px #77778b; }
 .modal .form-error { margin: 12px 0 0; font-size: .85rem; font-weight: 800; color: #8f2d45; }
 
 .dropzone { display: grid; place-items: center; gap: 8px; min-height: 120px; padding: 18px; border: 2px dashed #77778b; border-radius: 14px; text-align: center; font-weight: 800; background: var(--wash); color: var(--ink); cursor: pointer; }
 .dropzone small { font-weight: 700; opacity: .65; }
 .dropzone.drag-over { border-color: var(--mint-ink); background: #d8efec; }
 
-/* Learn episode list. */
-.ep-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+/* Learn episode list — one group per document. Episode 1 is always visible;
+   later outlines collapse behind the ep-more disclosure until clicked. */
+.ep-list { display: grid; gap: 16px; margin: 0; padding: 0; list-style: none; }
+.ep-group { display: grid; gap: 8px; }
 .ep-doc { padding: 6px 2px 0; font-size: .78rem; font-weight: 900; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ep-rows { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
 .ep { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 12px; font-weight: 800; background: var(--wash); }
 .ep.ready { box-shadow: inset 0 0 0 2px var(--mint-ink); }
 .ep .ep-meta { flex: 1; min-width: 0; }
 .ep .ep-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ep .ep-status { font-size: .76rem; font-weight: 800; opacity: .7; }
 .ep .ep-num { flex: none; font-size: .78rem; font-weight: 900; opacity: .55; }
-.modal .ep button { min-height: 38px; padding: 6px 16px; background: var(--mint-ink); color: var(--paper); }
+.ep .vn-button { min-height: 38px; padding: 6px 16px; }
+.ep-more > summary { display: flex; align-items: center; gap: 9px; min-height: 44px; padding: 8px 14px; border-radius: 12px; cursor: pointer; font-weight: 850; color: var(--muted); list-style: none; }
+.ep-more > summary::-webkit-details-marker { display: none; }
+.ep-more > summary::before { content: '▸'; transition: transform .18s var(--ease); }
+.ep-more[open] > summary::before { transform: rotate(90deg); }
+.ep-more > summary:hover { color: var(--ink); }
+.ep-more .ep-rows { margin-top: 8px; }
 .ep-empty { padding: 14px; font-weight: 700; opacity: .8; }
 .or { display: flex; align-items: center; gap: 12px; margin: 16px 0; font-size: .8rem; font-weight: 800; opacity: .65; }
 .or::before, .or::after { content: ''; flex: 1; height: 1px; background: currentColor; opacity: .4; }
 
-/* Menu dialog rows — shipped vn-menu-dialog shape. These rules are scoped to
-   .modal so .modal button's mint fill cannot win by specificity. */
-.menu-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
-.menu-heading h2 { margin: 0; font-size: 1.25rem; font-weight: 900; }
-.modal .menu-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; width: 100%; padding: 10px 12px 10px 18px; border-radius: 12px; font-weight: 850; text-align: left; background: transparent; color: var(--ink); box-shadow: inset 0 0 0 2px #77778b; margin-bottom: 10px; }
-.modal .menu-row:hover { background: #dedeea; }
-.menu-row .menu-row-glyph { font-weight: 900; opacity: .6; }
-.modal .motion-reset { display: block; min-height: 32px; margin: 6px 0 10px; padding: 4px 2px; border-radius: 4px; background: none; font-size: .85rem; font-weight: 800; text-decoration: underline; text-underline-offset: 3px; color: var(--mint-ink); }
-.modal .motion-reset:hover { color: #095850; }
-.switch { flex: none; position: relative; width: 48px; height: 26px; border-radius: 999px; background: #a9a9be; transition: background .18s var(--ease); }
-.menu-row[aria-checked='true'] .switch { background: var(--switch-on); }
-.switch-thumb { position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgb(15 15 29 / .4); transition: transform .18s var(--ease); }
-.menu-row[aria-checked='true'] .switch-thumb { transform: translateX(22px); }
+/* Menu is shared app chrome, not a stage action — the player's vn-menu-trigger
+   identity (paper pill, ink label, CSS hamburger) wins over the rail skin. */
+.rail .vn-menu-trigger { background: var(--paper); color: var(--ink); box-shadow: none; font-weight: 850; }
+.rail .vn-menu-trigger:hover { background: var(--wash); }
+.rail .vn-menu-trigger:active { transform: scale(.97); }
+.vn-menu-about { margin: 10px 0; }
+.vn-menu-about span[aria-hidden] { color: var(--mint-ink); font-weight: 900; }
 
 .about-p { margin: 0 0 12px; font-size: .92rem; font-weight: 650; }
 .about-p b { font-weight: 850; }

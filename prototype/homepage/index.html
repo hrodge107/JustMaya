@@ -87,8 +87,9 @@ button { font: inherit; cursor: pointer; border: 0; min-height: 44px; }
 .home[data-icons='on'] #iconToggle .st-on,
 .home[data-icons='icon'] #iconToggle .st-icon,
 .home[data-icons='off'] #iconToggle .st-off { display: inline; }
-.home[data-icons='off'] .rail button[data-act] .bi { display: none; }
-.home[data-icons='icon'] .rail button[data-act] span { display: none; }
+.home[data-icons='off'] .rail button[data-act] .bi,
+.home[data-icons='off'] .rail .vn-menu-icon { display: none; }
+.home[data-icons='icon'] .rail button[data-act] .bl { display: none; }
 @media (min-width: 720px) {
   .dock { flex-direction: row; align-items: center; }
   .rail { order: -1; flex-direction: column; align-items: stretch; gap: 7px; }
@@ -146,11 +147,15 @@ button { font: inherit; cursor: pointer; border: 0; min-height: 44px; }
 .varbar a { display: grid; place-items: center; min-width: 30px; min-height: 28px; padding: 2px 9px; border-radius: 8px; color: inherit; text-decoration: none; }
 .varbar .var-label { padding: 4px 8px 4px 4px; font-weight: 700; opacity: .75; }
 
-/* Modals. */
-dialog { border: 0; padding: 0; margin: auto; width: min(430px, calc(100% - 28px)); max-height: calc(100dvh - 40px); overflow: auto; border-radius: 20px; font: inherit; }
-dialog::backdrop { background: rgb(12 12 26 / .55); }
+/* Modals — the player's vn-menu-dialog frame: same radius, backdrop, and
+   enter motion. Content modals only widen the shared frame. */
+dialog { border: 0; padding: 0; margin: auto; width: min(420px, calc(100% - 32px)); max-height: calc(100dvh - 32px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); overflow: auto; border-radius: 20px; font: inherit; }
+dialog::backdrop { background: rgb(15 15 29 / .68); }
 dialog[open] { animation: dlg-in .18s var(--ease); }
 @keyframes dlg-in { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: none; } }
+#uploadDlg { width: min(560px, calc(100% - 32px)); }
+#learnDlg { width: min(640px, calc(100% - 32px)); }
+#aboutDlg { width: min(480px, calc(100% - 32px)); }
 .modal { padding: 24px; }
 .modal h2 { margin: 0 0 6px; font-size: 1.25rem; font-weight: 900; }
 .modal .sub { margin: 0 0 18px; font-size: .9rem; font-weight: 700; opacity: .75; }
@@ -160,13 +165,34 @@ dialog[open] { animation: dlg-in .18s var(--ease); }
 .dropzone small { font-weight: 700; opacity: .65; }
 .or { display: flex; align-items: center; gap: 12px; margin: 16px 0; font-size: .8rem; font-weight: 800; opacity: .65; }
 .or::before, .or::after { content: ''; flex: 1; height: 1px; background: currentColor; opacity: .4; }
-.ep-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.ep-list { display: grid; gap: 16px; margin: 0; padding: 0; list-style: none; }
+.ep-group { display: grid; gap: 8px; }
+.ep-doc { padding: 6px 2px 0; font-size: .78rem; font-weight: 900; letter-spacing: .04em; text-transform: uppercase; opacity: .65; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ep-rows { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
 .ep { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 12px; font-weight: 800; }
 .ep .ep-meta { flex: 1; min-width: 0; }
 .ep .ep-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ep .ep-status { font-size: .76rem; font-weight: 800; opacity: .7; }
 .ep .ep-num { flex: none; font-size: .78rem; font-weight: 900; opacity: .55; }
 .ep button { min-height: 38px; padding: 6px 16px; }
+/* Later outlines collapse behind the disclosure; episode 1 stays visible. */
+.ep-more > summary { display: flex; align-items: center; gap: 9px; min-height: 44px; padding: 8px 14px; border-radius: 12px; cursor: pointer; font-weight: 850; opacity: .75; list-style: none; }
+.ep-more > summary::-webkit-details-marker { display: none; }
+.ep-more > summary::before { content: '▸'; transition: transform .18s var(--ease); }
+.ep-more[open] > summary::before { transform: rotate(90deg); }
+.ep-more > summary:hover { opacity: 1; }
+.ep-more .ep-rows { margin-top: 8px; }
+/* Menu is shared app chrome: the player's vn-menu-trigger identity (paper
+   pill, ink label, CSS hamburger) in each variant's palette. */
+.vn-menu-icon { display: grid; gap: 4px; width: 20px; }
+.vn-menu-icon > span { height: 2px; border-radius: 1px; background: currentColor; }
+.rail .vn-menu-trigger { font-weight: 850; }
+[data-v='a'] .rail .vn-menu-trigger { background: #fff6f9; color: #5a2c40; }
+[data-v='a'] .rail .vn-menu-trigger:hover { background: #fff; }
+[data-v='b'] .rail .vn-menu-trigger { background: var(--paper); color: var(--ink); box-shadow: none; }
+[data-v='b'] .rail .vn-menu-trigger:hover { background: var(--wash); }
+[data-v='c'] .rail .vn-menu-trigger { background: #f4e9d6; color: #3a2c22; }
+[data-v='c'] .rail .vn-menu-trigger:hover { background: #fdf3de; }
 .about-p { margin: 0 0 12px; font-size: .92rem; font-weight: 650; }
 .about-p b { font-weight: 850; }
 
@@ -598,16 +624,16 @@ dialog[open] { animation: dlg-in .18s var(--ease); }
     <div class="foot">
       <nav class="rail" aria-label="Home actions">
         <button type="button" data-act="talk">
-          <svg class="bi" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span>Talk</span>
+          <svg class="bi" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span class="bl">Talk</span>
         </button>
         <button type="button" data-act="upload">
-          <svg class="bi" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg><span>Upload</span>
+          <svg class="bi" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg><span class="bl">Upload</span>
         </button>
         <button type="button" data-act="learn">
-          <svg class="bi" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg><span>Learn</span>
+          <svg class="bi" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg><span class="bl">Learn</span>
         </button>
-        <button type="button" data-act="menu" id="menuTrigger" aria-haspopup="dialog" aria-controls="menuDlg">
-          <svg class="bi" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg><span>Menu</span>
+        <button type="button" data-act="menu" id="menuTrigger" class="vn-menu-trigger" aria-haspopup="dialog" aria-controls="menuDlg">
+          <span class="vn-menu-icon" aria-hidden="true"><span></span><span></span><span></span></span><span class="bl">Menu</span>
         </button>
       </nav>
     </div>
@@ -641,11 +667,21 @@ dialog[open] { animation: dlg-in .18s var(--ease); }
       <h2 id="learnTitle">Episodes</h2>
       <p class="sub">Generated lessons from your documents. Episode 1 plays; the rest stay as outlines until it proves itself.</p>
       <ol class="ep-list" id="epList">
-        <li class="ep ready" id="ep1"><span class="ep-num">01</span><span class="ep-meta"><span class="ep-title" id="ep1Title">The First Cities · chapter draft</span><span class="ep-status" id="ep1Status">Ready</span></span><button type="button" id="ep1Play">Play</button></li>
-        <li class="ep"><span class="ep-num">02</span><span class="ep-meta"><span class="ep-title">Trade and early writing</span><span class="ep-status">Planned outline</span></span></li>
-        <li class="ep"><span class="ep-num">03</span><span class="ep-meta"><span class="ep-title">Law, kingship, and order</span><span class="ep-status">Planned outline</span></span></li>
-        <li class="ep"><span class="ep-num">04</span><span class="ep-meta"><span class="ep-title">Irrigation and organized labor</span><span class="ep-status">Planned outline</span></span></li>
-        <li class="ep"><span class="ep-num">05</span><span class="ep-meta"><span class="ep-title">What the river left behind</span><span class="ep-status">Planned outline</span></span></li>
+        <li class="ep-group">
+          <p class="ep-doc" id="epDocName">rivers-and-cities-ch1.pdf</p>
+          <ol class="ep-rows">
+            <li class="ep ready" id="ep1"><span class="ep-num">01</span><span class="ep-meta"><span class="ep-title" id="ep1Title">The First Cities · chapter draft</span><span class="ep-status" id="ep1Status">Ready</span></span><button type="button" id="ep1Play">Play</button></li>
+          </ol>
+          <details class="ep-more">
+            <summary>4 more planned outlines</summary>
+            <ol class="ep-rows">
+              <li class="ep"><span class="ep-num">02</span><span class="ep-meta"><span class="ep-title">Trade and early writing</span><span class="ep-status">Planned outline</span></span></li>
+              <li class="ep"><span class="ep-num">03</span><span class="ep-meta"><span class="ep-title">Law, kingship, and order</span><span class="ep-status">Planned outline</span></span></li>
+              <li class="ep"><span class="ep-num">04</span><span class="ep-meta"><span class="ep-title">Irrigation and organized labor</span><span class="ep-status">Planned outline</span></span></li>
+              <li class="ep"><span class="ep-num">05</span><span class="ep-meta"><span class="ep-title">What the river left behind</span><span class="ep-status">Planned outline</span></span></li>
+            </ol>
+          </details>
+        </li>
       </ol>
       <div class="row-end"><button type="button" class="ghost" data-close>Close</button></div>
     </div>
@@ -1200,6 +1236,7 @@ function ep1Learn(name) {
   const title = name.replace(/\.(pdf|txt|md)$/i, '').replace(/[-_]+/g, ' ');
   $('#ep1Title').textContent = title.charAt(0).toUpperCase() + title.slice(1) + ' · episode 1';
   $('#ep1Status').textContent = 'Ready · new';
+  $('#epDocName').textContent = name;
 }
 
 /* ---------- Learn / About ---------------------------------------------- */
