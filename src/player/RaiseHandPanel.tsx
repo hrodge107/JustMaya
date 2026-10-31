@@ -17,11 +17,9 @@ const PLACEHOLDER: Record<AwaitingKind, string> = {
   clarification: 'Answer the question above',
 }
 
-export default function RaiseHandPanel({ phase, draft, hasAsked, turnComplete, resumeLabel, busy, error, helpMode, anchored, awaiting, onDraft, onSend, onResume, onHelpMode, onNewTopic }: {
+export default function RaiseHandPanel({ phase, draft, resumeLabel, busy, error, helpMode, anchored, awaiting, onDraft, onSend, onResume, onHelpMode, onNewTopic }: {
   phase: AskPhase
   draft: string
-  hasAsked: boolean
-  turnComplete: boolean
   resumeLabel: string
   busy: boolean
   error: string
@@ -80,7 +78,7 @@ export default function RaiseHandPanel({ phase, draft, hasAsked, turnComplete, r
         </div>
       </>}
       {error && <p className="vn-error" role="alert">{error}</p>}
-      {phase === 'compose' && hasAsked && turnComplete && <button type="button" className="vn-choice vn-ask-resume" disabled={busy} onClick={onResume}>{resumeLabel}</button>}
+      {phase === 'compose' && <button type="button" className="vn-choice vn-ask-resume" disabled={busy} onClick={onResume}>{resumeLabel}</button>}
     </div>
   </div>
 }
