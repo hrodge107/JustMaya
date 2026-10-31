@@ -29,6 +29,15 @@
       Reduce motion, role=switch, device override persisted to localStorage).
       Every rail button carries an inline SVG icon; an in-rail switch toggles
       icon visibility and reparks itself at the row's head when icons are off.
+    - VRM stage: the real 3D mascot (prototype/vrm/stage.js, a bundle of
+      three + @pixiv/three-vrm ported from src/player/VRMCanvas.tsx) replaces
+      the stand-in face when the sample model loads. The model is embedded as
+      base64 (prototype/vrm/model.js, ~21MB, regen: node ../vrm/pack-model.cjs)
+      because file:// pages cannot fetch local files. A "Mascot lab" drawer
+      (sliders icon under the variant bar) pins every emotion/state by hand:
+      emotion chips, speaking, pointer gaze, nod, raw expression sliders, and
+      a file input for trying other .vrm files. Reduced motion follows the
+      shipped contract (stand-in) unless the lab's force switch overrides.
 
   Run: open this file directly, or `npm run dev` then /prototype/homepage/index.html
 -->
@@ -477,6 +486,39 @@ dialog[open] { animation: dlg-in .18s var(--ease); }
 [data-v='c'] .ep.ready { border-color: #c98a2e; }
 [data-v='c'] .ep button { background: #c98a2e; }
 
+/* ============================ VRM stage + lab ============================ */
+/* The 3D viewport fills the mascot figure once the model is ready; stand-in
+   faces hide and the name tag floats over the canvas. */
+.maya-vrm { position: absolute; inset: 0; z-index: 0; }
+.maya-vrm canvas { display: block; }
+.maya .maya-tag { z-index: 1; }
+.maya.vrm-on .maya-svg, .maya.vrm-on .face-mascot { display: none; }
+[data-v] .maya.vrm-on { height: min(96%, 470px); width: min(80vw, 400px); }
+
+/* Mascot lab — floating drawer + trigger stacked under the icon toggle. */
+#labToggle { position: fixed; top: 102px; left: 14px; z-index: 20; display: grid; place-items: center; width: 42px; height: 38px; padding: 0; border-radius: 10px; }
+#labToggle svg { width: 19px; height: 19px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+[data-v='a'] #labToggle { background: #fff0f6d9; color: #a03a5e; border: 1px solid #ffc4d9; }
+[data-v='b'] #labToggle { background: #23233acc; color: var(--paper); box-shadow: inset 0 0 0 2px #77778b; }
+[data-v='c'] #labToggle { background: #2c2440d9; color: #e8ddc8; border: 1px solid #57496e; }
+.lab { position: fixed; top: 14px; right: 14px; bottom: 14px; z-index: 25; width: min(330px, 88vw); overflow: auto; padding: 16px; border-radius: 16px; background: var(--paper); color: var(--ink); box-shadow: 0 12px 34px rgb(0 0 0 / .32); font-size: .9rem; }
+.lab h2 { margin: 0; font-size: 1.05rem; font-weight: 900; color: var(--ink); }
+.lab .lab-sub { margin: 2px 0 0; font-size: .74rem; font-weight: 700; opacity: .7; overflow-wrap: anywhere; }
+.lab .lab-err { margin: 8px 0 0; font-size: .78rem; font-weight: 800; color: #b3202e; }
+.lab-sec { display: block; margin: 14px 0 7px; font-size: .72rem; font-weight: 900; letter-spacing: .05em; text-transform: uppercase; opacity: .65; }
+.lab-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.lab button { min-height: 36px; }
+.lab-chips button, .lab-row button { padding: 6px 12px; border-radius: 10px; font-weight: 800; font-size: .8rem; background: transparent; color: inherit; box-shadow: inset 0 0 0 1.5px currentColor; }
+.lab-chips button.on { background: var(--mint-ink, var(--focus)); color: var(--paper); box-shadow: none; }
+.lab-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.lab-switch { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; margin-top: 4px; padding: 7px 10px; border-radius: 10px; font-weight: 800; font-size: .82rem; background: none; text-align: left; color: inherit; }
+.lab-expr { display: grid; gap: 5px; }
+.lab-expr label { display: grid; grid-template-columns: 86px 1fr 32px; gap: 8px; align-items: center; font-size: .72rem; font-weight: 800; }
+.lab-expr input[type='range'] { width: 100%; min-width: 0; accent-color: var(--mint-ink, var(--focus)); }
+.lab-expr output { text-align: right; font-variant-numeric: tabular-nums; }
+#labExprBox > summary { cursor: pointer; }
+.lab-read { margin: 12px 0 0; font-family: ui-monospace, Consolas, monospace; font-size: .72rem; font-weight: 700; opacity: .8; white-space: pre-wrap; }
+
 /* Reduced motion: same pattern as the shipped player. */
 :root[data-motion='reduce'] .home *, :root[data-motion='reduce'] dialog::backdrop { transition: none !important; animation: none !important; }
 </style>
@@ -507,6 +549,9 @@ dialog[open] { animation: dlg-in .18s var(--ease); }
       <g class="st st-icon"><rect x="6" y="6" width="12" height="12" rx="2"/></g>
       <g class="st st-off"><path d="M4 7h16M4 12h16M4 17h16"/></g>
     </svg>
+  </button>
+  <button type="button" id="labToggle" aria-label="Mascot lab" aria-expanded="false" aria-controls="lab" title="Mascot lab — pin any state">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h10M18 8h2M4 16h2M10 16h10"/><circle cx="16" cy="8" r="2"/><circle cx="8" cy="16" r="2"/></svg>
   </button>
 
   <div class="stage" id="stage">
@@ -610,6 +655,7 @@ dialog[open] { animation: dlg-in .18s var(--ease); }
           <span class="brow"></span><span class="eye left"></span><span class="eye right"></span><span class="mouth"></span><span class="mark"></span>
           <span class="face-book"></span>
         </div>
+        <div class="maya-vrm" id="mayaVrm" hidden aria-hidden="true"></div>
         <figcaption class="maya-tag"><span class="maya-name">Mita</span><span id="mayaMood"></span></figcaption>
       </figure>
     </div>
@@ -713,7 +759,45 @@ dialog[open] { animation: dlg-in .18s var(--ease); }
       <div class="row-end"><button type="button" class="ghost" data-close>Close</button></div>
     </div>
   </dialog>
+
+  <aside class="lab" id="lab" hidden aria-label="Mascot lab">
+    <h2>Mascot lab</h2>
+    <p class="lab-sub" id="labSub">loading stage…</p>
+    <p class="lab-err" id="labErr" hidden></p>
+    <span class="lab-sec">Emotion</span>
+    <div class="lab-chips" id="labEmo"></div>
+    <span class="lab-sec">State</span>
+    <button type="button" class="lab-switch" id="labSpeak" role="switch" aria-checked="false">
+      <span>Speaking mouth</span><span class="switch" aria-hidden="true"><span class="switch-thumb"></span></span>
+    </button>
+    <button type="button" class="lab-switch" id="labGaze" role="switch" aria-checked="true">
+      <span>Pointer gaze</span><span class="switch" aria-hidden="true"><span class="switch-thumb"></span></span>
+    </button>
+    <button type="button" class="lab-switch" id="labForce" role="switch" aria-checked="false" hidden>
+      <span>VRM despite reduced motion</span><span class="switch" aria-hidden="true"><span class="switch-thumb"></span></span>
+    </button>
+    <span class="lab-sec">Triggers</span>
+    <div class="lab-row">
+      <button type="button" id="labNod">Nod</button>
+      <button type="button" id="labTour">Auto tour</button>
+      <button type="button" id="labResume">Resume script</button>
+    </div>
+    <span class="lab-sec">Model</span>
+    <div class="lab-row">
+      <button type="button" id="labLoad">Load .vrm…</button>
+      <button type="button" id="labClear">Clear pins</button>
+      <input type="file" id="labFile" accept=".vrm" hidden>
+    </div>
+    <details id="labExprBox">
+      <summary class="lab-sec">Expressions</summary>
+      <div class="lab-expr" id="labExpr"></div>
+    </details>
+    <p class="lab-read" id="labRead"></p>
+  </aside>
 </div>
+
+<script src="../vrm/model.js"></script>
+<script src="../vrm/stage.js"></script>
 
 <script>
 'use strict';
@@ -1318,9 +1402,215 @@ addEventListener('pointermove', e => {
   maya.style.setProperty('--gy', Math.max(-1, Math.min(1, (e.clientY - (r.top + r.height / 2)) / (innerHeight / 2))));
 }, { passive: true });
 
+/* ---------- VRM stage + mascot lab ----------------------------------------
+   Mirrors the shipped MascotStage prop contract: emotion chips drive
+   data-state, a switch drives data-speaking, pointer gaze and nod map to the
+   same props VRMCanvas consumes. Chips pin a state by pausing the ambient
+   script; Resume hands control back. Falls back to the stand-in when the
+   model can't load or reduced motion is on (the shipped stage's own rule). */
+const EMOTIONS = ['idle','talking','thinking','happy','confused','listening','reading'];
+const vrmHost = $('#mayaVrm'), lab = $('#lab'), labToggle = $('#labToggle');
+const labSub = $('#labSub'), labErr = $('#labErr'), labEmo = $('#labEmo'),
+      labSpeak = $('#labSpeak'), labGaze = $('#labGaze'), labForce = $('#labForce'),
+      labExpr = $('#labExpr'), labRead = $('#labRead'), labFile = $('#labFile');
+let vrm = null, labMode = false, forceVrm = false, tourTimer = 0;
+let modelName = window.MITA_VRM_NAME || 'sample.vrm';
+
+const vrmProps = () => ({
+  emotion: maya.dataset.state,
+  isSpeaking: maya.hasAttribute('data-speaking'),
+  enablePointerTracking: labGaze.getAttribute('aria-checked') === 'true',
+  lookTargetOffset: null,
+  reduced: reduced && !forceVrm, // forcing the stage means opting into motion
+});
+
+function b64buf(s) {
+  const bin = atob(s), u8 = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  return u8.buffer;
+}
+async function modelBuffer(file) {
+  if (file) return file.arrayBuffer();
+  // fetch of local files is blocked on file:// — skip straight to the embed.
+  if (location.protocol !== 'file:') {
+    try { const r = await fetch('../1754622352515258289.vrm'); if (r.ok) return await r.arrayBuffer(); } catch { /* fall through */ }
+  }
+  if (window.MITA_VRM_B64) return b64buf(window.MITA_VRM_B64);
+  throw new Error('no model source (run pack-model.cjs)');
+}
+
+function syncLab() {
+  labEmo.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.e === maya.dataset.state));
+  labSpeak.setAttribute('aria-checked', String(maya.hasAttribute('data-speaking')));
+  const pins = vrm ? Object.keys(vrm.pins) : [];
+  labRead.textContent = 'mode=' + mode + ' state=' + maya.dataset.state
+    + (maya.hasAttribute('data-speaking') ? ' speaking' : '')
+    + ' gaze=' + (vrmProps().enablePointerTracking ? 'pointer' : 'off')
+    + (pins.length ? ' pins=' + pins.join(',') : '');
+}
+
+function buildExprSliders(names) {
+  labExpr.textContent = '';
+  for (const name of names) {
+    const label = document.createElement('label');
+    const span = document.createElement('span'); span.textContent = name;
+    const range = document.createElement('input');
+    range.type = 'range'; range.min = '0'; range.max = '1'; range.step = '0.01'; range.value = '0';
+    const out = document.createElement('output'); out.textContent = '0';
+    range.addEventListener('input', () => {
+      out.textContent = (+range.value).toFixed(2);
+      vrm?.pin(name, +range.value);
+      syncLab();
+    });
+    label.append(span, range, out);
+    labExpr.append(label);
+  }
+}
+
+function vrmFail(msg) {
+  if (vrm) { vrm.dispose(); vrm = null; }
+  maya.classList.remove('vrm-on');
+  vrmHost.hidden = true;
+  labErr.hidden = false;
+  labErr.textContent = 'VRM unavailable, stand-in active. ' + msg;
+  labSub.textContent = 'stand-in mascot (CSS/SVG), same states';
+  labForce.hidden = !reduced;
+}
+
+async function bootVRM(file) {
+  if (!window.MitaVRM) return vrmFail('stage.js bundle missing.');
+  if (reduced && !forceVrm && !file) {
+    vrmFail('reduced motion is on; the shipped stage also falls back. Force it below to inspect anyway.');
+    labForce.hidden = false;
+    return;
+  }
+  labForce.hidden = !reduced;
+  if (vrm) { vrm.dispose(); vrm = null; }
+  maya.classList.remove('vrm-on');
+  vrmHost.hidden = true;
+  try {
+    const buffer = await modelBuffer(file);
+    vrm = MitaVRM.mount(vrmHost, {
+      getBuffer: () => buffer,
+      props: vrmProps(),
+      onReady(info) {
+        maya.classList.add('vrm-on');
+        vrmHost.hidden = false;
+        labSub.textContent = modelName + ' · VRM ' + info.spec + ' · ' + info.expressions.length + ' expressions';
+        labErr.hidden = true;
+        buildExprSliders(info.expressions);
+        vrm?.setProps(vrmProps());
+        syncLab();
+      },
+      onError(err) { vrmFail(err.message || 'failed to load.'); },
+    });
+  } catch (e) { vrmFail(e.message || 'fetch failed.'); }
+}
+
+/* Chips pin an emotion: pauses the ambient script so the state holds. */
+function pinEmotion(e) {
+  if (mode === 'read') { chip.hidden = true; }
+  if (!labMode) {
+    labMode = true;
+    seq++; mode = 'lab';
+    closeAsk();
+    say("Lab mode — pin states, poke sliders, I'll hold the pose. Resume hands the wheel back.", 'talking');
+  }
+  setState(e);
+  syncLab();
+}
+for (const e of EMOTIONS) {
+  const b = document.createElement('button');
+  b.type = 'button'; b.dataset.e = e; b.textContent = e;
+  b.addEventListener('click', () => pinEmotion(e));
+  labEmo.append(b);
+}
+
+labSpeak.addEventListener('click', () => {
+  maya.toggleAttribute('data-speaking');
+  syncLab();
+});
+labGaze.addEventListener('click', () => {
+  const next = labGaze.getAttribute('aria-checked') !== 'true';
+  labGaze.setAttribute('aria-checked', String(next));
+  vrm?.setProps({ enablePointerTracking: next });
+  syncLab();
+});
+labForce.addEventListener('click', () => {
+  forceVrm = labForce.getAttribute('aria-checked') !== 'true';
+  labForce.setAttribute('aria-checked', String(forceVrm));
+  bootVRM();
+});
+
+$('#labNod').addEventListener('click', () => {
+  if (vrm) vrm.nod();
+  else if (!reduced) maya.animate(
+    [{ transform: 'none' }, { transform: 'translateY(7px) rotate(2deg)', offset: .35 },
+     { transform: 'translateY(-2px)', offset: .7 }, { transform: 'none' }],
+    { duration: 420, easing: 'ease-out' });
+});
+$('#labTour').addEventListener('click', function () {
+  if (tourTimer) { clearInterval(tourTimer); tourTimer = 0; this.textContent = 'Auto tour'; return; }
+  this.textContent = 'Stop tour';
+  let i = EMOTIONS.indexOf(maya.dataset.state) + 1 || 0;
+  pinEmotion(EMOTIONS[i % EMOTIONS.length]);
+  tourTimer = setInterval(() => pinEmotion(EMOTIONS[++i % EMOTIONS.length]), 2400);
+});
+$('#labResume').addEventListener('click', () => {
+  clearInterval(tourTimer); tourTimer = 0; $('#labTour').textContent = 'Auto tour';
+  labMode = false;
+  maya.removeAttribute('data-speaking');
+  setState('idle');
+  vrm?.clearPins();
+  labExpr.querySelectorAll('input').forEach(r => { r.value = '0'; });
+  labExpr.querySelectorAll('output').forEach(o => { o.textContent = '0'; });
+  seq++; mode = 'idle'; syncButtons();
+  ambient(seq);
+  syncLab();
+});
+
+$('#labLoad').addEventListener('click', () => labFile.click());
+labFile.addEventListener('change', () => {
+  const f = labFile.files[0];
+  if (f) { modelName = f.name; bootVRM(f); }
+});
+$('#labClear').addEventListener('click', () => {
+  vrm?.clearPins();
+  labExpr.querySelectorAll('input').forEach(r => { r.value = '0'; });
+  labExpr.querySelectorAll('output').forEach(o => { o.textContent = '0'; });
+  syncLab();
+});
+
+labToggle.addEventListener('click', () => {
+  lab.hidden = !lab.hidden;
+  labToggle.setAttribute('aria-expanded', String(!lab.hidden));
+});
+
+/* The mascot figure's data-state/data-speaking are the single source of
+   truth — the VRM and the chips both follow them. */
+new MutationObserver(() => { vrm?.setProps(vrmProps()); syncLab(); })
+  .observe(maya, { attributes: true, attributeFilter: ['data-state', 'data-speaking'] });
+
+/* Reduced-motion flips mid-session: remount or drop to the stand-in, same
+   contract as the shipped stage. The wrapper covers menu switches; the media
+   listener covers device changes (the original applyMotion runs first). */
+const _applyMotion = applyMotion;
+applyMotion = () => {
+  _applyMotion();
+  labForce.hidden = !reduced;
+  if (reduced && !forceVrm && vrm) vrmFail('reduced motion — stand-in.');
+  else if (!reduced && !vrm && window.MitaVRM) bootVRM();
+};
+motionMedia.addEventListener('change', () => {
+  labForce.hidden = !reduced;
+  if (reduced && !forceVrm && vrm) vrmFail('reduced motion — stand-in.');
+  else if (!reduced && !vrm && window.MitaVRM) bootVRM();
+});
+
 /* ---------- boot ---------------------------------------------------------- */
 (async () => {
   const t = seq;
+  bootVRM();
   for (const line of GREETING) {
     await say(line);
     if (t !== seq) return;

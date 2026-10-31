@@ -56,7 +56,10 @@ async function run(browser, variant) {
   await tgl.click()
   assert.equal(await page.evaluate(() => document.querySelector('.home').dataset.icons), 'on')
   assert.equal(await tgl.getAttribute('aria-label'), 'Rail display: icons and text')
-  const mascotSel = variant === 'b' ? '.face-mascot' : '.maya-svg'
+  // Mascot: stand-in face (or the VRM viewport when the sample model is
+  // present and motion is full — verify runs under reducedMotion so the
+  // stand-in path is what this exercises).
+  const mascotSel = variant === 'b' ? '.face-mascot, #mayaVrm:not([hidden])' : '.maya-svg, #mayaVrm:not([hidden])'
   assert.ok(await page.$(`${mascotSel}:visible`), `[${variant}] mascot rendered`)
   await page.waitForFunction(() => document.getElementById('dlgText').textContent.length > 3)
   await page.screenshot({ path: path.join(out, `v${variant}-home.png`) })
