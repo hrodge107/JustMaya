@@ -1,13 +1,13 @@
 <!doctype html>
 <!--
-  PROTOTYPE — dialogue "backlog" feature for the VN player. Throwaway; not wired
+  PROTOTYPE: dialogue "backlog" feature for the VN player. Throwaway; not wired
   to src/. Question: what should reviewing past lines + jumping back feel like?
 
   Three variants of the same feature on one copied scene, switchable via ?v=a|b|c
   or the floating bar:
-    a · Messenger card — centred chat modal (closest to the reference shots)
-    b · Timeline rail — right-side drawer on a scene spine
-    c · Prompt sheet  — bottom sheet, denser logbook rows
+    a · Messenger card: centred chat modal (closest to the reference shots)
+    b · Timeline rail: right-side drawer on a scene spine
+    c · Prompt sheet: bottom sheet, denser logbook rows
 
   Fixed spec in every variant: "^" cue inside the dialogue box's upper-right
   corner, "Backlog" row in the episode menu, click a chat -> warning modal ->
@@ -244,7 +244,7 @@ body:has(.player) { margin: 0; background: #e9e9f1; color: #30304c; color-scheme
 .vn-menu-backlog { margin: 0 0 20px; }
 .vn-menu-backlog .chev { color: var(--mint-ink); font-weight: 900; }
 
-/* Backlog overlay shell — position/shape differ per variant. */
+/* Backlog overlay shell: position/shape differ per variant. */
 .bl-layer { position: fixed; inset: 0; z-index: 8; display: flex; background: rgb(15 15 29 / .55); animation: menu-dim .18s var(--ease); }
 .bl-layer[hidden] { display: none; }
 .bl-panel { display: flex; flex-direction: column; min-height: 0; background: var(--paper); color: var(--ink); }
@@ -266,7 +266,8 @@ body:has(.player) { margin: 0; background: #e9e9f1; color: #30304c; color-scheme
 .bl-name { display: block; margin: 0 0 2px 2px; font-size: .78rem; font-weight: 800; color: var(--muted); }
 .bl-bubble { display: inline-block; max-width: 100%; padding: 9px 13px; border-radius: 4px 14px 14px 14px; background: #fff; box-shadow: 0 1px 2px rgb(15 15 29 / .1); font-size: .94rem; font-weight: 650; line-height: 1.4; overflow-wrap: anywhere; }
 .bl-you .bl-row { flex-direction: row-reverse; }
-.bl-you .bl-name { text-align: right; margin-right: 2px; }
+.bl-you .bl-main { text-align: right; }
+.bl-you .bl-name { margin-right: 2px; }
 .bl-you .bl-bubble { border-radius: 14px 4px 14px 14px; background: #d8f3ee; }
 .bl-meta { display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 999px; background: #ececf4; color: var(--mint-ink); font-size: .68rem; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; vertical-align: .15em; }
 .bl-note { margin: 14px 0; text-align: center; font-size: .85rem; font-weight: 700; font-style: italic; color: var(--muted); cursor: pointer; }
@@ -280,7 +281,7 @@ body:has(.player) { margin: 0; background: #e9e9f1; color: #30304c; color-scheme
 .bl-you .bl-jump { right: auto; left: 12px; }
 .bl-row:hover .bl-jump, .bl-row:focus-visible .bl-jump { opacity: 1; }
 
-/* Placeholder profile faces — pure CSS, no assets. */
+/* Placeholder profile faces: pure CSS, no assets. */
 .av { flex: none; position: relative; width: 44px; height: 44px; border-radius: 50%; overflow: hidden; box-shadow: 0 0 0 2px #e1e1ed; }
 .av-mita { background: var(--paper); }
 .av-mita i { position: absolute; background: var(--ink); }
@@ -308,6 +309,8 @@ body:has(.player) { margin: 0; background: #e9e9f1; color: #30304c; color-scheme
 .v-a .bl-layer { align-items: center; justify-content: center; padding: 20px; }
 .v-a .bl-panel { width: min(560px, 100%); max-height: min(640px, 88dvh); border-radius: 22px; box-shadow: 0 18px 50px rgb(15 15 29 / .45); animation: menu-enter .2s var(--ease); }
 .v-a .bl-scene { margin-inline: auto; width: fit-content; padding: 3px 12px; border-radius: 999px; background: var(--wash); }
+.v-a .bl-foot { display: none; }
+.v-a .bl-quote { display: none; }
 
 /* Variant b · right-side timeline rail. */
 .v-b .bl-layer { justify-content: flex-end; }
@@ -341,7 +344,7 @@ body:has(.player) { margin: 0; background: #e9e9f1; color: #30304c; color-scheme
 .v-c .bl-main { display: contents; }
 .v-c .bl-bubble { border-radius: 10px; font-size: .9rem; }
 .v-c .bl-you .bl-row { direction: ltr; flex-direction: row; }
-.v-c .bl-you .bl-bubble { border-radius: 10px; }
+.v-c .bl-you .bl-bubble { border-radius: 10px; justify-self: end; }
 .v-c .bl-note { margin: 10px 0; font-size: .8rem; }
 .v-c .bl-current { background: #e5f6f2; opacity: 1; }
 .v-c .bl-current .bl-row { box-shadow: inset 3px 0 0 var(--mint-ink); }
@@ -349,7 +352,7 @@ body:has(.player) { margin: 0; background: #e9e9f1; color: #30304c; color-scheme
 .v-c .bl-you .bl-jump { left: auto; }
 .v-c .bl-row:hover .bl-jump, .v-c .bl-row:focus-visible .bl-jump { opacity: 1; }
 
-/* Floating variant switcher — chrome of the prototype, not the design. */
+/* Floating variant switcher: chrome of the prototype, not the design. */
 .proto-bar { position: fixed; left: 50%; bottom: 14px; z-index: 40; transform: translateX(-50%); display: flex; align-items: center; gap: 6px; padding: 6px; border-radius: 999px; background: #16162a; color: var(--paper); box-shadow: 0 8px 24px rgb(15 15 29 / .5); font-size: .82rem; font-weight: 800; }
 .proto-bar button { min-height: 34px; min-width: 34px; padding: 0 10px; border-radius: 999px; background: transparent; color: var(--mint-bright); font-weight: 900; font-size: 1rem; }
 .proto-bar button:hover { background: #ffffff22; }
@@ -364,7 +367,7 @@ body:has(.player) { margin: 0; background: #e9e9f1; color: #30304c; color-scheme
 'use strict'
 const REVEAL_MS = 18
 
-/* Mock episode — three scenes, one raise-hand echo, one checkpoint.
+/* Mock episode: three scenes, one raise-hand echo, one checkpoint.
    src = index in SCRIPT; dynamic entries (echo/feedback) carry src: null. */
 const SCENES = { 1: 'The lift-off', 2: 'Cloud country', 3: 'The check' }
 const SCRIPT = [
@@ -372,7 +375,7 @@ const SCRIPT = [
   { scene: 1, who: 'mita', text: 'Today we follow a single drop of water through its whole journey.', emotion: 'talking' },
   { scene: 1, who: 'mita', text: 'It starts in the ocean. Warmth from the sun lifts tiny drops into the air.', emotion: 'talking' },
   { scene: 1, who: 'you', text: 'How does liquid water turn into a gas?', emotion: 'listening', tag: 'Raised hand' },
-  { scene: 1, who: 'mita', text: 'Heat gives water molecules the energy to break free — that is evaporation.', emotion: 'happy' },
+  { scene: 1, who: 'mita', text: 'Heat gives water molecules the energy to break free. That is evaporation.', emotion: 'happy' },
   { scene: 2, who: 'story', text: 'The drop climbs higher, into air too thin and cold to hold it.', emotion: 'idle' },
   { scene: 2, who: 'mita', text: 'Up here it condenses, clinging to dust with millions of others.', emotion: 'talking' },
   { scene: 2, who: 'mita', text: 'Together they make the clouds you can see from your window.', emotion: 'talking' },
@@ -380,9 +383,9 @@ const SCRIPT = [
   { scene: 3, who: 'story', text: 'A quick check before the drop keeps moving.', emotion: 'idle' },
   { scene: 3, who: 'mita', text: 'Which process turns water vapour back into liquid drops?', emotion: 'thinking', tag: 'Checkpoint',
     options: ['Evaporation', 'Condensation', 'Precipitation'], correct: 'Condensation',
-    right: 'Exactly — condensation. Cooling air slows the molecules until they gather into drops again.',
-    wrong: 'Not quite — evaporation lifts drops up and precipitation is them falling. Condensation is vapour turning back to liquid.' },
-  { scene: 3, who: 'mita', text: 'And when it lands, the journey starts again — collection, evaporation, all of it.', emotion: 'happy' },
+    right: 'Exactly, condensation. Cooling air slows the molecules until they gather into drops again.',
+    wrong: 'Not quite. Evaporation lifts drops up and precipitation is them falling. Condensation is vapour turning back to liquid.' },
+  { scene: 3, who: 'mita', text: 'And when it lands, the journey starts again: collection, evaporation, all of it.', emotion: 'happy' },
 ]
 const VARIANTS = [
   { id: 'a', name: 'Messenger card' },
@@ -531,7 +534,7 @@ function render() {
       <button type="button" class="vn-dialogue-target" id="target" aria-label="Reveal or advance dialogue">
         <span class="vn-dialogue-scroll-area">
           <span class="vn-speaker">${e ? (e.who === 'you' ? 'You' : 'Mita') : 'Mita'}</span>
-          <span class="vn-text"><span id="vn-shown">${state.done ? 'That is the whole journey — the drop is back where it started.' : ''}</span><span class="vn-reveal-boundary"></span><span class="vn-text-rest" id="vn-rest"></span></span>
+          <span class="vn-text"><span id="vn-shown">${state.done ? 'That is the whole journey. The drop is back where it started.' : ''}</span><span class="vn-reveal-boundary"></span><span class="vn-text-rest" id="vn-rest"></span></span>
         </span>
         <span class="vn-advance-cue" id="cue2" aria-hidden="true"></span>
       </button>
@@ -567,7 +570,7 @@ function render() {
       <footer class="bl-foot">Pick a message to jump back to it.</footer>
       <div class="bl-confirm" id="bl-confirm" hidden>
         <blockquote id="bl-confirm-quote"></blockquote>
-        <p class="bl-warn-copy">Jumping back rewinds your progress to this line. Later lines — and their backlog entries — are cleared.</p>
+        <p class="bl-warn-copy">Rewinds progress and clears later log entries.</p>
         <div class="bl-confirm-actions">
           <button type="button" class="vn-quiet" id="bl-cancel">Keep reading</button>
           <button type="button" class="vn-button" id="bl-jump">Jump back</button>
@@ -579,7 +582,7 @@ function render() {
   <dialog class="bl-warn" id="warn" aria-labelledby="warn-title">
     <h3 id="warn-title">Jump back to this line?</h3>
     <p class="bl-quote" id="warn-quote"></p>
-    <p class="bl-warn-copy">Your progress returns to this point. Everything after it — including later backlog entries — is cleared.</p>
+    <p class="bl-warn-copy">Rewinds progress and clears later log entries.</p>
     <div class="bl-warn-actions">
       <button type="button" class="vn-quiet" id="warn-cancel">Stay here</button>
       <button type="button" class="vn-button" id="warn-jump">Jump back</button>
@@ -743,7 +746,7 @@ document.addEventListener('keydown', ev => {
   if (state.backlog || document.getElementById('episode-menu')?.open || document.getElementById('warn')?.open) return
   setVariant(VARIANTS[(VARIANTS.indexOf(variant()) + (ev.key === 'ArrowRight' ? 1 : VARIANTS.length - 1)) % VARIANTS.length].id)
 })
-/* Mascot gaze — copied behaviour, lightweight. */
+/* Mascot gaze: copied behaviour, lightweight. */
 document.addEventListener('pointermove', ev => {
   const m = document.getElementById('mascot')
   if (!m || state.backlog) return

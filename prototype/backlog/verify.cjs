@@ -1,4 +1,4 @@
-// PROTOTYPE smoke check — throwaway, not part of CI.
+// PROTOTYPE smoke check: throwaway, not part of CI.
 // Exercises the backlog overlay, jump warning, and truncation on all variants.
 // Run: node verify.cjs  (expects vite dev on 5174, or set PROTO_URL)
 const { chromium } = require(require('path').join(require('os').tmpdir(), 'proto-pw', 'node_modules', 'playwright-core'))
@@ -67,6 +67,6 @@ if (!browser) throw new Error('No system Edge/Chrome found for playwright-core')
 for (const v of ['a', 'b', 'c']) await run(browser, v)
 await browser.close()
 if (errors.length) { console.error('ERRORS:\n' + errors.join('\n')); process.exit(1) }
-console.log('OK — 3 variants verified. Shots at ' + out)
+console.log('OK: 3 variants verified. Shots at ' + out)
 }
 main().catch(e => { console.error(e); process.exit(1) })
