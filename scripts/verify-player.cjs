@@ -75,7 +75,7 @@ async function fixture(browser, options = {}) {
 async function layout(page) {
   return page.evaluate(() => {
     const box = selector => { const r = document.querySelector(selector).getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height, bottom: r.bottom, right: r.right } }
-    const dialogue = box('.vn-dialogue'), rail = box('.vn-rail'), frame = box('.vn-frame')
+    const dialogue = box('.vn-dialogue'), rail = box('.vn-menu-rail'), frame = box('.vn-frame')
     const target = document.querySelector('.vn-dialogue-scroll-area')
     const style = target && getComputedStyle(target)
     return {
@@ -87,11 +87,10 @@ async function layout(page) {
 }
 
 function assertMenuPlacement(layout) {
-  assert.ok(layout.rail, 'episode action rail exists')
-  if (layout.width < 720) return assert.ok(layout.dialogue.bottom <= layout.rail.y + 1, 'mobile rail sits below the dialogue')
-  assert.ok(layout.rail.right <= layout.dialogue.x + 1, 'desktop rail is the column left of the dialogue')
-  assert.ok(layout.rail.bottom <= layout.frame.bottom + 1 && layout.dialogue.bottom <= layout.frame.bottom + 1, 'dock stays inside the frame')
-  assert.ok(layout.frame.bottom - Math.max(layout.rail.bottom, layout.dialogue.bottom) <= 31, 'dock hugs the frame bottom')
+  if (layout.width < 1000) return assert.ok(layout.dialogue.bottom <= layout.rail.y + 1)
+  assert.ok(layout.rail.y - layout.frame.y <= 1, 'desktop Menu is at frame top')
+  assert.ok(Math.abs(layout.rail.right - layout.frame.right) <= 1, 'desktop Menu is at frame right')
+  assert.ok(layout.frame.bottom - layout.dialogue.bottom <= 21, 'desktop has no reserved bottom Menu space')
 }
 
 async function revealBoundary(page) {
@@ -426,7 +425,7 @@ async function main() {
 
     const sweep = await fixture(browser)
     await sweep.go()
-    for (const width of [360, 639, 640, 719, 720, 768, 999, 1000, 1024]) {
+    for (const width of [360, 639, 640, 768, 999, 1000, 1024]) {
       await sweep.page.setViewportSize({ width, height: 800 })
       const current = await layout(sweep.page)
       assert.ok(current.scrollWidth <= width + 1)
@@ -434,7 +433,7 @@ async function main() {
       assert.equal(current.frame.right, width)
       assertMenuPlacement(current)
     }
-    evidence.push({ check: 'width sweep including 639/640, 719/720 and 999/1000 breakpoints', result: 'PASS' })
+    evidence.push({ check: 'width sweep including 639/640 and 999/1000 breakpoints', result: 'PASS' })
     await sweep.context.close()
 
     for (const viewport of [{width: 320, height: 568}, {width: 390, height: 844}, {width: 800, height: 1024}, {width: 1280, height: 800}, {width: 844, height: 390}]) {
