@@ -51,6 +51,26 @@ def validate_pdf(data: bytes, settings: Settings) -> int:
         return doc.page_count
 
 
+@router.get("/api/documents")
+def list_documents(request: Request) -> dict:
+    conn = sqlite3.connect(request.app.state.data_dir / "app.db")
+    try:
+        rows = conn.execute(
+            "SELECT d.document_id, d.filename, d.page_count, d.created_at "
+            "FROM documents d WHERE EXISTS "
+            "(SELECT 1 FROM episodes e WHERE e.document_id = d.document_id AND e.status = 'ready') "
+            "ORDER BY d.created_at DESC"
+        ).fetchall()
+    finally:
+        conn.close()
+    return {
+        "documents": [
+            {"document_id": r[0], "filename": r[1], "page_count": r[2], "created_at": r[3]}
+            for r in rows
+        ]
+    }
+
+
 @router.post("/api/documents", status_code=201)
 async def upload_document(
     request: Request,

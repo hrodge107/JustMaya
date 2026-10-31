@@ -29,7 +29,7 @@ const STAGE_LABEL: Record<string, string> = {
 export default function App() {
   const [file, setFile] = useState<File | null>(null)
   const [jobId, setJobId] = useState(() => new URLSearchParams(location.search).get('job') || '')
-  const [documentId, setDocumentId] = useState('')
+  const [documents, setDocuments] = useState<{ document_id: string; filename: string }[]>([])
   const [job, setJob] = useState<Job | null>(null)
   const [roadmap, setRoadmap] = useState<Roadmap | null>(null)
   const [ready, setReady] = useState('')
@@ -45,6 +45,9 @@ export default function App() {
   const errorSource = useRef<'poll' | 'action' | null>(null)
   const jobRef = useRef(jobId)
   useEffect(() => { jobRef.current = jobId }, [jobId])
+  useEffect(() => {
+    api.documents().then(r => setDocuments(r.documents)).catch(() => {})
+  }, [ready])
   useEffect(() => {
     const onPop = () => setSessionId(sessionParam())
     window.addEventListener('popstate', onPop)
@@ -160,9 +163,7 @@ export default function App() {
     } finally { setBusy(false) }
   }
 
-  async function openExisting(e: FormEvent) {
-    e.preventDefault()
-    const trimmed = documentId.trim()
+  async function openExisting(trimmed: string) {
     if (!trimmed) return
     generation.current++; setJobId(''); setJob(null); setRoadmap(null); setReady(''); errorSource.current = 'action'; setError(''); setBusy(true)
     history.replaceState(null, '', location.pathname)
@@ -198,7 +199,7 @@ export default function App() {
     <section className="intro"><p className="chapter">Your document, your story</p><h1>Turn your notes into a lesson.</h1><p>Choose a PDF and we’ll prepare an episode around its ideas.</p></section>
     <div className="flow">
       <section className="panel upload"><h2>Choose your PDF</h2><p>Your document is the starting point for your learning roadmap.</p><form onSubmit={upload}><label htmlFor="pdf">PDF document</label><input id="pdf" type="file" accept="application/pdf,.pdf" onChange={e => setFile(e.target.files?.[0] || null)} required />{file && <p className="file-name">Selected: {file.name}</p>}<button className="primary" disabled={!file || busy || running}>Prepare my lesson</button></form>
-      <details><summary>Open a prepared document</summary><form onSubmit={openExisting}><label htmlFor="document">Document ID</label><input id="document" value={documentId} onChange={e => setDocumentId(e.target.value)} placeholder="Paste a document ID" /><button disabled={busy || running || !documentId.trim()}>Open document</button></form></details></section>
+      {documents.length > 0 && <details><summary>Open a prepared document</summary><ul className="document-list">{documents.map(d => <li key={d.document_id}><button disabled={busy || running} onClick={() => void openExisting(d.document_id)}>{d.filename}</button></li>)}</ul></details>}</section>
       {(job || running) && !ready && <section className="panel progress" aria-live="polite"><p className="chapter">Preparing your lesson</p><h2>{job?.stage ? (STAGE_LABEL[job.stage] ?? `Stage: ${job.stage}`) : 'Starting preparation'}</h2><p>{job?.status === 'failed' ? 'Preparation stopped.' : 'Working on your document'}</p>{job?.error && <p className="job-error" role="alert">{job.error}</p>}{job?.can_run && !running && !roadmap && <button onClick={() => void run(job.job_id)}>{job.status === 'queued' ? 'Start preparation' : 'Retry preparation'}</button>}</section>}
       {error && <div className="notice" role="alert">{error}{jobId && <button onClick={() => { errorSource.current = null; setError(''); setWake(w => w + 1) }}>Refresh status</button>}</div>}
       {roadmap && !ready && <section className="panel roadmap"><p className="chapter">Your roadmap</p><h2>Here’s what we’ll cover.</h2><div className="episodes">{roadmap.episodes.map((ep, index) => <article className={ep.status === 'selected' ? 'episode first' : 'episode'} key={ep.episode_id}><span className="episode-tag">{index === 0 ? 'Episode 1' : `Episode ${index + 1}`}{ep.status === 'planned_only' ? ' · Planned' : ''}</span><h3>{ep.title}</h3><p className="episode-time">About {Math.round(ep.estimated_minutes)} min</p>{ep.objective_ids.map(id => <p key={id}>{roadmap.objectives.find(o => o.id === id)?.description || id}</p>)}{ep.warnings?.length > 0 && <p className="episode-warning">{ep.warnings.join(' ')}</p>}</article>)}</div>{roadmap.uncovered_concept_ids.length > 0 && <div className="uncovered"><h3>Topics outside this roadmap</h3><ul>{roadmap.uncovered_concept_ids.map(id => <li key={id}>{roadmap.concepts.find(c => c.id === id)?.title || id}{roadmap.uncovered_reasons[id] ? `: ${roadmap.uncovered_reasons[id]}` : ''}</li>)}</ul></div>}{job && (job.can_run || !roadmap.confirmed) && <button className="primary" disabled={busy || running} onClick={() => void start()}>{roadmap.confirmed ? 'Resume Episode 1 preparation' : 'Start Episode 1'}</button>}</section>}
