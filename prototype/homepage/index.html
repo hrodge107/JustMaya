@@ -79,11 +79,16 @@ button { font: inherit; cursor: pointer; border: 0; min-height: 44px; }
 .rail button:active { transform: scale(.96); }
 .rail button[aria-disabled='true'] { opacity: .45; cursor: default; }
 .rail .bi { width: 1.1em; height: 1.1em; flex: none; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-#iconToggle { flex: none; }
-#iconToggle .ic-off { display: none; }
-.home[data-icons='off'] .rail button[data-act] .bi { display: none; }   /* icons hidden — labels reflow */
-.home[data-icons='off'] #iconToggle { order: -1; }     /* toggle parks at the row's head */
-.home[data-icons='off'] #iconToggle .ic-off { display: block; }
+/* Display toggle — fixed under the variant bar (not a rail member). Three
+   states cycle: on = icons + text, off = text only, icon = icons only. */
+#iconToggle { position: fixed; top: 58px; left: 14px; z-index: 20; display: grid; place-items: center; width: 42px; height: 38px; padding: 0; border-radius: 10px; }
+#iconToggle svg { width: 19px; height: 19px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+#iconToggle .st { display: none; }
+.home[data-icons='on'] #iconToggle .st-on,
+.home[data-icons='icon'] #iconToggle .st-icon,
+.home[data-icons='off'] #iconToggle .st-off { display: inline; }
+.home[data-icons='off'] .rail button[data-act] .bi { display: none; }
+.home[data-icons='icon'] .rail button[data-act] span { display: none; }
 @media (min-width: 720px) {
   .dock { flex-direction: row; align-items: center; }
   .rail { order: -1; flex-direction: column; align-items: stretch; gap: 7px; }
@@ -95,7 +100,6 @@ button { font: inherit; cursor: pointer; border: 0; min-height: 44px; }
   .rail { margin: 0 auto; gap: 5px; }
   .rail button { flex: 1 1 0; min-width: 0; min-height: 44px; padding: 8px 6px; font-size: .82rem; gap: 5px; white-space: nowrap; }
   .rail .bi { width: 13px; height: 13px; }
-  #iconToggle { flex: 0 0 38px; }
 }
 @media (max-width: 380px) {
   .rail button { padding: 8px 4px; font-size: .78rem; }
@@ -305,6 +309,7 @@ dialog[open] { animation: dlg-in .18s var(--ease); }
 [data-v='a'] .upload-chip { background: #fff0f6f0; color: #a03a5e; border: 2px solid #ffb8d1; box-shadow: 0 6px 18px #a34a6a33; }
 [data-v='a'] .up-track { background: #ffd8e6; } [data-v='a'] .up-fill { background: linear-gradient(90deg,#ff8fb8,#ff6ba0); }
 [data-v='a'] .varbar { background: #fff0f6d9; color: #a03a5e; border: 1px solid #ffc4d9; }
+[data-v='a'] #iconToggle { background: #fff0f6d9; color: #a03a5e; border: 1px solid #ffc4d9; }
 [data-v='a'] .varbar a.on { background: #ff8fb8; color: #fff; }
 [data-v='a'] .modal .menu-row { background: transparent; color: #5a2c40; box-shadow: inset 0 0 0 2px #ffb8d1; margin-bottom: 10px; }
 [data-v='a'] .modal .menu-row:hover { background: #fff0f6; }
@@ -353,6 +358,7 @@ dialog[open] { animation: dlg-in .18s var(--ease); }
 [data-v='b'] .upload-chip { background: var(--paper); color: var(--ink); box-shadow: 0 8px 24px #30304c40; }
 [data-v='b'] .up-track { background: #dedeea; } [data-v='b'] .up-fill { background: var(--mint-ink); }
 [data-v='b'] .varbar { background: #23233acc; color: var(--paper); }
+[data-v='b'] #iconToggle { background: #23233acc; color: var(--paper); box-shadow: inset 0 0 0 2px #77778b; }
 [data-v='b'] .varbar a.on { background: var(--mint-ink); }
 [data-v='b'] .modal .menu-row { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 2px #77778b; margin-bottom: 10px; }
 [data-v='b'] .modal .menu-row:hover { background: #dedeea; }
@@ -427,6 +433,7 @@ dialog[open] { animation: dlg-in .18s var(--ease); }
 [data-v='c'] .upload-chip { background: #2c2440f2; color: #f4e9d6; border: 1px solid #57496e; box-shadow: 0 8px 24px #00000066; }
 [data-v='c'] .up-track { background: #453a5e; } [data-v='c'] .up-fill { background: linear-gradient(90deg,#e8b45c,#c98a2e); }
 [data-v='c'] .varbar { background: #2c2440d9; color: #e8ddc8; border: 1px solid #57496e; }
+[data-v='c'] #iconToggle { background: #2c2440d9; color: #e8ddc8; border: 1px solid #57496e; }
 [data-v='c'] .varbar a.on { background: #c98a2e; color: #241a10; }
 [data-v='c'] .modal .menu-row { background: transparent; color: #3a2c22; box-shadow: inset 0 0 0 2px #c9ab7c; margin-bottom: 10px; }
 [data-v='c'] .modal .menu-row:hover { background: #efe3cb; }
@@ -466,6 +473,13 @@ dialog[open] { animation: dlg-in .18s var(--ease); }
     <a href="?v=b" data-var="b" title="Player-native">B</a>
     <a href="?v=c" data-var="c" title="After-hours">C</a>
   </nav>
+  <button type="button" id="iconToggle" aria-label="Rail display: icons and text" title="Rail display: icons and text">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <g class="st st-on"><rect x="3" y="4" width="7" height="7" rx="1.5"/><path d="M14 6h7M14 10h7M3 15h18M3 19h18"/></g>
+      <g class="st st-icon"><rect x="6" y="6" width="12" height="12" rx="2"/></g>
+      <g class="st st-off"><path d="M4 7h16M4 12h16M4 17h16"/></g>
+    </svg>
+  </button>
 
   <div class="stage" id="stage">
     <div class="ask-overlay" id="askOverlay" hidden>
@@ -594,9 +608,6 @@ dialog[open] { animation: dlg-in .18s var(--ease); }
         </button>
         <button type="button" data-act="menu" id="menuTrigger" aria-haspopup="dialog" aria-controls="menuDlg">
           <svg class="bi" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg><span>Menu</span>
-        </button>
-        <button type="button" id="iconToggle" role="switch" aria-checked="true" aria-label="Button icons" title="Icons on/off">
-          <svg class="bi" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/><line class="ic-off" x1="3" y1="21" x2="21" y2="3"/></svg>
         </button>
       </nav>
     </div>
@@ -1231,14 +1242,18 @@ document.querySelector('[data-act="talk"]').addEventListener('click', () => { if
 document.querySelector('[data-act="upload"]').addEventListener('click', () => { if (mode !== 'read') openModal(uploadDlg); });
 document.querySelector('[data-act="learn"]').addEventListener('click', () => openModal(learnDlg));
 
-/* Icons — in-rail switch; off-state reparks it at the rail's head. */
+/* Display toggle — three states cycle on → off (text only) → icon (icons
+   only) → on. Lives under the variant bar, not in the rail. */
 const home = document.querySelector('.home');
 home.dataset.icons = 'on';
-$('#iconToggle').addEventListener('click', e => {
-  e.stopPropagation();
-  const on = home.dataset.icons !== 'off';
-  home.dataset.icons = on ? 'off' : 'on';
-  e.currentTarget.setAttribute('aria-checked', String(!on));
+const iconToggle = $('#iconToggle');
+const ICON_NEXT = { on: 'off', off: 'icon', icon: 'on' };
+const ICON_LABEL = { on: 'icons and text', off: 'text only', icon: 'icons only' };
+iconToggle.addEventListener('click', () => {
+  const next = ICON_NEXT[home.dataset.icons];
+  home.dataset.icons = next;
+  iconToggle.setAttribute('aria-label', 'Rail display: ' + ICON_LABEL[next]);
+  iconToggle.setAttribute('title', 'Rail display: ' + ICON_LABEL[next]);
 });
 
 /* Menu — trigger is a rail member; opens the dialog, close returns focus. */

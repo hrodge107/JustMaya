@@ -33,17 +33,25 @@ async function run(browser, variant) {
   assert.deepEqual(labels.map(s => s.trim()), ['Talk', 'Upload', 'Learn', 'Menu'], `[${variant}] rail labels`)
   for (const b of rail) assert.ok(await b.$('svg.bi'), `[${variant}] rail button icon`)
 
-  // Icon toggle: off-state hides action icons and reparks the toggle up front.
+  // Display toggle (fixed under the variant bar, not a rail member):
+  // cycles on -> off (text only) -> icon (icons only) -> on.
   const tgl = await page.$('#iconToggle')
-  const box1 = await tgl.boundingBox()
+  assert.ok(!(await tgl.evaluate(el => el.closest('.rail'))), `[${variant}] toggle not in rail`)
+  const vb = await (await page.$('.varbar')).boundingBox()
+  const tb = await tgl.boundingBox()
+  assert.ok(tb.y >= vb.y + vb.height - 4 && tb.x < vb.x + vb.width + 40, `[${variant}] toggle below the variant bar`)
+  const disp = sel => page.evaluate(s => getComputedStyle(document.querySelector(s)).display, sel)
   await tgl.click()
   assert.equal(await page.evaluate(() => document.querySelector('.home').dataset.icons), 'off')
-  assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.rail button[data-act="talk"] .bi')).display), 'none', `[${variant}] talk icon hidden`)
-  assert.equal(await tgl.getAttribute('aria-checked'), 'false')
-  const box2 = await tgl.boundingBox()
-  assert.ok(Math.abs(box2.x - box1.x) > 1 || Math.abs(box2.y - box1.y) > 1, `[${variant}] toggle reparked when icons off`)
+  assert.equal(await disp('.rail button[data-act="talk"] .bi'), 'none', `[${variant}] off hides icons`)
+  assert.notEqual(await disp('.rail button[data-act="talk"] span'), 'none', `[${variant}] off keeps text`)
+  await tgl.click()
+  assert.equal(await page.evaluate(() => document.querySelector('.home').dataset.icons), 'icon')
+  assert.equal(await disp('.rail button[data-act="talk"] span'), 'none', `[${variant}] icon hides text`)
+  assert.notEqual(await disp('.rail button[data-act="talk"] .bi'), 'none', `[${variant}] icon keeps icons`)
   await tgl.click()
   assert.equal(await page.evaluate(() => document.querySelector('.home').dataset.icons), 'on')
+  assert.equal(await tgl.getAttribute('aria-label'), 'Rail display: icons and text')
   const mascotSel = variant === 'b' ? '.face-mascot' : '.maya-svg'
   assert.ok(await page.$(`${mascotSel}:visible`), `[${variant}] mascot rendered`)
   await page.waitForFunction(() => document.getElementById('dlgText').textContent.length > 3)
