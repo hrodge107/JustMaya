@@ -29,7 +29,7 @@ def main():
         source.backup(target)
     with sqlite3.connect(staged / "app.db") as conn:
         episodes = [json.loads(r[0]) for r in conn.execute("SELECT payload FROM episodes WHERE status='ready'")]
-    required = ["scene-03-checkpoint-1", "scene-05-checkpoint-2"]
+    required = ["s3-check1", "s5-check2"]
     episode = next(e for e in episodes if all(s in {s['sceneId'] for s in e['scenes']} for s in required))
     evidence = []
     with TestClient(create_app(data_dir=staged)) as client:

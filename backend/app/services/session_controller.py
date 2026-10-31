@@ -21,6 +21,7 @@ from app.models.session import (
     CheckpointState,
     Position,
     QuizAttempt,
+    RewindRequest,
 )
 
 
@@ -83,6 +84,18 @@ def restore_checkpoint(session: LearnerSession, episode: EpisodeScript) -> Learn
     return session.model_copy(update={"checkpoint": state})
 
 
+def _scene_order(episode: EpisodeScript) -> dict[str, int]:
+    """Linear play order via startSceneId/nextSceneId. Scenes unreachable
+    from the start are absent, which callers treat as unplaceable anchors."""
+    by_id = {scene.sceneId: scene for scene in episode.scenes}
+    order: dict[str, int] = {}
+    cursor = episode.startSceneId
+    while cursor and cursor not in order:
+        order[cursor] = len(order)
+        cursor = by_id[cursor].nextSceneId if cursor in by_id else None
+    return order
+
+
 def advance(session: LearnerSession, episode: EpisodeScript) -> LearnerSession:
     """Apply one authoritative dialogue or completed-checkpoint transition."""
     session = restore_checkpoint(session, episode)
@@ -134,7 +147,13 @@ def answer(session: LearnerSession, episode: EpisodeScript, request: AnswerReque
         "quizAttempts": [*session.quizAttempts, quiz], "learningNotes": notes,
         "version": session.version + 1, "updatedAt": _now(),
     })
-    return restore_checkpoint(updated, episode)
+    restored = restore_checkpoint(updated, episode)
+    if restored.checkpoint is not None:
+        quiz = quiz.model_copy(update={"feedback": restored.checkpoint.feedback})
+        restored = restored.model_copy(
+            update={"quizAttempts": [*restored.quizAttempts[:-1], quiz]}
+        )
+    return restored
 
 
 def raise_hand(session: LearnerSession) -> LearnerSession:
@@ -164,6 +183,61 @@ def resume(session: LearnerSession, episode: EpisodeScript) -> LearnerSession:
         "sceneId": snap.sceneId,
         "dialogueIndex": snap.dialogueIndex,
         "mode": snap.mode,
+        "resumeSnapshot": None,
+        "tutorThreadId": None,
+        "version": session.version + 1,
+        "updatedAt": _now(),
+    }), episode)
+
+
+def rewind(session: LearnerSession, episode: EpisodeScript,
+           request: RewindRequest) -> LearnerSession:
+    """Jump back to an earlier position and drop appends at or after it."""
+    if session.mode not in (MODE_PLAYING, MODE_CHECKPOINT):
+        raise InvalidSessionTransition(
+            f"Cannot rewind while session mode is {session.mode!r}.")
+    scenes = {scene.sceneId: scene for scene in episode.scenes}
+    target_scene = scenes.get(request.scene_id)
+    if target_scene is None:
+        raise InvalidSessionTransition("Rewind target is not part of the episode.")
+    if target_scene.kind == "checkpoint":
+        if request.dialogue_index != 0:
+            raise InvalidSessionTransition("Rewind target is not a valid line.")
+    elif request.dialogue_index >= len(target_scene.dialogue):
+        raise InvalidSessionTransition("Rewind target is not a valid line.")
+    order = _scene_order(episode)
+    if session.sceneId not in order or request.scene_id not in order:
+        raise InvalidSessionTransition("Rewind target is unreachable in this episode.")
+    current_key = (order[session.sceneId], session.dialogueIndex)
+    target_key = (order[request.scene_id], request.dialogue_index)
+    if target_key > current_key:
+        raise InvalidSessionTransition(
+            "Rewind target is ahead of the current position.")
+    if target_key == current_key:
+        return session
+    question_scene = {
+        scene.question.questionId: scene.sceneId
+        for scene in episode.scenes if scene.question
+    }
+
+    def attempt_before(attempt: QuizAttempt) -> bool:
+        sid = question_scene.get(attempt.questionId)
+        return sid is None or sid not in order or order[sid] < target_key[0]
+
+    def interaction_before(interaction) -> bool:
+        pos = interaction.position
+        if pos is None or pos.sceneId not in order:
+            return True
+        return (order[pos.sceneId], pos.dialogueIndex) < target_key
+
+    return restore_checkpoint(session.model_copy(update={
+        "sceneId": request.scene_id,
+        "dialogueIndex": request.dialogue_index,
+        "mode": MODE_CHECKPOINT
+        if target_scene.kind == "checkpoint" else MODE_PLAYING,
+        "quizAttempts": [a for a in session.quizAttempts if attempt_before(a)],
+        "interactions": [
+            i for i in session.interactions if interaction_before(i)],
         "resumeSnapshot": None,
         "tutorThreadId": None,
         "version": session.version + 1,

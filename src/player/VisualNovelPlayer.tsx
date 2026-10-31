@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { api, ApiError, type AnswerRequest, type AwaitingKind, type Emotion, type Episode, type HelpMode, type Scene, type Session } from '../learnerApi'
 import { useReducedMotion } from '../motionPreference'
+import BacklogPanel, { type BacklogEntry } from './BacklogPanel'
 import MascotStage from './MascotStage'
 import MotionToggle from './MotionToggle'
 import RaiseHandPanel from './RaiseHandPanel'
@@ -30,6 +31,70 @@ function happyLinesReached(order: Scene[], session: Session): number {
     if (s.sceneId === session.sceneId) return n
   }
   return n
+}
+
+// The backlog is a projection over the authoritative session plus episode:
+// script lines and checkpoint prompts in linear order, with quiz picks,
+// served feedback, and tutor exchanges inserted at their anchors. Nothing
+// is stored client-side; a rewind simply truncates this list server-side.
+function buildBacklog(episode: Episode, order: Scene[], session: Session): BacklogEntry[] {
+  const entries: BacklogEntry[] = []
+  const questionScene = new Map(episode.scenes.filter(s => s.question).map(s => [s.question!.questionId, s]))
+  const sceneIndex = new Map(order.map((s, i) => [s.sceneId, i]))
+  const appendsAt = new Map<string, { t: string; rows: BacklogEntry[] }[]>()
+  const append = (sceneId: string, index: number, t: string, rows: BacklogEntry[]) => {
+    const key = `${sceneId}:${index}`
+    const list = appendsAt.get(key) ?? []
+    list.push({ t, rows })
+    appendsAt.set(key, list)
+  }
+  for (const a of session.quizAttempts ?? []) {
+    const scene = questionScene.get(a.questionId)
+    if (!scene) continue
+    const anchor = { sceneId: scene.sceneId, dialogueIndex: 0 }
+    const label = scene.question!.options.find(o => o.optionId === a.selectedOptionId)?.label ?? a.selectedOptionId
+    const rows: BacklogEntry[] = [{ key: `pick:${a.questionId}:${a.attemptNumber}`, role: 'you', text: label, sceneChip: null, anchor, current: false }]
+    if (a.feedback) rows.push({ key: `fb:${a.questionId}:${a.attemptNumber}`, role: 'mita', text: a.feedback, sceneChip: null, anchor, current: false })
+    append(scene.sceneId, 0, a.timestamp, rows)
+  }
+  const trailing: { t: string; rows: BacklogEntry[] }[] = []
+  for (const i of session.interactions ?? []) {
+    const anchor = i.position ? { sceneId: i.position.sceneId, dialogueIndex: i.position.dialogueIndex } : null
+    const rows: BacklogEntry[] = [
+      { key: `you:${i.interactionId}`, role: 'you', text: i.userMessage, sceneChip: null, anchor, current: false },
+      { key: `ans:${i.interactionId}`, role: 'mita', text: i.lines?.length ? i.lines.join(' ') : i.answer, sceneChip: null, anchor, current: false },
+    ]
+    if (i.position) append(i.position.sceneId, i.position.dialogueIndex, i.createdAt, rows)
+    else trailing.push({ t: i.createdAt, rows })
+  }
+  const flush = (sceneId: string, index: number) => {
+    const key = `${sceneId}:${index}`
+    const items = appendsAt.get(key)
+    if (!items) return
+    for (const item of items.sort((a, b) => a.t < b.t ? -1 : a.t > b.t ? 1 : 0)) entries.push(...item.rows)
+    appendsAt.delete(key)
+  }
+  const currentIndex = sceneIndex.get(session.sceneId) ?? -1
+  let sceneChipNext: string | null = null
+  for (const [i, s] of order.entries()) {
+    if (currentIndex >= 0 && i > currentIndex) break
+    sceneChipNext = `Scene ${i + 1}`
+    const push = (entry: BacklogEntry) => { entry.sceneChip = sceneChipNext; sceneChipNext = null; entries.push(entry) }
+    if (s.kind === 'checkpoint' && s.question) {
+      push({ key: `cp:${s.sceneId}`, role: 'mita', text: s.question.prompt, sceneChip: null, anchor: { sceneId: s.sceneId, dialogueIndex: 0 }, current: false })
+      flush(s.sceneId, 0)
+      continue
+    }
+    const last = s.sceneId === session.sceneId ? session.dialogueIndex : s.dialogue.length - 1
+    for (const [index, l] of s.dialogue.entries()) {
+      if (index > last) break
+      push({ key: l.lineId, role: l.speaker === 'narrator' ? 'note' : 'mita', text: l.text, sceneChip: null, anchor: { sceneId: s.sceneId, dialogueIndex: index }, current: false })
+      flush(s.sceneId, index)
+    }
+  }
+  for (const item of trailing.sort((a, b) => a.t < b.t ? -1 : a.t > b.t ? 1 : 0)) entries.push(...item.rows)
+  if (entries.length) entries[entries.length - 1].current = true
+  return entries
 }
 
 function DialogueText({ id, text, revealed, onRevealed, onRevealProgress }: { id: string; text: string; revealed: boolean; onRevealed(id: string): void; onRevealProgress(marker: HTMLSpanElement | null): void }) {
@@ -63,6 +128,9 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
   const [revealedLine, setRevealedLine] = useState('')
   const [restoredTurn, setRestoredTurn] = useState('')
   const [menuOpen, setMenuOpen] = useState(false)
+  const [backlogOpen, setBacklogOpen] = useState(false)
+  const [backlogError, setBacklogError] = useState('')
+  const backlogReturn = useRef<HTMLElement | null>(null)
   const [readingReset, setReadingReset] = useState(0)
   const [draft, setDraft] = useState('')
   const [asking, setAsking] = useState(false)
@@ -90,6 +158,7 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
   const followLatestRef = useRef(true)
   const autoScrollTopRef = useRef<number | null>(null)
   const menuRef = useRef<HTMLButtonElement>(null)
+  const backlogCueRef = useRef<HTMLButtonElement>(null)
   const dialogRef = useRef<HTMLDialogElement>(null)
   const closeRef = useRef<HTMLButtonElement>(null)
   const advancing = useRef(false)
@@ -324,6 +393,45 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
     } finally { advancing.current = false; if (alive.current) setPending(false) }
   }
 
+  function openBacklog(from: HTMLElement | null) {
+    backlogReturn.current = from
+    setBacklogError('')
+    setBacklogOpen(true)
+  }
+
+  function closeBacklog() {
+    setBacklogOpen(false)
+    backlogReturn.current?.focus({ preventScroll: true })
+  }
+
+  async function jumpTo(entry: BacklogEntry) {
+    if (!session || !entry.anchor || advancing.current || reloadRequired.current) return
+    advancing.current = true
+    const body = {
+      request_id: crypto.randomUUID(),
+      expected_version: session.version,
+      scene_id: entry.anchor.sceneId,
+      dialogue_index: entry.anchor.dialogueIndex,
+    }
+    setPending(true); setBacklogError('')
+    try {
+      const next = await api.rewind(sessionId, body)
+      acceptSession(next)
+      if (alive.current) closeBacklog()
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        reloadRequired.current = true
+        try {
+          await reload()
+          reloadRequired.current = false
+          if (alive.current) closeBacklog()
+        } catch {
+          if (alive.current) { setNeedsReload(true); setBacklogError('Could not reload your place in the lesson. Try again.') }
+        }
+      } else if (alive.current) setBacklogError(err instanceof Error ? err.message : 'Could not jump back.')
+    } finally { advancing.current = false; if (alive.current) setPending(false) }
+  }
+
   async function resumeLesson() {
     if (!session || !inQuestion || awaiting || advancing.current || reloadRequired.current) return
     advancing.current = true
@@ -353,7 +461,7 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
   useEffect(() => {
     if (!inQuestion) return
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || dialogRef.current?.open || awaiting) return
+      if (event.key !== 'Escape' || dialogRef.current?.open || awaiting || backlogOpen) return
       void resumeLesson()
     }
     window.addEventListener('keydown', onKey)
@@ -444,6 +552,8 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
   // Mita names every model-spoken turn; mascot/narrator stays as the speaker kind for animation.
   const speaker = inQuestion && awaiting ? 'You' : returnBeat || inQuestion || question || line ? 'Mita' : ''
   const canRaise = mode === 'playing' && !!line || mode === 'checkpoint'
+  const backlogEntries = buildBacklog(episode, order, session)
+  const canJump = mode === 'playing' || mode === 'checkpoint'
   const lookTarget = inQuestion ? awaiting ? (revealed ? { x: 0.7, y: -0.7 } : { x: 0, y: 0.85 }) : { x: 0, y: 0.85 } : emotion === 'thinking' ? { x: 0.7, y: -0.7 } : null
   const mascot = <MascotStage emotion={emotion} isSpeaking={isSpeaking} nodTrigger={nodTrigger} customAnimationTrigger={null} lookTargetOffset={lookTarget} enablePointerTracking={mode === 'playing'} />
 
@@ -472,6 +582,10 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
           onNewTopic={() => { setDraft(''); setNewTopic(true); setHelpMode('explain') }} />}
       </section>
       <section className="vn-dialogue" aria-label="Dialogue">
+        <button ref={backlogCueRef} type="button" className="vn-backlog-cue" aria-label="Open the dialogue backlog" aria-haspopup="dialog"
+          onClick={() => openBacklog(backlogCueRef.current)}>
+          <span aria-hidden="true">^</span>
+        </button>
         {(canRaise || inQuestion) && (
           <button type="button" className="vn-raise" aria-label={inQuestion ? 'Resume the lesson' : 'Raise your hand to ask a question'}
             aria-disabled={pending || undefined} aria-busy={pending || undefined}
@@ -556,7 +670,13 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
     }}>
       <div className="vn-menu-heading"><h2 id="episode-menu-title">Episode menu</h2><button ref={closeRef} type="button" className="vn-quiet" onClick={() => dialogRef.current?.close()}>Close</button></div>
       <MotionToggle />
+      <button type="button" className="vn-motion vn-menu-backlog"
+        onClick={() => { const from = menuRef.current; dialogRef.current?.close(); openBacklog(from) }}>
+        <span>Backlog</span><span aria-hidden="true">^</span>
+      </button>
       <button type="button" className="vn-button vn-menu-leave" onClick={onExit}>Leave episode</button>
     </dialog>
+    {backlogOpen && <BacklogPanel open={backlogOpen} entries={backlogEntries} canJump={canJump} busy={pending} error={backlogError}
+      onClose={closeBacklog} onJump={entry => void jumpTo(entry)} />}
   </main>
 }

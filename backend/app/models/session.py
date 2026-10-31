@@ -46,6 +46,7 @@ class QuizAttempt(BaseModel):
     correct: bool
     attemptNumber: int = Field(ge=1)
     timestamp: str
+    feedback: str | None = None
 
 
 class CheckpointState(BaseModel):
@@ -95,6 +96,7 @@ class TutorInteraction(BaseModel):
     groundingStatus: Literal["supported", "partial", "unsupported"] | None = None
     requestId: str | None = None
     flow: TutorFlow | None = None
+    position: Position | None = None
 
 
 class LearnerSession(BaseModel):
@@ -160,6 +162,13 @@ class QuestionRequest(BaseModel):
 class ResumeRequest(BaseModel):
     request_id: str = Field(min_length=1)
     expected_version: int = Field(ge=1)
+
+
+class RewindRequest(BaseModel):
+    request_id: str = Field(min_length=1)
+    expected_version: int = Field(ge=1)
+    scene_id: str = Field(min_length=1)
+    dialogue_index: int = Field(ge=0)
 
 
 def learner_session_view(session: LearnerSession) -> dict:

@@ -18,10 +18,13 @@ export type TutorMove = 'explain' | 'clarify' | 'diagnose' | 'hint' | 'foundatio
 export type AwaitingKind = 'none' | 'attempt' | 'reflection' | 'clarification'
 // Server-owned dialogue metadata; absent on pre-flow interactions.
 export type TutorFlow = { threadId: string; topicQuestion: string; replyToInteractionId: string | null; helpMode: HelpMode; move: TutorMove; hintLevel: number | null; reflection: string | null; awaiting: AwaitingKind }
-export type TutorInteraction = { interactionId: string; kind: 'raise_hand' | 'discussion'; userMessage: string; answer: string; lines?: string[]; sourceRefs: SourceRef[]; createdAt: string; groundingStatus: 'supported' | 'partial' | 'unsupported' | null; requestId: string | null; flow?: TutorFlow | null }
+// A persisted script anchor; mode excludes question/error on the server.
+export type Position = { sceneId: string; dialogueIndex: number; mode: 'playing' | 'checkpoint' | 'completed' | 'discussion' }
+export type TutorInteraction = { interactionId: string; kind: 'raise_hand' | 'discussion'; userMessage: string; answer: string; lines?: string[]; sourceRefs: SourceRef[]; createdAt: string; groundingStatus: 'supported' | 'partial' | 'unsupported' | null; requestId: string | null; flow?: TutorFlow | null; position?: Position | null }
 export type QuestionBody = { question: string; request_id: string; expected_version: number; help_mode?: HelpMode; reply_to_interaction_id?: string | null; reflection?: string | null }
 export type QuestionResponse = { interaction: TutorInteraction; session: Session }
-export type Session = { sessionId: string; episodeId: string; mode: SessionMode; sceneId: string; dialogueIndex: number; version: number; status: 'active' | 'completed' | 'abandoned'; updatedAt: string; checkpoint?: Checkpoint | null; resumeSnapshot?: { sceneId: string; dialogueIndex: number; mode: SessionMode } | null; interactions?: TutorInteraction[]; learningNotes?: string[]; tutorThreadId?: string | null; quizAttempts: { questionId: string; selectedOptionId: string; correct: boolean; attemptNumber: number; timestamp: string }[] }
+export type RewindBody = { request_id: string; expected_version: number; scene_id: string; dialogue_index: number }
+export type Session = { sessionId: string; episodeId: string; mode: SessionMode; sceneId: string; dialogueIndex: number; version: number; status: 'active' | 'completed' | 'abandoned'; updatedAt: string; checkpoint?: Checkpoint | null; resumeSnapshot?: { sceneId: string; dialogueIndex: number; mode: SessionMode } | null; interactions?: TutorInteraction[]; learningNotes?: string[]; tutorThreadId?: string | null; quizAttempts: { questionId: string; selectedOptionId: string; correct: boolean; attemptNumber: number; timestamp: string; feedback?: string | null }[] }
 
 export class ApiError extends Error {
   status: number
@@ -54,6 +57,7 @@ export const api = {
   raiseHand: (session: string, body: { request_id: string; expected_version: number }) => request<Session>(`/api/sessions/${id(session)}/raise-hand`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   askQuestion: (session: string, body: QuestionBody) => request<QuestionResponse>(`/api/sessions/${id(session)}/questions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   resume: (session: string, body: { request_id: string; expected_version: number }) => request<Session>(`/api/sessions/${id(session)}/resume`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  rewind: (session: string, body: RewindBody) => request<Session>(`/api/sessions/${id(session)}/rewind`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
 }
 
 // Compile-time guard: the learner Question and its options must never grow

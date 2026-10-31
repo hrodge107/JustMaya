@@ -11,6 +11,7 @@ from app.models.session import (
     QuestionRequest,
     RaiseHandRequest,
     ResumeRequest,
+    RewindRequest,
     learner_session_view,
 )
 from app.services.model_provider import MetaProvider, ModelProviderError
@@ -25,6 +26,7 @@ from app.storage.sessions import (
     apply_answer,
     apply_raise_hand,
     apply_resume,
+    apply_rewind,
     commit_question,
     create_session,
     get_session,
@@ -119,6 +121,18 @@ def resume_endpoint(session_id: str, body: ResumeRequest, request: Request):
             session_id,
             body.request_id,
             body.expected_version,
+        ))
+    except (LookupError, SessionConflict, InvalidSessionTransition) as exc:
+        return _error(exc)
+
+
+@router.post("/api/sessions/{session_id}/rewind")
+def rewind_endpoint(session_id: str, body: RewindRequest, request: Request):
+    try:
+        return learner_session_view(apply_rewind(
+            request.app.state.data_dir,
+            session_id,
+            body,
         ))
     except (LookupError, SessionConflict, InvalidSessionTransition) as exc:
         return _error(exc)

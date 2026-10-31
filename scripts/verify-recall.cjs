@@ -17,7 +17,7 @@ async function post(request, endpoint, body) {
   assert.equal(response.status(), 200, await response.text())
   return response.json()
 }
-async function parked(request, sceneId = 'scene-03-checkpoint-1') {
+async function parked(request, sceneId = 's3-check1') {
   let session = await post(request, `/api/episodes/${episode.episodeId}/sessions`)
   while (session.sceneId !== sceneId) session = await post(request, `/api/sessions/${session.sessionId}/advance`, { request_id: id(), expected_version: session.version })
   return session
@@ -70,7 +70,7 @@ async function liveOutcomes(browser) {
   for (const outcome of ['correct-first', 'wrong-correct', 'all-wrong']) {
     const f = await start(browser)
     let missed = 0
-    for (const sceneId of ['scene-03-checkpoint-1', 'scene-05-checkpoint-2']) {
+    for (const sceneId of ['s3-check1', 's5-check2']) {
       const q = scenes.get(sceneId).question, right = q.correctOptionId
       const wrongs = q.options.filter(o => o.optionId !== right).map(o => o.optionId)
       const answers = outcome === 'correct-first' ? [right] : outcome === 'wrong-correct' ? [wrongs[0], right] : [...wrongs, right]
@@ -126,7 +126,7 @@ async function liveOutcomes(browser) {
       assert.equal(current.sceneId, scenes.get(sceneId).nextSceneId)
       await f.page.clock.runFor(readingDelay(state.checkpoint.feedback))
       assert.equal(f.state.calls.length, posts + 1, 'manual advance supersedes the reading timer')
-      if (sceneId === 'scene-03-checkpoint-1') {
+      if (sceneId === 's3-check1') {
         while (current.mode === 'playing') {
           await response(f.page, () => f.page.locator('.vn-dialogue-target').click(), '/advance')
           current = await saved(f)
