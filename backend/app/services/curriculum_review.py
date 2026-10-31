@@ -17,7 +17,7 @@ def warnings(episode) -> list[str]:
     result = []
     if episode.estimate_stale:
         result.append("The word estimate predates the scope change.")
-    if estimated_minutes(episode) > 10:
+    if estimated_minutes(episode) > 12:
         result.append("This episode may be too broad for its target duration.")
     return result
 

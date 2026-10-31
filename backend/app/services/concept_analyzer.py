@@ -105,7 +105,10 @@ DETAIL_SYSTEM = (
     "objective IDs define the scope: emit full lesson ingredients — explanations, examples, "
     "misconceptions, relationships, uncertainty — only for those IDs, reusing them exactly. "
     "Cite source document page ranges inside the supplied pages and section IDs; "
-    "use null when no section is supplied. Record uncertainty or gaps rather than inventing. "
+    "use null when no section is supplied. Every emitted claim — concept, objective, "
+    "and relationship — MUST carry at least one evidence reference into the supplied "
+    "pages; omit a claim entirely when you cannot ground it. Record uncertainty or "
+    "gaps rather than inventing. "
     "Return empty lists when evidence is absent."
 )
 
@@ -113,7 +116,8 @@ DETAIL_SYSTEM = (
 def _check_window(items, allowed_pages: set[int], document_id: str, section_id: str | None) -> None:
     for item in items:
         if not item.evidence:
-            raise ValueError("Analysis claim has no source evidence")
+            item_id = getattr(item, "id", None) or getattr(item, "source_id", "?")
+            raise ValueError(f"Analysis claim '{item_id}' has no source evidence")
         for ref in item.evidence:
             if (ref.document_id != document_id or ref.page_start > ref.page_end
                     or not set(range(ref.page_start, ref.page_end + 1)).issubset(allowed_pages)

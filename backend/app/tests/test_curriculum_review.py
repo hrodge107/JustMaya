@@ -57,11 +57,20 @@ def test_coverage_counts_concept_assigned_to_multiple_episodes_once():
 def test_scope_warning_and_objectives_follow_edited_concepts():
     source, value = inventory(), roadmap()
     source.concepts.append(source.concepts[0].model_copy(update={"id": "other"}))
-    updated = apply_edit(value, edit(value, ["other"], pace=10, minutes=2), source)
+    updated = apply_edit(value, edit(value, ["other"], pace=10, minutes=3), source)
     assert updated.episodes[0].objective_ids == []
     assert any("too broad" in warning for warning in warnings(updated.episodes[0]))
     with pytest.raises(ValueError, match="supported objective"):
         lock_selection(updated, source)
+
+
+def test_duration_warning_threshold_is_twelve_minutes():
+    value = roadmap()
+    episode = value.episodes[0]
+    episode.dialogue_words = 1120  # 1120/140 + 2 = 10 minutes — on target, silent
+    assert not any("too broad" in w for w in warnings(episode))
+    episode.dialogue_words = 1540  # 1540/140 + 2 = 13 minutes — warns
+    assert any("too broad" in w for w in warnings(episode))
 
 
 def _scope_inventory(pages_by_concept):

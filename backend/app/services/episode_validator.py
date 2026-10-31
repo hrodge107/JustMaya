@@ -88,9 +88,11 @@ def deterministic_check(
     known_objective_ids: set[str],
     supplied_web_urls: set[str],
     settings: Settings,
+    target_dialogue_words: int | None = None,
 ) -> list[str]:
-    """Structural invariants plus configured bounds. No duration minimum —
-    small locked scope legitimately produces a short episode."""
+    """Structural invariants plus configured bounds. The dialogue minimum is
+    relative to the confirmed outline's own target, never an absolute
+    duration — a thin locked scope keeps a thin floor."""
     violations = validate_script(
         script,
         known_chunks,
@@ -107,6 +109,16 @@ def deterministic_check(
         violations.append(
             f"Dialogue words {words} exceeds max {settings.validation_max_dialogue_words}"
         )
+    if target_dialogue_words is not None:
+        minimum = int(
+            target_dialogue_words * settings.validation_min_target_fraction
+        )
+        if words < minimum:
+            violations.append(
+                f"Dialogue words {words} below minimum {minimum} "
+                f"({settings.validation_min_target_fraction} of target "
+                f"{target_dialogue_words})"
+            )
     if script.estimatedMinutes > settings.validation_max_minutes:
         violations.append(
             f"Estimated minutes {script.estimatedMinutes} exceeds max "
@@ -252,6 +264,7 @@ def build_report(
             "max_dialogue_words": settings.validation_max_dialogue_words,
             "checkpoint_count": settings.validation_checkpoint_count,
             "max_minutes": settings.validation_max_minutes,
+            "min_target_fraction": settings.validation_min_target_fraction,
         }
     return ValidationReport(
         checked_at=datetime.now(timezone.utc).isoformat(),
@@ -289,7 +302,10 @@ async def validate_and_publish(
     when every check passes. Frozen `ready` rows are never overwritten."""
     objectives = {o.id for o in lesson_context.objectives}
     web_urls = {s.url for s in lesson_context.supplements}
-    det = deterministic_check(script, known_chunks, objectives, web_urls, settings)
+    det = deterministic_check(
+        script, known_chunks, objectives, web_urls, settings,
+        target_dialogue_words=roadmap.episodes[0].dialogue_words,
+    )
     verdict: SemanticVerdict | None = None
     regenerated = False
     if not det:
@@ -311,7 +327,8 @@ async def validate_and_publish(
             )
             save_episode_draft(data_dir, script, roadmap.curriculum_id)
             det = deterministic_check(
-                script, known_chunks, objectives, web_urls, settings
+                script, known_chunks, objectives, web_urls, settings,
+                target_dialogue_words=roadmap.episodes[0].dialogue_words,
             )
             if not det:
                 verdict = await semantic_review(

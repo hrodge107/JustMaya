@@ -89,7 +89,7 @@ def _roadmap(ctx: LessonContext) -> Roadmap:
                 title="Writing Before Paper",
                 objective_ids=["obj-1"],
                 concepts=[OrderedConcept(concept_id="c1", basis="source_order", explanation="first")],
-                dialogue_words=700,
+                dialogue_words=30,
                 words_per_minute=140.0,
                 interaction_minutes=2.0,
                 status="selected",
@@ -99,9 +99,9 @@ def _roadmap(ctx: LessonContext) -> Roadmap:
     )
 
 
-def _script_payload(chunk_id="doc-1-p0001-000"):
+def _script_payload(chunk_id="doc-1-p0001-000", words_per_line=10):
     def line(lid, **kw):
-        return {"lineId": lid, "speaker": "mascot", "text": "word " * 10,
+        return {"lineId": lid, "speaker": "mascot", "text": "word " * words_per_line,
                 "emotion": "happy", "sourceRefs": [], "webRefs": [], **kw}
 
     def question(qid):
@@ -244,6 +244,35 @@ async def test_repair_pass_fixes_dangling_id(data_dir):
 
 
 @pytest.mark.anyio
+async def test_undersized_output_is_repaired(data_dir):
+    settings = _settings()
+    roadmap = _roadmap(_lesson_context())
+    roadmap.episodes[0].dialogue_words = 700
+    stub = GenStub([_script_payload(), _script_payload(words_per_line=200)])
+    script = await generate_episode(
+        roadmap, _lesson_context(), [],
+        {"doc-1-p0001-000": (1, 1)}, _metered(stub, data_dir, settings), "j1", settings,
+    )
+    assert len(stub.calls) == 2
+    assert "below minimum 560" in stub.calls[1]["user"]
+    assert script.startSceneId == "s1"
+
+
+@pytest.mark.anyio
+async def test_undersized_twice_fails_with_violations(data_dir):
+    settings = _settings()
+    roadmap = _roadmap(_lesson_context())
+    roadmap.episodes[0].dialogue_words = 700
+    stub = GenStub([_script_payload(), _script_payload()])
+    with pytest.raises(GenerationError, match="below minimum 560"):
+        await generate_episode(
+            roadmap, _lesson_context(), [], {},
+            _metered(stub, data_dir, settings), "j1", settings,
+        )
+    assert len(stub.calls) == 2
+
+
+@pytest.mark.anyio
 async def test_twice_invalid_fails_with_violations(data_dir):
     settings = _settings()
     bad = _script_payload()
@@ -279,6 +308,12 @@ def test_system_prompt_instructs_per_option_responses():
     assert "selected idea and its mistaken inference" in system
     assert "one concrete next reasoning action" in system
     assert "firstIncorrect" not in system and "maxAttempts" not in system
+
+
+def test_system_prompt_instructs_teaching_beats():
+    system = gen._system()
+    assert "at least three distinct teaching or application beats" in system
+    assert "substantive teaching" in system and "not longer lines" in system
 
 
 @pytest.mark.anyio

@@ -86,7 +86,7 @@ async def _fake_plan(inventory, provider, job_id, settings):
     return Roadmap.model_validate({"curriculum_id": inventory.document_id + "-curriculum", "document_id": inventory.document_id,
         "revision": 1, "episodes": [{"episode_id": inventory.document_id + "-episode", "title": "Topic",
         "objective_ids": ["o"], "concepts": [{"concept_id": "c", "basis": "inferred", "explanation": "Suggested", "uncertainty": []}],
-        "dialogue_words": 100, "words_per_minute": 140, "interaction_minutes": 2}]})
+        "dialogue_words": 2, "words_per_minute": 140, "interaction_minutes": 2}]})
 
 
 def _services(**overrides):
@@ -1029,7 +1029,7 @@ def test_end_to_end_upload_to_ready_episode(tmp_path, fixtures, monkeypatch):
                 "objective_ids": ["o"],
                 "concepts": [{"concept_id": "c", "basis": "inferred",
                               "explanation": "Suggested", "uncertainty": []}],
-                "dialogue_words": 100, "words_per_minute": 140,
+                "dialogue_words": 2, "words_per_minute": 140,
                 "interaction_minutes": 2}
 
     async def fake_plan(inventory, provider, job_id, settings):
