@@ -292,17 +292,17 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
     <div className="room" aria-hidden="true"><div className="b-scene" /></div>
 
     <div className={`stage${snap.dimmed ? ' ask-dim' : ''}`}>
-      {snap.askOpen && <div className="ask-overlay">
-        <div className="ask-choices">
-          <div className="ask-strip" role="button" tabIndex={0}
+      {snap.askOpen && <div className="ask-overlay vn-ask-overlay">
+        <div className="vn-choices">
+          <div className="vn-choice vn-ask-strip" role="button" tabIndex={0}
             aria-label="Type a message, then select this strip to send it"
             onClick={e => { if (e.target === askInput.current) return; activateAsk() }}
             onKeyDown={e => { if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) { e.preventDefault(); activateAsk() } }}>
-            <input ref={askInput} type="text" autoComplete="off" maxLength={240} placeholder="Type your question"
+            <input ref={askInput} type="text" className="vn-ask-input" autoComplete="off" maxLength={240} placeholder="Type your question"
               aria-label="Your message" enterKeyHint="done" value={askText} onChange={e => setAskText(e.target.value)} />
-            {askText.trim() !== '' && <button type="button" onClick={e => { e.stopPropagation(); activateAsk() }}>Send</button>}
+            {askText.trim() !== '' && <button type="button" className="vn-ask-send" onClick={e => { e.stopPropagation(); activateAsk() }}>Send</button>}
           </div>
-          <button type="button" className="ask-choice" onClick={() => void engine.askNothing()}>Nothing</button>
+          <button type="button" className="vn-choice" onClick={() => void engine.askNothing()}>Nothing</button>
         </div>
       </div>}
       <div className="maya-wrap">
