@@ -626,7 +626,7 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
               <DialogueText key={turnId} id={turnId} text={text} revealed={revealed} onRevealed={markRevealed} onRevealProgress={onRevealProgress} />
               {dialogueError && <span className="vn-error" role="alert">{dialogueError} Activate the dialogue to try again.</span>}
             </span>
-            <span className="vn-advance-cue" aria-hidden="true">{pending || awaiting || question && !checkpoint?.checkpointCompleted && !dialogueError && revealed ? '…' : inQuestion ? (onFinalBeat ? '' : '◆') : '◆'}</span>
+            <span className="vn-advance-cue" aria-hidden="true">{pending || awaiting || question && !checkpoint?.checkpointCompleted && !dialogueError && revealed ? '…' : !revealed && !dialogueError ? '' : inQuestion && onFinalBeat ? '' : '▾'}</span>
           </button>
           {inQuestion && lastTurn && onFinalBeat && (
             <span className="vn-sources">

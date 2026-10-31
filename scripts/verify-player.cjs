@@ -241,6 +241,9 @@ async function main() {
 
     const revealing = await fixture(browser, { context: { reducedMotion: 'no-preference' }, long: true })
     await revealing.go()
+    const advanceCue = revealing.page.locator('.vn-advance-cue')
+    assert.equal(await advanceCue.textContent(), '', 'Advance cue stays hidden while the line types')
+    assert.equal(await advanceCue.evaluate(el => getComputedStyle(el).animationName), 'cue-bob', 'Advance cue shares the home cue-bob motion')
     const revealTarget = revealing.page.locator('.vn-dialogue-scroll-area')
     await revealing.page.waitForFunction(() => document.querySelector('.vn-dialogue-scroll-area')?.scrollTop > 100, undefined, { timeout: 15000 })
     let boundary = await revealBoundary(revealing.page)
@@ -274,6 +277,7 @@ async function main() {
     const keyTarget = scrollKeys.page.locator('.vn-dialogue-target')
     const keyViewport = scrollKeys.page.locator('.vn-dialogue-scroll-area')
     assert.equal(await keyTarget.locator('.vn-text-rest').textContent(), '')
+    assert.equal(await scrollKeys.page.locator('.vn-advance-cue').textContent(), '▾', 'Advance cue shows the shared arrow once the line stops')
     await keyViewport.hover()
     await scrollKeys.page.mouse.wheel(0, 180)
     await scrollKeys.page.waitForFunction(() => document.querySelector('.vn-dialogue-scroll-area')?.scrollTop > 0)

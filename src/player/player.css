@@ -151,7 +151,9 @@ body:has(.player) { margin: 0; background: #23233a; color: #30304c; color-scheme
 .vn-dialogue-target .vn-speaker { position: sticky; top: 0; z-index: 1; margin-bottom: 12px; }
 .vn-dialogue-target .vn-text { display: block; max-width: none; }
 .vn-reveal-boundary { display: inline-block; width: 0; height: 1.35em; vertical-align: text-bottom; }
-.vn-advance-cue { position: absolute; right: 24px; bottom: 14px; color: var(--mint-ink); font-size: 1rem; }
+.vn-advance-cue { position: absolute; right: 24px; bottom: 14px; color: var(--mint-ink); font-size: 1rem; animation: cue-bob 1.2s var(--ease) infinite; pointer-events: none; }
+/* Shared advance-cue motion — the home .dlg-cue uses this same definition. */
+@keyframes cue-bob { 0%, 100% { transform: translateY(0); opacity: .55 } 50% { transform: translateY(4px); opacity: 1 } }
 .vn-dialogue-target .vn-error { flex: none; margin-top: 12px; }
 .vn-dialogue:not(:has(.vn-dialogue-target)) { padding: 20px; }
 
