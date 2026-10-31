@@ -80,6 +80,7 @@ async function layout(page) {
     const style = target && getComputedStyle(target)
     return {
       dialogue, rail, frame, width: innerWidth, height: innerHeight,
+      gallery: box('.vn-gallery-trigger'), menu: box('.vn-frame > .vn-menu-rail .vn-menu-trigger:not(.vn-gallery-trigger)'),
       scrollWidth: document.documentElement.scrollWidth,
       dialogueTarget: target && { height: target.getBoundingClientRect().height, clientHeight: target.clientHeight, scrollHeight: target.scrollHeight, clientWidth: target.clientWidth, scrollWidth: target.scrollWidth, scrollTop: target.scrollTop, overflowY: style.overflowY, scrollbarWidth: style.scrollbarWidth },
     }
@@ -87,6 +88,7 @@ async function layout(page) {
 }
 
 function assertMenuPlacement(layout) {
+  assert.ok(layout.gallery.x + layout.gallery.width <= layout.menu.x, 'Gallery is immediately before Menu')
   if (layout.width < 1000) return assert.ok(layout.dialogue.bottom <= layout.rail.y + 1)
   assert.ok(layout.rail.y - layout.frame.y <= 1, 'desktop Menu is at frame top')
   assert.ok(Math.abs(layout.rail.right - layout.frame.right) <= 1, 'desktop Menu is at frame right')
@@ -182,28 +184,55 @@ async function modalCheck(page, count) {
 }
 
 async function main() {
-  const browser = await chromium.launch({ channel: process.env.PLAYER_VERIFY_BROWSER || 'msedge', headless: true })
+  const browser = await chromium.launch({ ...(process.env.PLAYER_VERIFY_EXECUTABLE ? { executablePath: process.env.PLAYER_VERIFY_EXECUTABLE } : { channel: process.env.PLAYER_VERIFY_BROWSER || 'msedge' }), headless: true })
   try {
     const picture = await fixture(browser)
     picture.state.episode.scenes[0].pictureCard = { title: 'Ziggurat', description: 'A ziggurat was a temple platform.', sourceRefs: [{ chunkId: 'c', documentId: 'd', pageStart: 2, pageEnd: 2 }], image: { imageUrl: 'https://upload.wikimedia.org/test.png', filePageUrl: 'https://commons.wikimedia.org/wiki/File:Test', title: 'Test image', author: 'Example', license: 'CC0 1.0', licenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/', changes: 'None' } }
     await picture.page.route('https://upload.wikimedia.org/**', route => route.fulfill({ status: 200, contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64') }))
     await picture.go()
-    const cardButton = picture.page.getByRole('button', { name: 'Ziggurat +' })
+    const cardButton = picture.page.getByRole('button', { name: 'Ziggurat', exact: true })
     await cardButton.focus(); await picture.page.keyboard.press('Enter')
-    assert.equal(await picture.page.getByText('PDF: Page 2').isVisible(), true)
+    assert.equal(await picture.page.getByRole('heading', { name: 'PDF citations' }).isVisible(), true)
+    assert.equal(await picture.page.getByText('Page 2', { exact: true }).isVisible(), true)
     assert.equal(await picture.page.getByText('Example', { exact: false }).count() > 0, true)
-    await picture.page.keyboard.press('Enter')
-    assert.equal(await picture.page.getByText('PDF: Page 2').count(), 0)
+    await picture.page.keyboard.press('Escape')
+    assert.equal(await picture.page.evaluate(() => document.activeElement.getAttribute('aria-haspopup')), 'dialog')
+    const galleryButton = picture.page.getByRole('button', { name: 'Gallery', exact: true })
+    assert.equal(await galleryButton.locator('svg').count(), 1)
+    assert.equal((await galleryButton.locator('svg').evaluate(node => node.parentElement.innerText)), '')
+    await galleryButton.click()
+    assert.equal(await picture.page.getByRole('button', { name: 'Open Ziggurat' }).isVisible(), true)
+    await picture.page.screenshot({ path: path.join(output, 'picture-gallery.png') })
+    await picture.page.getByRole('button', { name: 'Open Ziggurat' }).click()
+    await picture.page.screenshot({ path: path.join(output, 'picture-note-detail.png') })
+    await picture.page.getByRole('button', { name: 'Back to Gallery' }).click()
+    assert.equal(await picture.page.getByRole('button', { name: 'Open Ziggurat' }).evaluate(el => el === document.activeElement), true)
+    await picture.page.getByRole('button', { name: 'Close', exact: true }).click()
+    await picture.page.getByRole('button', { name: 'Dismiss Ziggurat' }).click()
+    assert.equal(await picture.page.locator('.vn-picture').count(), 0)
+    await galleryButton.click()
+    assert.equal(await picture.page.getByRole('button', { name: 'Open Ziggurat' }).isVisible(), true)
+    await picture.page.getByRole('button', { name: 'Close', exact: true }).click()
     await picture.page.reload(); await picture.page.locator('.vn-picture').waitFor()
-    assert.equal(await picture.page.getByRole('button', { name: 'Ziggurat +' }).isVisible(), true)
+    assert.equal(await picture.page.getByRole('button', { name: 'Ziggurat', exact: true }).isVisible(), true)
     await picture.page.screenshot({ path: path.join(output, 'picture-card.png') })
     await picture.page.unroute('https://upload.wikimedia.org/**')
     await picture.page.route('https://upload.wikimedia.org/**', route => route.abort())
     await picture.page.reload(); await picture.page.locator('.vn-frame').waitFor()
-    await picture.page.locator('.vn-picture').waitFor({ state: 'detached' })
+    await picture.page.locator('.vn-picture-unavailable').waitFor()
+    await picture.page.getByRole('button', { name: 'Gallery', exact: true }).click()
+    assert.equal(await picture.page.getByRole('button', { name: 'Open Ziggurat' }).isVisible(), true)
     assert.equal(await picture.page.getByRole('button', { name: 'Reveal or advance dialogue' }).isVisible(), true)
-    evidence.push({ check: 'picture card reload, keyboard disclosure, citation and separate credit', result: 'PASS' })
+    evidence.push({ check: 'picture card, SVG-only Gallery control, encountered-note collection, modal citations, dismissal retention, keyboard and image error recovery', result: 'PASS' })
     await picture.context.close()
+    const emptyGallery = await fixture(browser)
+    await emptyGallery.go()
+    await emptyGallery.page.getByRole('button', { name: 'Gallery', exact: true }).click()
+    assert.equal(await emptyGallery.page.getByText('No picture notes yet.', { exact: true }).isVisible(), true)
+    await emptyGallery.page.keyboard.press('Escape')
+    assert.equal(await emptyGallery.page.getByRole('button', { name: 'Gallery', exact: true }).evaluate(el => el === document.activeElement), true)
+    evidence.push({ check: 'empty Gallery explains how notes collect and restores focus on Escape', result: 'PASS' })
+    await emptyGallery.context.close()
     for (const [width, height] of [[390, 844], [320, 568], [844, 390], [800, 1024], [1280, 800]]) {
       const f = await fixture(browser, { context: { viewport: { width, height } } })
       await f.go()

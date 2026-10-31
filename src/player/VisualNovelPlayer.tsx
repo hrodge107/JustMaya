@@ -1,4 +1,3 @@
-import { PictureCardView } from './PictureCardView'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { api, ApiError, type AnswerRequest, type AwaitingKind, type Emotion, type Episode, type HelpMode, type Scene, type Session } from '../learnerApi'
 import { useReducedMotion } from '../motionPreference'
@@ -7,6 +6,7 @@ import MascotStage from './MascotStage'
 import MotionToggle from './MotionToggle'
 import RaiseHandPanel from './RaiseHandPanel'
 import RecallCheckpoint from './RecallCheckpoint'
+import { GalleryButton, PictureCardView, PictureNotesDialog, type EncounteredPictureNote, type PictureNoteView } from './PictureCardView'
 import { BACK_TO_LESSON, STRIP_LABEL, closingCue, drawCue } from './tutorCues'
 import useReadingAdvance from './useReadingAdvance'
 import './player.css'
@@ -129,6 +129,19 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
   const [revealedLine, setRevealedLine] = useState('')
   const [restoredTurn, setRestoredTurn] = useState('')
   const [menuOpen, setMenuOpen] = useState(false)
+  const [pictureNotes, setPictureNotes] = useState<EncounteredPictureNote[]>([])
+  const [dismissedPictures, setDismissedPictures] = useState<string[]>([])
+  const [pictureView, setPictureView] = useState<PictureNoteView>(null)
+  const [selectedPicture, setSelectedPicture] = useState<EncounteredPictureNote | null>(null)
+  const [pictureFromGallery, setPictureFromGallery] = useState(false)
+  const pictureDialogRef = useRef<HTMLDialogElement>(null)
+  const pictureCloseRef = useRef<HTMLButtonElement>(null)
+  const galleryTriggerRef = useRef<HTMLButtonElement>(null)
+  const galleryCardRef = useRef<HTMLButtonElement>(null)
+  const pictureOpenerRef = useRef<HTMLElement | null>(null)
+  const galleryScrollRef = useRef<HTMLDivElement>(null)
+  const galleryScrollTopRef = useRef(0)
+  const returnToGalleryRef = useRef(false)
   const [backlogOpen, setBacklogOpen] = useState(false)
   const [backlogError, setBacklogError] = useState('')
   const backlogReturn = useRef<HTMLElement | null>(null)
@@ -185,6 +198,8 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
               setRestoredTurn(`ask:${last.interactionId}:${lastBeat}`)
             }
           }
+          const initialScene = e.scenes.find(item => item.sceneId === s.sceneId)
+          if (s.mode === 'playing' && initialScene?.pictureCard) setPictureNotes([{ sceneId: initialScene.sceneId, card: initialScene.pictureCard }])
           setSession(s); setEpisode(e)
         }
       } catch (err) {
@@ -193,6 +208,18 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
     })()
     return () => { active = false; alive.current = false }
   }, [sessionId])
+
+  useLayoutEffect(() => {
+    if (!pictureView) return
+    const dialog = pictureDialogRef.current
+    if (!dialog) return
+    if (!dialog.open) dialog.showModal()
+    if (pictureView === 'gallery' && returnToGalleryRef.current) {
+      galleryCardRef.current?.focus({ preventScroll: true })
+      galleryScrollRef.current?.scrollTo({ top: galleryScrollTopRef.current })
+      returnToGalleryRef.current = false
+    } else pictureCloseRef.current?.focus({ preventScroll: true })
+  }, [pictureView, selectedPicture])
 
   const order = episode ? sceneOrder(episode) : []
   const scene = order.find(s => s.sceneId === session?.sceneId) ?? episode?.scenes.find(s => s.sceneId === session?.sceneId)
@@ -306,6 +333,31 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
     closeRef.current?.focus({ preventScroll: true })
   }
 
+  function openPictureGallery(trigger: HTMLButtonElement) {
+    pictureOpenerRef.current = trigger
+    setPictureFromGallery(false)
+    setSelectedPicture(null)
+    setPictureView('gallery')
+  }
+
+  function openPictureDetail(note: EncounteredPictureNote, fromGallery: boolean, trigger: HTMLButtonElement) {
+    pictureOpenerRef.current = trigger
+    setPictureFromGallery(fromGallery)
+    setSelectedPicture(note)
+    setPictureView('detail')
+  }
+
+  function handlePictureNotesClose() {
+    setPictureView(null)
+    const target = pictureOpenerRef.current?.isConnected ? pictureOpenerRef.current : galleryTriggerRef.current
+    target?.focus({ preventScroll: true })
+  }
+
+  function backToPictureGallery() {
+    returnToGalleryRef.current = true
+    setPictureView('gallery')
+  }
+
   async function reload() {
     const s = await api.session(sessionId)
     acceptSession(s)
@@ -318,6 +370,8 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
     const increment = count - observedNods.current
     if (increment > 0) setNodTrigger(n => n + increment)
     observedNods.current = count
+    const reachedScene = order.find(item => item.sceneId === next.sceneId)
+    if (next.mode === 'playing' && reachedScene?.pictureCard) setPictureNotes(current => current.some(item => item.sceneId === reachedScene.sceneId) ? current : [...current, { sceneId: reachedScene.sceneId, card: reachedScene.pictureCard! }])
     setSession(next)
   }
 
@@ -569,7 +623,9 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
       <section className={`vn-scene${question || inQuestion ? ' vn-checkpoint-scene' : ''}${inQuestion && askPhase !== 'compose' ? ' vn-undim' : ''}`} aria-label="Scene">
         <div className="vn-stage">
           {mascot}
-          {mode === 'playing' && scene.pictureCard && <PictureCardView key={scene.sceneId} card={scene.pictureCard} />}
+          {mode === 'playing' && scene.pictureCard && !dismissedPictures.includes(scene.sceneId) && <PictureCardView key={scene.sceneId} note={{ sceneId: scene.sceneId, card: scene.pictureCard }}
+            onOpen={trigger => openPictureDetail({ sceneId: scene.sceneId, card: scene.pictureCard! }, false, trigger)}
+            onDismiss={() => setDismissedPictures(current => current.includes(scene.sceneId) ? current : [...current, scene.sceneId])} />}
           {mode === 'completed' && <div className="vn-prompt"><p className="vn-prompt-label">Episode complete</p><p className="vn-prompt-text">{episode.title}</p></div>}
         </div>
         {question && <RecallCheckpoint key={scene.sceneId} question={question} state={checkpoint ?? null} pending={pending}
@@ -652,6 +708,7 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
         </>}
       </section>
       <div className="vn-menu-rail">
+        <GalleryButton buttonRef={galleryTriggerRef} onOpen={openPictureGallery} />
         <button ref={menuRef} type="button" className="vn-menu-trigger" aria-haspopup="dialog" aria-controls="episode-menu" onClick={openMenu}>
           <span className="vn-menu-icon" aria-hidden="true"><span /><span /><span /></span>
           Menu
@@ -676,6 +733,11 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
       </button>
       <button type="button" className="vn-button vn-menu-leave" onClick={onExit}>Leave episode</button>
     </dialog>
+    <PictureNotesDialog dialogRef={pictureDialogRef} title={selectedPicture?.card.title ?? 'Gallery'} view={pictureView} notes={pictureNotes}
+      selected={selectedPicture} fromGallery={pictureFromGallery} onClose={handlePictureNotesClose} closeRef={pictureCloseRef}
+      returnTargetRef={galleryCardRef} galleryScrollRef={galleryScrollRef}
+      onSelect={(note, trigger) => { galleryScrollTopRef.current = galleryScrollRef.current?.scrollTop ?? 0; galleryCardRef.current = trigger; openPictureDetail(note, true, trigger) }}
+      onBack={backToPictureGallery} />
     {backlogOpen && <BacklogPanel open={backlogOpen} entries={backlogEntries} canJump={canJump} busy={pending} error={backlogError}
       onClose={closeBacklog} onJump={entry => void jumpTo(entry)} />}
   </main>
