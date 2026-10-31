@@ -65,20 +65,17 @@ body:has(.home) { margin: 0; overflow: hidden; background: #23233a; color-scheme
 .rail .bi { width: 1.1em; height: 1.1em; flex: none; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .rail :focus-visible { outline-color: var(--mint-bright); }
 
-/* ---------- Talk overlay: vn-ask-strip semantics on the home stage ---------- */
+/* ---------- Talk overlay: the player's vn-choices / vn-ask-strip surface on
+   the home stage. The overlay box is home-scoped geometry (absolute over the
+   stage); everything inside uses the player's own classes, so the vn-choice
+   transform animation, corner tab, focus rings and reduce-motion guard apply
+   unscoped — only the .player-gated surface needs .home twins. */
 .ask-overlay { position: absolute; inset: 0; z-index: 8; display: flex; align-items: flex-end; justify-content: center; padding: 12px 16px 18px; }
-.ask-choices { display: grid; gap: 12px; width: min(100%, 44rem); max-height: 100%; overflow-y: auto; }
-/* button.ask-choice must out-tie `.home button { font: inherit }` — the bare
-   class loses, which is why "Nothing" used to render at regular weight. */
-.ask-strip, button.ask-choice { position: relative; min-height: 48px; padding: 12px 18px; font-weight: 800; text-align: left; background: var(--paper); color: var(--ink); border: 2px solid #626281; border-radius: 2px; }
-.ask-strip { display: flex; align-items: center; gap: 10px; cursor: pointer; padding-right: 32px; }
-.ask-choice { display: block; width: 100%; padding-right: 32px; }
-.ask-strip::after, .ask-choice::after { content: ''; position: absolute; right: 0; bottom: 0; width: 14px; height: 14px; background: var(--mint-ink); clip-path: polygon(100% 0, 100% 100%, 0 100%); }
-.ask-strip:hover, .ask-choice:hover { background: var(--wash); border-color: var(--mint-ink); }
-.ask-strip input { flex: 1; min-width: 0; border: 0; background: transparent; font: inherit; font-weight: 800; color: var(--ink); outline: none; }
-.ask-strip input::placeholder { color: #77778b; }
-.ask-strip button { flex: none; min-height: 38px; padding: 6px 18px; font-weight: 850; background: var(--mint-ink); color: var(--paper); border-radius: 2px; }
-.ask-overlay :focus-visible { outline-color: var(--focus); }
+.home .vn-choice { position: relative; min-height: 48px; padding: 12px 30px 12px 18px; border: 2px solid #626281; border-radius: 2px; background: var(--paper); color: var(--ink); text-align: left; white-space: normal; overflow-wrap: anywhere; font-weight: 800; }
+.home .vn-ask-strip { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+/* `.home button { border: 0; min-height: 44px }` out-ties the bare .vn-ask-send
+   class — restore the player's pill geometry. */
+.home .vn-ask-send { border: 1.5px solid var(--mint-ink); min-height: 36px; }
 
 /* ---------- top-right upload progress chip ---------- */
 .upload-chip { position: fixed; top: 16px; right: 16px; z-index: 20; width: min(280px, 70vw); padding: 12px 16px 14px; border-radius: 14px; font-size: .82rem; font-weight: 800; background: var(--paper); color: var(--ink); box-shadow: 0 8px 24px #30304c40; }

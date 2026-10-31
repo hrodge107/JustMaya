@@ -116,7 +116,9 @@ button { font: inherit; cursor: pointer; border: 0; min-height: 44px; }
    strips hang in front of the dimmed scene, just above the dialogue box. */
 .ask-overlay { position: absolute; inset: 0; z-index: 8; display: flex; align-items: flex-end; justify-content: center; padding: 12px 16px 18px; }
 .ask-choices { display: grid; gap: 12px; width: min(100%, 44rem); max-height: 100%; overflow-y: auto; }
-.ask-strip, .ask-choice { position: relative; min-height: 48px; padding: 12px 18px; font-weight: 800; text-align: left; border-radius: 12px; }
+.ask-strip, .ask-choice { position: relative; min-height: 48px; padding: 12px 18px; font-weight: 800; text-align: left; border-radius: 12px; transition: transform 160ms cubic-bezier(.22,.8,.3,1); transform-origin: center; touch-action: manipulation; }
+@media (hover: hover) and (pointer: fine) { .ask-strip:hover, .ask-choice:hover { transform: translateY(-2px) scale(1.01); } }
+.ask-strip:active, .ask-choice:active { transform: scale(.985); }
 .ask-strip { display: flex; align-items: center; gap: 10px; cursor: pointer; }
 .ask-strip input { flex: 1; min-width: 0; border: 0; background: transparent; font: inherit; font-weight: 800; color: inherit; outline: none; }
 .ask-strip button { flex: none; min-height: 38px; padding: 6px 18px; border-radius: 10px; font-weight: 850; }
