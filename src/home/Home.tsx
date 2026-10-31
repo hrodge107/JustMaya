@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type RefObject } from 'react'
 import { api, ApiError, type Job } from '../learnerApi'
-import { setMotionOverride, useMotionOverride, useReducedMotion } from '../motionPreference'
 import MascotStage from '../player/MascotStage'
+import MotionToggle from '../player/MotionToggle'
 import HomeDialogue from './dialogueEngine'
 import { readDoneTurns, readFailTurn } from './script'
 import './home.css'
@@ -38,8 +38,6 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
   if (!engineRef.current) engineRef.current = new HomeDialogue()
   const engine = engineRef.current
   const snap = useSyncExternalStore(engine.subscribe, engine.getSnap)
-  const reduced = useReducedMotion()
-  const override = useMotionOverride()
   const [chip, setChip] = useState<Chip>({ visible: false, name: '', stage: '', pct: 0, error: '', jobId: '' })
   const [askText, setAskText] = useState('')
   const [uploadErr, setUploadErr] = useState('')
@@ -265,6 +263,18 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
     else if (outcome === 'focus') askInput.current?.focus()
   }
 
+  function renderRow(doc: LearnDoc, row: LearnRow) {
+    return <li className={`ep${row.ready ? ' ready' : ''}`} key={`${doc.name}-${row.n}`}>
+      <span className="ep-num">{String(row.n).padStart(2, '0')}</span>
+      <span className="ep-meta">
+        <span className="ep-title">{row.title}</span>
+        <span className="ep-status">{row.ready ? `Ready${row.isNew ? ' · new' : ''}` : 'Planned outline'}</span>
+      </span>
+      {row.ready && row.episodeId && <button type="button" className="vn-button" disabled={playingId !== null}
+        onClick={() => void play(row.episodeId!)}>{playingId === row.episodeId ? 'Starting…' : 'Play'}</button>}
+    </li>
+  }
+
   function onMenuKeyDown(e: React.KeyboardEvent<HTMLDialogElement>) {
     if (e.key !== 'Tab') return
     const dlg = e.currentTarget
@@ -328,8 +338,9 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
           <button type="button" data-act="learn" onClick={() => { openDialog(learnDlg); void loadEpisodes() }}>
             <svg className="bi" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" /><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" /></svg><span>Learn</span>
           </button>
-          <button type="button" data-act="menu" ref={menuTrigger} aria-haspopup="dialog" onClick={() => openDialog(menuDlg)}>
-            <svg className="bi" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg><span>Menu</span>
+          <button type="button" data-act="menu" ref={menuTrigger} className="vn-menu-trigger" aria-haspopup="dialog" aria-controls="menuDlg" onClick={() => openDialog(menuDlg)}>
+            <span className="vn-menu-icon" aria-hidden="true"><span /><span /><span /></span>
+            Menu
           </button>
         </nav>
       </div>
@@ -342,13 +353,13 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
       {chip.error !== '' && <>
         <p className="up-err">{chip.error}</p>
         <div className="up-actions">
-          <button type="button" onClick={() => { setChip(c => ({ ...c, error: '' })); setJobParam(chip.jobId); void drive(chip.jobId, chip.name, 1) }}>Retry</button>
-          <button type="button" className="ghost" onClick={() => setChip(c => ({ ...c, visible: false }))}>Dismiss</button>
+          <button type="button" className="vn-button" onClick={() => { setChip(c => ({ ...c, error: '' })); setJobParam(chip.jobId); void drive(chip.jobId, chip.name, 1) }}>Retry</button>
+          <button type="button" className="vn-quiet" onClick={() => setChip(c => ({ ...c, visible: false }))}>Dismiss</button>
         </div>
       </>}
     </div>}
 
-    <dialog ref={uploadDlg} id="uploadDlg" aria-labelledby="upTitle" onClose={onDialogClose}
+    <dialog ref={uploadDlg} id="uploadDlg" className="vn-menu-dialog" aria-labelledby="upTitle" onClose={onDialogClose}
       onClick={e => { if (e.target === e.currentTarget) e.currentTarget.close() }}>
       <div className="modal">
         <h2 id="upTitle">Upload a document</h2>
@@ -364,14 +375,14 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
         <input ref={filePick} id="filePick" type="file" accept="application/pdf,.pdf" hidden
           onChange={e => { const f = e.target.files?.[0]; if (f) void uploadFile(f) }} />
         <div className="or">or</div>
-        <button type="button" id="sampleBtn" style={{ width: '100%' }} disabled={uploadBusy}
+        <button type="button" id="sampleBtn" className="vn-button" style={{ width: '100%' }} disabled={uploadBusy}
           onClick={() => void uploadSample()}>Use the sample chapter</button>
         {uploadErr !== '' && <p className="form-error" role="alert">{uploadErr}</p>}
-        <div className="row-end"><button type="button" className="ghost" onClick={e => e.currentTarget.closest('dialog')?.close()}>Cancel</button></div>
+        <div className="row-end"><button type="button" className="vn-quiet" onClick={e => e.currentTarget.closest('dialog')?.close()}>Cancel</button></div>
       </div>
     </dialog>
 
-    <dialog ref={learnDlg} id="learnDlg" aria-labelledby="learnTitle" onClose={onDialogClose}
+    <dialog ref={learnDlg} id="learnDlg" className="vn-menu-dialog" aria-labelledby="learnTitle" onClose={onDialogClose}
       onClick={e => { if (e.target === e.currentTarget) e.currentTarget.close() }}>
       <div className="modal">
         <h2 id="learnTitle">Episodes</h2>
@@ -380,48 +391,40 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
         {learnErr !== '' && <p className="form-error" role="alert">{learnErr}</p>}
         {docs !== null && docs.length === 0 && !learnErr && <p className="ep-empty">No episodes yet — upload a document and I'll plan your first one.</p>}
         {docs !== null && docs.length > 0 && <ol className="ep-list">
-          {docs.flatMap(doc => [
-            <li className="ep-doc" key={`doc-${doc.name}`}>{doc.name}</li>,
-            ...doc.rows.map(row => <li className={`ep${row.ready ? ' ready' : ''}`} key={`${doc.name}-${row.n}`}>
-              <span className="ep-num">{String(row.n).padStart(2, '0')}</span>
-              <span className="ep-meta">
-                <span className="ep-title">{row.title}</span>
-                <span className="ep-status">{row.ready ? `Ready${row.isNew ? ' · new' : ''}` : 'Planned outline'}</span>
-              </span>
-              {row.ready && row.episodeId && <button type="button" disabled={playingId !== null}
-                onClick={() => void play(row.episodeId!)}>{playingId === row.episodeId ? 'Starting…' : 'Play'}</button>}
-            </li>),
-          ])}
+          {docs.filter(doc => doc.rows.length > 0).map(doc => {
+            const [first, ...rest] = doc.rows
+            return <li className="ep-group" key={`doc-${doc.name}`}>
+              <p className="ep-doc">{doc.name}</p>
+              <ol className="ep-rows">{renderRow(doc, first)}</ol>
+              {rest.length > 0 && <details className="ep-more">
+                <summary>{rest.length} more planned {rest.length === 1 ? 'outline' : 'outlines'}</summary>
+                <ol className="ep-rows">{rest.map(row => renderRow(doc, row))}</ol>
+              </details>}
+            </li>
+          })}
         </ol>}
-        <div className="row-end"><button type="button" className="ghost" onClick={e => e.currentTarget.closest('dialog')?.close()}>Close</button></div>
+        <div className="row-end"><button type="button" className="vn-quiet" onClick={e => e.currentTarget.closest('dialog')?.close()}>Close</button></div>
       </div>
     </dialog>
 
-    <dialog ref={menuDlg} id="menuDlg" aria-labelledby="menuTitle" onKeyDown={onMenuKeyDown}
+    <dialog ref={menuDlg} id="menuDlg" className="vn-menu-dialog" aria-labelledby="menuTitle" onKeyDown={onMenuKeyDown}
       onClose={e => { onDialogClose(e); if (!aboutDlg.current?.open && !learnDlg.current?.open && !uploadDlg.current?.open) menuTrigger.current?.focus({ preventScroll: true }) }}
       onClick={e => { if (e.target === e.currentTarget) e.currentTarget.close() }}>
-      <div className="modal">
-        <div className="menu-heading"><h2 id="menuTitle">Menu</h2><button type="button" className="ghost" onClick={e => e.currentTarget.closest('dialog')?.close()}>Close</button></div>
-        <button type="button" className="menu-row" role="switch" aria-checked={reduced}
-          onClick={() => setMotionOverride(reduced ? 'full' : 'reduce')}>
-          <span>Reduce motion</span>
-          <span className="switch" aria-hidden="true"><span className="switch-thumb" /></span>
-        </button>
-        {override !== null && <button type="button" className="motion-reset" onClick={() => setMotionOverride(null)}>Use device setting</button>}
-        <button type="button" className="menu-row" onClick={() => { openDialog(aboutDlg); menuDlg.current?.close() }}>
-          <span>About</span><span className="menu-row-glyph" aria-hidden="true">i</span>
-        </button>
-      </div>
+      <div className="vn-menu-heading"><h2 id="menuTitle">Menu</h2><button type="button" className="vn-quiet" onClick={e => e.currentTarget.closest('dialog')?.close()}>Close</button></div>
+      <MotionToggle />
+      <button type="button" className="vn-motion vn-menu-about" onClick={() => { openDialog(aboutDlg); menuDlg.current?.close() }}>
+        <span>About</span><span aria-hidden="true">i</span>
+      </button>
     </dialog>
 
-    <dialog ref={aboutDlg} id="aboutDlg" aria-labelledby="aboutTitle" onClose={onDialogClose}
+    <dialog ref={aboutDlg} id="aboutDlg" className="vn-menu-dialog" aria-labelledby="aboutTitle" onClose={onDialogClose}
       onClick={e => { if (e.target === e.currentTarget) e.currentTarget.close() }}>
       <div className="modal">
         <h2 id="aboutTitle">About Meet Mita</h2>
         <p className="about-p"><b>Meet Mita turns a document into a playable lesson.</b> Upload a PDF and it plans a learning roadmap, generates a visual-novel episode, and checks your understanding inside the story, with a tutor you can raise your hand for at any point.</p>
         <p className="about-p">Mita is the in-app guide: she narrates, teaches, and keeps you company between sessions.</p>
         <p className="about-p">React and Vite in front of a FastAPI pipeline. Episodes are generated once from your document, then played back without per-line model calls.</p>
-        <div className="row-end"><button type="button" className="ghost" onClick={e => e.currentTarget.closest('dialog')?.close()}>Close</button></div>
+        <div className="row-end"><button type="button" className="vn-quiet" onClick={e => e.currentTarget.closest('dialog')?.close()}>Close</button></div>
       </div>
     </dialog>
   </main>
