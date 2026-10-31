@@ -559,14 +559,14 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
 
   return <main className="player">
     <div className={`vn-frame mode-${mode}`}>
-      <header className="player-header">
-        <span className="brand">Meet Mita</span><h1 className="player-title">{episode.title}</h1>
-        <div className="vn-progress">
-          <span>Scene {sceneNumber} of {order.length}</span>
-          <ol aria-hidden="true">{order.map((s, i) => <li key={s.sceneId} className={i + 1 < sceneNumber ? 'done' : i + 1 === sceneNumber ? 'current' : ''} />)}</ol>
-        </div>
-      </header>
       <section className={`vn-scene${question || inQuestion ? ' vn-checkpoint-scene' : ''}${inQuestion && askPhase !== 'compose' ? ' vn-undim' : ''}`} aria-label="Scene">
+        <header className="player-header">
+          <span className="brand">Meet Mita</span><h1 className="player-title">{episode.title}</h1>
+          <div className="vn-progress">
+            <span>Scene {sceneNumber} of {order.length}</span>
+            <ol aria-hidden="true">{order.map((s, i) => <li key={s.sceneId} className={i + 1 < sceneNumber ? 'done' : i + 1 === sceneNumber ? 'current' : ''} />)}</ol>
+          </div>
+        </header>
         <div className="vn-stage">
           {mascot}
           {mode === 'completed' && <div className="vn-prompt"><p className="vn-prompt-label">Episode complete</p><p className="vn-prompt-text">{episode.title}</p></div>}
@@ -581,28 +581,9 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
           onHelpMode={setHelpMode}
           onNewTopic={() => { setDraft(''); setNewTopic(true); setHelpMode('explain') }} />}
       </section>
-      <section className="vn-dialogue" aria-label="Dialogue">
-        <button ref={backlogCueRef} type="button" className="vn-backlog-cue" aria-label="Open the dialogue backlog" aria-haspopup="dialog"
-          onClick={() => openBacklog(backlogCueRef.current)}>
-          <span aria-hidden="true">^</span>
-        </button>
-        {(canRaise || inQuestion) && (
-          <button type="button" className="vn-raise" aria-label={inQuestion ? 'Resume the lesson' : 'Raise your hand to ask a question'}
-            aria-disabled={pending || undefined} aria-busy={pending || undefined}
-            onClick={() => { if (pending) return; if (inQuestion) void resumeLesson(); else void raiseHand() }}>
-            {inQuestion ? (
-              <svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="8 5 19 12 8 19" fill="currentColor" stroke="currentColor" strokeWidth="2.4" strokeLinejoin="round" /></svg>
-            ) : (
-              <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2" />
-                <path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v6" />
-                <path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8" />
-                <path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" />
-              </svg>
-            )}
-          </button>
-        )}
-        {(mode === 'playing' && line) || question || inQuestion ? <>
+      <div className="vn-dock">
+        <section className="vn-dialogue" aria-label="Dialogue">
+          {(mode === 'playing' && line) || question || inQuestion ? <>
           <button ref={continueRef} type="button" className="vn-dialogue-target" aria-label={dialogueError || needsReload ? question ? 'Retry lesson connection' : 'Retry advancing dialogue' : returnBeat ? 'Return to the lesson' : inQuestion ? awaiting ? 'Reveal your message' : 'Reveal tutor reply' : question ? checkpoint?.checkpointCompleted && revealed ? 'Advance dialogue' : 'Reveal dialogue' : 'Reveal or advance dialogue'} aria-busy={pending || undefined} aria-disabled={pending && !awaiting || undefined} onClick={activateDialogue} onKeyDown={event => {
             if (event.altKey || event.ctrlKey || event.metaKey) return
             const target = dialogueScrollRef.current
@@ -650,12 +631,34 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
             {mode !== 'checkpoint' && mode !== 'completed' && <p className="vn-note">This session is in {mode} mode, which this player cannot show yet.</p>}
           </div>
         </>}
-      </section>
-      <div className="vn-menu-rail">
-        <button ref={menuRef} type="button" className="vn-menu-trigger" aria-haspopup="dialog" aria-controls="episode-menu" onClick={openMenu}>
-          <span className="vn-menu-icon" aria-hidden="true"><span /><span /><span /></span>
-          Menu
-        </button>
+        </section>
+        <nav className="vn-rail" aria-label="Episode actions">
+          {(canRaise || inQuestion) && (
+            <button type="button" className="vn-raise" aria-label={inQuestion ? 'Resume the lesson' : 'Raise your hand to ask a question'}
+              aria-disabled={pending || undefined} aria-busy={pending || undefined}
+              onClick={() => { if (pending) return; if (inQuestion) void resumeLesson(); else void raiseHand() }}>
+              {inQuestion ? (
+                <svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="8 5 19 12 8 19" fill="currentColor" stroke="currentColor" strokeWidth="2.4" strokeLinejoin="round" /></svg>
+              ) : (
+                <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2" />
+                  <path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v6" />
+                  <path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8" />
+                  <path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" />
+                </svg>
+              )}
+              <span className="vn-rail-label">{inQuestion ? 'Resume' : 'Raise hand'}</span>
+            </button>
+          )}
+          <button ref={backlogCueRef} type="button" className="vn-backlog-cue" aria-label="Open the dialogue backlog" aria-haspopup="dialog"
+            onClick={() => openBacklog(backlogCueRef.current)}>
+            <span aria-hidden="true">^</span><span className="vn-rail-label">Backlog</span>
+          </button>
+          <button ref={menuRef} type="button" className="vn-menu-trigger" aria-haspopup="dialog" aria-controls="episode-menu" onClick={openMenu}>
+            <span className="vn-menu-icon" aria-hidden="true"><span /><span /><span /></span>
+            <span className="vn-rail-label">Menu</span>
+          </button>
+        </nav>
       </div>
     </div>
     <dialog ref={dialogRef} id="episode-menu" className="vn-menu-dialog" aria-labelledby="episode-menu-title" onClose={() => { setMenuOpen(false); menuRef.current?.focus({ preventScroll: true }) }} onKeyDown={event => {

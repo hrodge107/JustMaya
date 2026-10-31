@@ -113,7 +113,7 @@ async function main() {
   }
   browser ??= await chromium.launch()
   try {
-    // 1. Cue inside the dialogue box opens the messenger card.
+    // 1. Cue in the episode action rail opens the messenger card.
     {
       const { context, page, go } = await fixture(browser)
       await go()
@@ -121,10 +121,10 @@ async function main() {
       await cue.waitFor()
       const placement = await page.evaluate(() => {
         const c = document.querySelector('.vn-backlog-cue').getBoundingClientRect()
-        const d = document.querySelector('.vn-dialogue').getBoundingClientRect()
-        return { cueTop: c.top - d.top, cueRight: d.right - c.right, w: c.width, h: c.height }
+        const r = document.querySelector('.vn-rail').getBoundingClientRect()
+        return { inRail: c.top >= r.top - 1 && c.bottom <= r.bottom + 1 && c.left >= r.left - 1 && c.right <= r.right + 1, w: c.width, h: c.height }
       })
-      assert.ok(placement.cueTop < 12 && placement.cueRight < 14, 'cue hugs the upper-right corner inside the box')
+      assert.ok(placement.inRail, 'cue lives inside the episode action rail')
       assert.ok(placement.w >= 44 && placement.h >= 44, 'cue meets the 44px target')
       await openBacklogViaCue(page)
       assert.match(await text(page, '.bl-head h2'), /Backlog/)
