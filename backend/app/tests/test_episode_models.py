@@ -40,7 +40,8 @@ def _question(question_id="q-1", **kwargs):
            "prompt": "Which?",
            "objectiveId": "obj-1",
            "options": [AnswerOption(optionId="a", label="A", mistakeResponse="Not A."),
-                       AnswerOption(optionId="b", label="B", mistakeResponse="Not B.")],
+                       AnswerOption(optionId="b", label="B", mistakeResponse="Not B."),
+                       AnswerOption(optionId="c", label="C", mistakeResponse="Not C.")],
            "correctOptionId": "a",
            "correctExplanation": "Because.",
            "incorrectExplanation": "Try again.",
@@ -159,6 +160,14 @@ def test_question_invariants_flagged():
     violations = validate_script(_script(scenes), CHUNKS, OBJECTIVES, WEB_URLS)
     assert any("correctOptionId not in options" in v for v in violations)
     assert any("objectiveId not in locked objectives" in v for v in violations)
+
+
+def test_option_count_enforced():
+    scenes = _valid_scenes()
+    scenes[1].question.options.pop()
+    violations = validate_script(_script(scenes), CHUNKS, OBJECTIVES, WEB_URLS)
+    assert any("q-1: expected 3 options, found 2" in v for v in violations)
+    assert all("q-2: expected 3 options" not in v for v in violations)
 
 
 def test_unreachable_ending_and_duplicate_ids_flagged():

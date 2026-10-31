@@ -108,7 +108,8 @@ def _script_payload(chunk_id="doc-1-p0001-000", words_per_line=10):
         return {
             "questionId": qid, "prompt": "Which?", "objectiveId": "obj-1",
             "options": [{"optionId": "a", "label": "A", "mistakeResponse": "Not A."},
-                        {"optionId": "b", "label": "B", "mistakeResponse": "Not B."}],
+                        {"optionId": "b", "label": "B", "mistakeResponse": "Not B."},
+                        {"optionId": "c", "label": "C", "mistakeResponse": "Not C."}],
             "correctOptionId": "a", "correctExplanation": "Because.",
             "incorrectExplanation": "Try again.",
             "sourceRefs": [{"chunkId": chunk_id, "documentId": "doc-1",
