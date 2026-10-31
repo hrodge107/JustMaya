@@ -53,18 +53,22 @@ class StubProvider:
         return 25
 
 
-PASSAGES = [
-    SourcePassage(
-        chunk_id="chunk-a",
-        text="Verification passage",
-        source=SourceRef(chunk_id="chunk-a", document_id="d", page_start=2, page_end=3),
-    )
-]
+# The tutor service filters retrieved passages to the episode's document_id,
+# so the stub passage is built per-episode inside main().
+def passages(document_id):
+    return [
+        SourcePassage(
+            chunk_id="chunk-a",
+            text="Verification passage",
+            source=SourceRef(chunk_id="chunk-a", document_id=document_id, page_start=2, page_end=3),
+        )
+    ]
 
 
 def main():
     staged = Path(tempfile.mkdtemp(prefix="justmaya-raise-hand-"))
-    with sqlite3.connect(ROOT / "backend/data/app.db") as source, sqlite3.connect(staged / "app.db") as target:
+    source_db = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "backend/data/app.db"
+    with sqlite3.connect(source_db) as source, sqlite3.connect(staged / "app.db") as target:
         source.backup(target)
     with sqlite3.connect(staged / "app.db") as conn:
         episodes = [json.loads(r[0]) for r in conn.execute("SELECT payload FROM episodes WHERE status='ready'")]
@@ -74,7 +78,7 @@ def main():
     app = create_app(data_dir=staged)
     stub = StubProvider()
     app.state.tutor_provider = MeteredProvider(stub, settings, staged)
-    app.state.retriever = lambda document_id, query, **kw: PASSAGES
+    app.state.retriever = lambda document_id, query, **kw: passages(episode["documentId"])
 
     evidence = []
     with TestClient(app) as client:

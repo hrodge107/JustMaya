@@ -128,7 +128,7 @@ async function main() {
       assert.ok(placement.w >= 44 && placement.h >= 44, 'cue meets the 44px target')
       await openBacklogViaCue(page)
       assert.match(await text(page, '.bl-head h2'), /Backlog/)
-      // Messenger rows: mita avatar, right-aligned you, note, prompt, marker.
+      // Messenger rows: mita avatar, right-aligned you, prompt, marker.
       const rows = page.locator('.bl-row')
       assert.equal(await rows.count(), 10, 'every shown turn is a backlog entry')
       await page.locator('.bl-row.bl-mita .bl-av-mita').first().waitFor()
@@ -138,10 +138,12 @@ async function main() {
         return row.right - bubble.right
       })
       assert.ok(youAlign < 64, 'learner echoes hug the right edge')
-      assert.match(await page.locator('.bl-bubble.bl-note').innerText(), /Water made farming possible/)
+      const narrationRow = page.locator('.bl-row.bl-mita', { hasText: 'Water made farming possible' })
+      assert.match(await narrationRow.locator('.bl-bubble').innerText(), /Water made farming possible/)
+      await narrationRow.locator('.bl-av-mita').waitFor()
       assert.match(await page.locator('.bl-row.bl-mita', { hasText: 'Why did early settlements' }).innerText(), /Why did early settlements/)
       await page.locator('.bl-here', { hasText: 'Here' }).waitFor()
-      evidence.push('cue opens messenger card: avatars, echo alignment, note, prompt, here marker')
+      evidence.push('cue opens messenger card: avatars, echo alignment, narration as mita turn, prompt, here marker')
       await context.close()
     }
 

@@ -2,7 +2,7 @@
 // endpoints. Only POST /questions is stubbed (synthesized from a live session
 // GET) so tutor answers stay deterministic without a live model key; every
 // other session call reaches the real backend on a copied database.
-const { chromium } = (() => { try { return require('playwright') } catch { return require('playwright-core') } })()
+const { chromium, request: pwRequest } = (() => { try { return require('playwright') } catch { return require('playwright-core') } })()
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -36,7 +36,10 @@ async function fixture(browser, viewport = { width: 390, height: 844 }, reducedM
   const page = await context.newPage()
   page.on('pageerror', err => errors.push(err.message))
   await page.clock.install(); await page.clock.pauseAt(new Date())
-  const state = { fault: '', calls: [], gate: null, questionReplies: new Map(), nextFlow: null, getPatch: null, get: sid => context.request.get(`${base}/api/sessions/${sid}`).then(r => r.json()) }
+  // A standalone request context keeps in-flight session GETs alive when a
+  // route callback outlives the browser context that issued them.
+  const apiRequest = await pwRequest.newContext({ baseURL: base })
+  const state = { fault: '', calls: [], gate: null, questionReplies: new Map(), nextFlow: null, getPatch: null, get: sid => apiRequest.get(`${base}/api/sessions/${sid}`).then(r => r.json()) }
   await page.route('**/api/sessions/**', async route => {
     const request = route.request()
     if (request.method() === 'GET') {
@@ -160,7 +163,7 @@ async function coreFlow(browser) {
   assert.ok(STRIP_LABEL.includes(stripLabel), 'resume strip label comes from the label pool')
   assert.equal(await input(f.page).inputValue(), '', 'closing beat lands an empty editable input')
   assert.equal(await f.page.evaluate(() => document.activeElement === document.querySelector('.vn-ask-input')), true, 'fresh input takes focus')
-  assert.equal(await f.page.locator('.vn-source-note').textContent(), 'Partly supported by your PDF.')
+  assert.equal(await f.page.locator('.vn-source-note').textContent(), 'Partly supported by retrieved PDF passages.')
   await f.page.getByRole('button', { name: 'Sources', exact: true }).click()
   assert.deepEqual(await f.page.locator('.vn-source-badge').allTextContents(), ['Page 2–3'])
   assert.equal(await f.page.locator('.vn-ask-new').count(), 1, 'New question control appears once a flow turn anchors the thread')
@@ -313,12 +316,24 @@ async function layouts(browser) {
     assert.ok(raiseBox.width >= 44 && raiseBox.height >= 44, 'raise button hit size')
     const stripBox = await strip(f.page).boundingBox()
     assert.ok(stripBox.height >= 44, 'strip hit height')
+    const modeBox = await f.page.locator('.vn-ask-mode').first().boundingBox()
+    assert.ok(modeBox.height >= 44, 'help-mode pill hit height')
     // Keyboard modality: Shift+Tab from the input reaches the strip visibly.
     await input(f.page).press('Shift+Tab')
     assert.equal(await f.page.evaluate(() => document.activeElement === document.querySelector('.vn-ask-strip')), true)
     assert.equal(await strip(f.page).evaluate(el => getComputedStyle(el).outlineStyle), 'solid')
+    // Focus back in the input keeps the strip's ring visible while typing.
+    await input(f.page).focus()
+    assert.equal(await strip(f.page).evaluate(el => getComputedStyle(el).outlineStyle), 'solid', 'compose strip keeps a focus ring while typing')
+    // Forward Tab from the input lands on a named Send button; Enter sends once.
+    await input(f.page).press('Tab')
+    assert.equal(await f.page.evaluate(() => document.activeElement === document.querySelector('.vn-ask-send')), true, 'forward Tab reaches the Send button')
+    assert.equal(await send(f.page).getAttribute('aria-label'), 'Send your question')
     await f.page.screenshot({ path: path.join(output, `ask-${viewport.width}x${viewport.height}.png`), fullPage: true })
-    evidence.push({ check: `${viewport.width}x${viewport.height}: strip+raise geometry, focus, no horizontal overflow`, result: 'PASS' })
+    await f.page.keyboard.press('Enter')
+    await f.page.waitForFunction(() => document.querySelector('.vn-dialogue .sr-only[aria-live]')?.textContent?.startsWith('You: '))
+    assert.equal(questionPosts(f).length, 1, 'Enter on the Send button sends exactly once')
+    evidence.push({ check: `${viewport.width}x${viewport.height}: strip+raise+mode geometry, visible focus typing/strip/send, keyboard send, no horizontal overflow`, result: 'PASS' })
     await f.context.close()
   }
 }
