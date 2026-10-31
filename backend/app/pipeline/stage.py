@@ -16,7 +16,7 @@ from typing import Any, NamedTuple
 from app.config import Settings
 from app.models.curriculum import Roadmap
 from app.pipeline.state import PipelineState
-from app.services.concept_analyzer import analyze_document
+from app.services.concept_analyzer import detail_analysis, survey_document
 from app.services.curriculum_planner import plan_curriculum
 from app.services.episode_generator import generate_episode
 from app.services.episode_validator import validate_and_publish
@@ -40,8 +40,9 @@ class StageServices:
 
     extract_document: Callable = extract_document
     index_document: Callable = index_document
-    analyze_document: Callable = analyze_document
+    survey_document: Callable = survey_document
     plan_curriculum: Callable = plan_curriculum
+    detail_analysis: Callable = detail_analysis
     generate_episode: Callable = generate_episode
     validate_and_publish: Callable = validate_and_publish
 

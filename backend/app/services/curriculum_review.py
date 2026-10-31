@@ -51,25 +51,55 @@ def apply_edit(roadmap: Roadmap, edit: RoadmapEdit, inventory: ConceptInventory)
     return result
 
 
-def lock_lesson(roadmap: Roadmap, inventory: ConceptInventory) -> Roadmap:
+def lock_selection(roadmap: Roadmap, inventory: ConceptInventory) -> Roadmap:
+    """Confirmation-time lock: freezes the Episode-1 selection and marks the
+    roadmap confirmed. The lesson context is built later by the detail pass."""
     validate_roadmap(roadmap, inventory)
     first = roadmap.episodes[0]
     if not first.concepts or not first.objective_ids:
         raise ValueError("Episode 1 needs concepts and at least one supported objective")
     result = roadmap.model_copy(deep=True)
-    first = result.episodes[0]
-    first.status = "selected"
-    selected = {item.concept_id for item in first.concepts}
-    concepts = {item.id: item for item in inventory.concepts}
-    objectives = {item.id: item for item in inventory.learning_objectives}
-    pages = {page for cid in selected for ref in concepts[cid].evidence
-             for page in range(ref.page_start, ref.page_end + 1)}
-    result.lesson_context = LessonContext(
-        episode_id=first.episode_id, objectives=[objectives[oid] for oid in first.objective_ids],
-        concepts=[concepts[item.concept_id] for item in first.concepts], teaching_order=first.concepts,
-        relationships=[edge for edge in inventory.prerequisite_edges if edge.source_id in selected and edge.target_id in selected],
-        supplements=[item for item in inventory.supplements if pages.intersection(item.page_numbers)],
-        uncertainty=inventory.uncertainty, excluded_concept_ids=[item.id for item in inventory.concepts if item.id not in selected],
-    )
+    result.episodes[0].status = "selected"
     result.confirmed = True
     return result
+
+
+def build_lesson_context(roadmap: Roadmap, detail_inventory: ConceptInventory,
+                         survey_inventory: ConceptInventory) -> LessonContext:
+    """Assemble the locked lesson context from the scoped detail inventory.
+    The reviewed outline supplies order and selection; the detail inventory
+    supplies depth; excluded scope comes from the survey inventory."""
+    first = roadmap.episodes[0]
+    selected = {item.concept_id for item in first.concepts}
+    concepts = {item.id: item for item in detail_inventory.concepts}
+    objectives = {item.id: item for item in detail_inventory.learning_objectives}
+    pages = {page for cid in selected for ref in concepts[cid].evidence
+             for page in range(ref.page_start, ref.page_end + 1)}
+    return LessonContext(
+        episode_id=first.episode_id, objectives=[objectives[oid] for oid in first.objective_ids],
+        concepts=[concepts[item.concept_id] for item in first.concepts], teaching_order=first.concepts,
+        relationships=[edge for edge in detail_inventory.prerequisite_edges if edge.source_id in selected and edge.target_id in selected],
+        supplements=[item for item in detail_inventory.supplements if pages.intersection(item.page_numbers)],
+        uncertainty=detail_inventory.uncertainty,
+        excluded_concept_ids=[item.id for item in survey_inventory.concepts if item.id not in selected],
+    )
+
+
+def detail_scope(roadmap: Roadmap, inventory: ConceptInventory, settings) -> set[int]:
+    """Confirmed Episode-1 evidence pages plus a bounded context margin —
+    the deterministic (token-free) scope the detail pass analyzes."""
+    first = roadmap.episodes[0]
+    selected = {item.concept_id for item in first.concepts}
+    concepts = {item.id: item for item in inventory.concepts}
+    pages = {page for cid in selected for ref in concepts[cid].evidence
+             for page in range(ref.page_start, ref.page_end + 1)}
+    if not pages:
+        raise ValueError("DETAIL_SCOPE_EMPTY: confirmed scope has no evidence pages")
+    max_page = max(item.page_number for item in inventory.coverage) if inventory.coverage else max(pages)
+    margin = settings.detail_context_margin_pages
+    scoped = {page for base in pages
+              for page in range(max(1, base - margin), min(max_page, base + margin) + 1)}
+    if len(scoped) > settings.detail_scope_max_pages:
+        raise ValueError(
+            f"DETAIL_SCOPE_TOO_LARGE: {len(scoped)} pages exceeds the detail scope cap")
+    return scoped

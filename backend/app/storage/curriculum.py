@@ -5,8 +5,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app.models.concept import ConceptInventory
-from app.models.curriculum import Roadmap, RoadmapEdit, validate_roadmap
-from app.services.curriculum_review import apply_edit, lock_lesson
+from app.models.curriculum import LessonContext, Roadmap, RoadmapEdit, validate_roadmap
+from app.services.curriculum_review import apply_edit, lock_selection
 from app.storage.jobs import release_from_review
 
 
@@ -81,12 +81,36 @@ def confirm_draft(data_dir: Path, document_id: str, revision: int) -> Roadmap:
         if roadmap.confirmed:
             conn.commit()
             return roadmap
-        result = lock_lesson(roadmap, inventory)
+        result = lock_selection(roadmap, inventory)
         if not release_from_review(conn, job_id):
             raise RoadmapConflict("Job is not awaiting review")
         conn.execute("UPDATE roadmaps SET payload = ? WHERE curriculum_id = ?", (result.model_dump_json(), result.curriculum_id))
         conn.commit()
         return result
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def attach_lesson_context(data_dir: Path, document_id: str, context: LessonContext) -> Roadmap:
+    """Persist the detail pass's lesson context onto the confirmed roadmap.
+    Idempotent: an existing context is returned unchanged, never overwritten."""
+    conn = _connect(data_dir)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        roadmap, _, _ = _read(conn, document_id)
+        if not roadmap.confirmed:
+            raise RoadmapConflict("Roadmap is not confirmed")
+        if roadmap.lesson_context is not None:
+            conn.commit()
+            return roadmap
+        updated = roadmap.model_copy(deep=True, update={"lesson_context": context})
+        conn.execute("UPDATE roadmaps SET payload = ? WHERE curriculum_id = ?",
+                     (updated.model_dump_json(), updated.curriculum_id))
+        conn.commit()
+        return updated
     except Exception:
         conn.rollback()
         raise

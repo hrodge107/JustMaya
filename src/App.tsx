@@ -14,13 +14,14 @@ function setSessionParam(id: string, push: boolean) {
 const ACTIVE = new Set(['queued', 'running'])
 // Stages at which a roadmap can already exist; a failed job that reached
 // one of these may have a confirmed roadmap the learner can resume.
-const PLANNED_STAGES = new Set(['plan', 'generate', 'validate'])
+const PLANNED_STAGES = new Set(['plan', 'detail', 'generate', 'validate'])
 
 const STAGE_LABEL: Record<string, string> = {
   extract: 'Reading your pages',
   index: 'Indexing your document',
   analyze: 'Mapping the ideas',
   plan: 'Planning your episodes',
+  detail: 'Studying Episode 1',
   generate: 'Writing Episode 1',
   validate: 'Checking the lesson',
 }
