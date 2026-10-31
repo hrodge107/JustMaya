@@ -81,6 +81,22 @@ async function run(browser, variant) {
   assert.match(await page.textContent('#aboutDlg'), /JustMaya turns a document/i)
   await page.click('#aboutDlg [data-close]')
 
+  // Player-driven dialogue: clicking the box advances to the next line.
+  await page.waitForFunction(() => document.getElementById('dlgText').textContent.length > 3)
+  const line1 = await page.textContent('#dlgText')
+  await page.click('#dlg')
+  await page.waitForFunction(prev => {
+    const t = document.getElementById('dlgText').textContent
+    return t !== prev && t.length > 3
+  }, line1)
+  assert.notEqual(await page.textContent('#dlgText'), line1, `[${variant}] click advances dialogue`)
+
+  // Auto-advance only after ~10s idle — checked once on variant a.
+  if (variant === 'a') {
+    const line2 = await page.textContent('#dlgText')
+    await page.waitForFunction(prev => document.getElementById('dlgText').textContent !== prev, line2, { timeout: 14000 })
+  }
+
   await page.close()
   console.log(`variant ${variant}: ok`)
 }
