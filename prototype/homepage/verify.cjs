@@ -142,14 +142,22 @@ async function main() {
   const browser = await chromium.launch({ executablePath: findBrowser() })
   try {
     for (const v of ['a', 'b', 'c']) await run(browser, v)
-    // Menu trigger moves to lower-right on mobile widths.
+    // Mobile: rail sits below the dialogue box, centred to it, Menu on the same row.
     const mp = await browser.newPage({ viewport: { width: 420, height: 800 }, reducedMotion: 'reduce' })
     mp.on('pageerror', e => errors.push(`[mobile] ${e.message}`))
     await mp.goto(`${base}?v=a`, { waitUntil: 'load' })
+    const dlg = await (await mp.$('#dlg')).boundingBox()
+    const rail = await (await mp.$('.rail')).boundingBox()
     const mm = await (await mp.$('.menu-trigger')).boundingBox()
-    assert.ok(mm.x + mm.width > 380 && mm.y > 700, '[mobile] menu trigger lower-right')
+    assert.ok(rail.y >= dlg.y + dlg.height - 2, '[mobile] rail below the dialogue box')
+    const railCx = rail.x + rail.width / 2, dlgCx = dlg.x + dlg.width / 2
+    assert.ok(Math.abs(railCx - dlgCx) < 40, `[mobile] rail centred to dialogue (${railCx.toFixed(0)} vs ${dlgCx.toFixed(0)})`)
+    assert.ok(mm.y + mm.height > rail.y && mm.y < rail.y + rail.height, '[mobile] Menu on the same row')
+    assert.ok(mm.x + mm.width > 380, '[mobile] Menu at the right end')
+    assert.ok(mm.x >= rail.x + rail.width - 2, '[mobile] no Menu/rail overlap')
+    await mp.screenshot({ path: path.join(out, 'mobile-foot.png') })
     await mp.close()
-    console.log('mobile menu placement: ok')
+    console.log('mobile rail/menu placement: ok')
   } finally {
     await browser.close()
   }
