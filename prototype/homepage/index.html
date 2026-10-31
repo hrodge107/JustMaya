@@ -24,9 +24,11 @@
     - Upload -> modal -> simulated progress (top-right) -> mascot 'reading'
       state -> dialogue beats at progress milestones -> Learn gets the result.
     - Learn lists generated episodes (Ep1 ready, 2-5 planned outlines only).
-    - Menu mirrors the shipped player's vn-menu-rail/vn-menu-dialog: hamburger
-      trigger top-right on desktop / lower-right on mobile, bundling About +
-      Reduce motion (role=switch, device override persisted to localStorage).
+    - The rail is one action row: Talk / Upload / Learn / Menu — Menu is a
+      rail member with full label, opening the vn-menu-dialog pattern (About +
+      Reduce motion, role=switch, device override persisted to localStorage).
+      Every rail button carries an inline SVG icon; an in-rail switch toggles
+      icon visibility and reparks itself at the row's head when icons are off.
 
   Run: open this file directly, or `npm run dev` then /prototype/homepage/index.html
 -->
@@ -73,9 +75,15 @@ button { font: inherit; cursor: pointer; border: 0; min-height: 44px; }
 .dock { position: relative; display: flex; flex-direction: column; gap: 8px; padding: 0 clamp(10px,3vw,36px) calc(clamp(10px,3vh,26px) + env(safe-area-inset-bottom, 0px)); }
 .foot { display: contents; }
 .rail { display: flex; gap: 8px; justify-content: center; }
-.rail button { padding: 8px 18px; font-weight: 800; border-radius: 12px; letter-spacing: .01em; transition: transform .15s var(--ease), background .15s var(--ease), opacity .15s; }
+.rail button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 8px 18px; font-weight: 800; border-radius: 12px; letter-spacing: .01em; transition: transform .15s var(--ease), background .15s var(--ease), opacity .15s; }
 .rail button:active { transform: scale(.96); }
 .rail button[aria-disabled='true'] { opacity: .45; cursor: default; }
+.rail .bi { width: 1.1em; height: 1.1em; flex: none; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+#iconToggle { flex: none; }
+#iconToggle .ic-off { display: none; }
+.home[data-icons='off'] .rail button[data-act] .bi { display: none; }   /* icons hidden — labels reflow */
+.home[data-icons='off'] #iconToggle { order: -1; }     /* toggle parks at the row's head */
+.home[data-icons='off'] #iconToggle .ic-off { display: block; }
 @media (min-width: 720px) {
   .dock { flex-direction: row; align-items: center; }
   .rail { order: -1; flex-direction: column; align-items: stretch; gap: 7px; }
@@ -83,15 +91,14 @@ button { font: inherit; cursor: pointer; border: 0; min-height: 44px; }
   .dlg { flex: 1; }
 }
 @media (max-width: 719px) {
-  .foot { position: relative; display: flex; align-items: center; }
-  .rail { margin: 0 auto; gap: 6px; }
-  .rail button { min-height: 44px; padding: 8px 12px; }
-  .foot .menu-rail { position: absolute; right: 0; top: 50%; transform: translateY(-50%); }
-  .foot .menu-trigger { min-height: 44px; padding: 10px 14px; }
-  .menu-label { display: none; }           /* icon-only in the mobile action row */
+  .foot { display: flex; }
+  .rail { margin: 0 auto; gap: 5px; }
+  .rail button { flex: 1 1 0; min-width: 0; min-height: 44px; padding: 8px 6px; font-size: .82rem; gap: 5px; white-space: nowrap; }
+  .rail .bi { width: 13px; height: 13px; }
+  #iconToggle { flex: 0 0 38px; }
 }
 @media (max-width: 380px) {
-  .rail button { padding: 8px 8px; }
+  .rail button { padding: 8px 4px; font-size: .78rem; }
 }
 
 .dlg { position: relative; min-height: clamp(140px, 24dvh, 210px); }
@@ -112,21 +119,8 @@ button { font: inherit; cursor: pointer; border: 0; min-height: 44px; }
 /* Top-right upload progress chip (below the Menu trigger on desktop). */
 .upload-chip { position: fixed; top: 16px; right: 16px; z-index: 20; width: min(280px, 70vw); padding: 12px 16px 14px; border-radius: 14px; font-size: .82rem; font-weight: 800; }
 
-/* Menu: mirrors vn-menu-rail/vn-menu-trigger/vn-menu-dialog from the player —
-   top-right on desktop, lower-right on mobile. */
-.menu-rail { position: fixed; z-index: 21; }
-.menu-trigger { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-radius: 12px; font-weight: 850; transition: transform .15s var(--ease); }
-.menu-trigger:active { transform: scale(.97); }
-.menu-icon { display: grid; gap: 4px; width: 20px; }
-.menu-icon > span { height: 2px; border-radius: 1px; background: currentColor; }
-@media (min-width: 720px) and (max-width: 999px) {
-  .menu-rail { right: 14px; bottom: 16px; }
-  .dock { padding-bottom: 88px; }
-}
-@media (min-width: 1000px) {
-  .menu-rail { top: 14px; right: 14px; }
-  .upload-chip { top: 72px; }
-}
+/* Menu: the trigger is a rail member now (vn-menu-dialog pattern kept for
+   the dialog itself). */
 
 /* Menu dialog rows — shipped shape: heading, whole-row switch, row links. */
 .menu-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
@@ -312,8 +306,6 @@ dialog[open] { animation: dlg-in .18s var(--ease); }
 [data-v='a'] .up-track { background: #ffd8e6; } [data-v='a'] .up-fill { background: linear-gradient(90deg,#ff8fb8,#ff6ba0); }
 [data-v='a'] .varbar { background: #fff0f6d9; color: #a03a5e; border: 1px solid #ffc4d9; }
 [data-v='a'] .varbar a.on { background: #ff8fb8; color: #fff; }
-[data-v='a'] .menu-trigger { background: #ffffffb8; color: #a03a5e; border: 2px solid #ffc4d9; box-shadow: 0 2px 6px #a34a6a26; }
-[data-v='a'] .menu-trigger:hover { background: #fff; }
 [data-v='a'] .modal .menu-row { background: transparent; color: #5a2c40; box-shadow: inset 0 0 0 2px #ffb8d1; margin-bottom: 10px; }
 [data-v='a'] .modal .menu-row:hover { background: #fff0f6; }
 [data-v='a'] .modal .motion-reset { background: none; color: #b34a72; }
@@ -362,7 +354,6 @@ dialog[open] { animation: dlg-in .18s var(--ease); }
 [data-v='b'] .up-track { background: #dedeea; } [data-v='b'] .up-fill { background: var(--mint-ink); }
 [data-v='b'] .varbar { background: #23233acc; color: var(--paper); }
 [data-v='b'] .varbar a.on { background: var(--mint-ink); }
-[data-v='b'] .menu-trigger { background: var(--paper); color: var(--ink); }
 [data-v='b'] .modal .menu-row { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 2px #77778b; margin-bottom: 10px; }
 [data-v='b'] .modal .menu-row:hover { background: #dedeea; }
 [data-v='b'] .modal .motion-reset { background: none; color: var(--mint-ink); }
@@ -437,8 +428,6 @@ dialog[open] { animation: dlg-in .18s var(--ease); }
 [data-v='c'] .up-track { background: #453a5e; } [data-v='c'] .up-fill { background: linear-gradient(90deg,#e8b45c,#c98a2e); }
 [data-v='c'] .varbar { background: #2c2440d9; color: #e8ddc8; border: 1px solid #57496e; }
 [data-v='c'] .varbar a.on { background: #c98a2e; color: #241a10; }
-[data-v='c'] .menu-trigger { background: #f4e9d6e0; color: #5a4020; border: 1px solid #c9ab7c; box-shadow: 0 3px 10px #00000040; }
-[data-v='c'] .menu-trigger:hover { background: #fdf3de; }
 [data-v='c'] .modal .menu-row { background: transparent; color: #3a2c22; box-shadow: inset 0 0 0 2px #c9ab7c; margin-bottom: 10px; }
 [data-v='c'] .modal .menu-row:hover { background: #efe3cb; }
 [data-v='c'] .modal .motion-reset { background: none; color: #a0681a; }
@@ -594,16 +583,22 @@ dialog[open] { animation: dlg-in .18s var(--ease); }
     </div>
     <div class="foot">
       <nav class="rail" aria-label="Home actions">
-        <button type="button" data-act="talk">Talk</button>
-        <button type="button" data-act="upload">Upload</button>
-        <button type="button" data-act="learn">Learn</button>
-      </nav>
-      <div class="menu-rail">
-        <button type="button" class="menu-trigger" id="menuTrigger" aria-label="Menu" aria-haspopup="dialog" aria-controls="menuDlg">
-          <span class="menu-icon" aria-hidden="true"><span></span><span></span><span></span></span>
-          <span class="menu-label">Menu</span>
+        <button type="button" data-act="talk">
+          <svg class="bi" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span>Talk</span>
         </button>
-      </div>
+        <button type="button" data-act="upload">
+          <svg class="bi" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg><span>Upload</span>
+        </button>
+        <button type="button" data-act="learn">
+          <svg class="bi" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg><span>Learn</span>
+        </button>
+        <button type="button" data-act="menu" id="menuTrigger" aria-haspopup="dialog" aria-controls="menuDlg">
+          <svg class="bi" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg><span>Menu</span>
+        </button>
+        <button type="button" id="iconToggle" role="switch" aria-checked="true" aria-label="Button icons" title="Icons on/off">
+          <svg class="bi" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/><line class="ic-off" x1="3" y1="21" x2="21" y2="3"/></svg>
+        </button>
+      </nav>
     </div>
   </div>
 
@@ -1136,7 +1131,17 @@ document.querySelector('[data-act="talk"]').addEventListener('click', () => { if
 document.querySelector('[data-act="upload"]').addEventListener('click', () => { if (mode !== 'read') openModal(uploadDlg); });
 document.querySelector('[data-act="learn"]').addEventListener('click', () => openModal(learnDlg));
 
-/* Menu — trigger opens the dialog, close returns focus (player pattern). */
+/* Icons — in-rail switch; off-state reparks it at the rail's head. */
+const home = document.querySelector('.home');
+home.dataset.icons = 'on';
+$('#iconToggle').addEventListener('click', e => {
+  e.stopPropagation();
+  const on = home.dataset.icons !== 'off';
+  home.dataset.icons = on ? 'off' : 'on';
+  e.currentTarget.setAttribute('aria-checked', String(!on));
+});
+
+/* Menu — trigger is a rail member; opens the dialog, close returns focus. */
 const menuTrigger = $('#menuTrigger'), menuDlg = $('#menuDlg');
 menuTrigger.addEventListener('click', () => openModal(menuDlg));
 menuDlg.addEventListener('close', () => menuTrigger.focus({ preventScroll: true }));
