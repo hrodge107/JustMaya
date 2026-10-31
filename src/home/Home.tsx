@@ -191,6 +191,16 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
     }
   }
 
+  async function uploadSample() {
+    try {
+      const res = await fetch('/sample-chapter.pdf')
+      if (!res.ok) throw new Error('missing')
+      await uploadFile(new File([await res.blob()], 'sample-chapter.pdf', { type: 'application/pdf' }))
+    } catch (err) {
+      if (!uploading.current) setUploadErr(err instanceof Error ? err.message : 'Could not load the sample chapter.')
+    }
+  }
+
   async function uploadFile(file: File) {
     if (uploading.current) return
     uploading.current = true
@@ -353,6 +363,9 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
         </label>
         <input ref={filePick} id="filePick" type="file" accept="application/pdf,.pdf" hidden
           onChange={e => { const f = e.target.files?.[0]; if (f) void uploadFile(f) }} />
+        <div className="or">or</div>
+        <button type="button" id="sampleBtn" style={{ width: '100%' }} disabled={uploadBusy}
+          onClick={() => void uploadSample()}>Use the sample chapter</button>
         {uploadErr !== '' && <p className="form-error" role="alert">{uploadErr}</p>}
         <div className="row-end"><button type="button" className="ghost" onClick={e => e.currentTarget.closest('dialog')?.close()}>Cancel</button></div>
       </div>
