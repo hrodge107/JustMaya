@@ -1,4 +1,4 @@
-# JustMaya - agent harness bootstrap (Windows PowerShell)
+# Meet Mita - agent harness bootstrap (Windows PowerShell)
 # Run: .\init.ps1
 # Optional: $env:RUN_START_COMMAND=1; .\init.ps1
 

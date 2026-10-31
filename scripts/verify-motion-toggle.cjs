@@ -7,7 +7,7 @@ const path = require('node:path')
 const os = require('node:os')
 
 const base = process.env.PLAYER_VERIFY_URL || 'http://127.0.0.1:5173'
-const output = process.env.PLAYER_VERIFY_OUTPUT || path.join(os.tmpdir(), 'justmaya-motion-toggle')
+const output = process.env.PLAYER_VERIFY_OUTPUT || path.join(os.tmpdir(), 'meet-mita-motion-toggle')
 fs.mkdirSync(output, { recursive: true })
 const evidence = []
 const errors = []
@@ -39,7 +39,7 @@ async function fixture(browser, reducedMotion) {
 }
 
 const dataMotion = page => page.evaluate(() => document.documentElement.dataset.motion)
-const stored = page => page.evaluate(() => localStorage.getItem('justmaya:motion'))
+const stored = page => page.evaluate(() => localStorage.getItem('meet-mita:motion'))
 const rest = page => page.locator('.vn-text-rest').textContent()
 
 async function openMenu(page) {

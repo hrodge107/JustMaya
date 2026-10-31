@@ -6,7 +6,7 @@ import { useSyncExternalStore } from 'react'
 export type MotionOverride = 'reduce' | 'full' | null
 
 const QUERY = '(prefers-reduced-motion: reduce)'
-const STORAGE_KEY = 'justmaya:motion'
+const STORAGE_KEY = 'meet-mita:motion'
 const media = matchMedia(QUERY)
 const listeners = new Set<() => void>()
 

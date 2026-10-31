@@ -40,7 +40,7 @@ async def fetch_summary(data_dir: Path, document_id: str, title: str, page_numbe
     url = "https://en.wikipedia.org/api/rest_v1/page/summary/" + quote(title.strip(), safe="")
     try:
         async with httpx.AsyncClient(timeout=timeout, transport=transport, follow_redirects=False,
-                                     headers={"User-Agent": "JustMaya/1.0 educational analysis"}) as client:
+                                     headers={"User-Agent": "MeetMita/1.0 educational analysis"}) as client:
             async with client.stream("GET", url) as response:
                 if response.status_code != 200:
                     return None

@@ -560,7 +560,7 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
   return <main className="player">
     <div className={`vn-frame mode-${mode}`}>
       <header className="player-header">
-        <span className="brand">JustMaya</span><h1 className="player-title">{episode.title}</h1>
+        <span className="brand">Meet Mita</span><h1 className="player-title">{episode.title}</h1>
         <div className="vn-progress">
           <span>Scene {sceneNumber} of {order.length}</span>
           <ol aria-hidden="true">{order.map((s, i) => <li key={s.sceneId} className={i + 1 < sceneNumber ? 'done' : i + 1 === sceneNumber ? 'current' : ''} />)}</ol>

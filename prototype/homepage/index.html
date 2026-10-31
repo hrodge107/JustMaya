@@ -656,9 +656,9 @@ dialog[open] { animation: dlg-in .18s var(--ease); }
 
   <dialog id="aboutDlg" aria-labelledby="aboutTitle">
     <div class="modal">
-      <h2 id="aboutTitle">About JustMaya</h2>
+      <h2 id="aboutTitle">About Meet Mita</h2>
       <p class="sr-only">about dialog</p>
-      <p class="about-p"><b>JustMaya turns a document into a playable lesson.</b> Upload a PDF and it plans a learning roadmap, generates a visual-novel episode, and checks your understanding inside the story — with a tutor you can raise your hand for at any point.</p>
+      <p class="about-p"><b>Meet Mita turns a document into a playable lesson.</b> Upload a PDF and it plans a learning roadmap, generates a visual-novel episode, and checks your understanding inside the story — with a tutor you can raise your hand for at any point.</p>
       <p class="about-p">Mita is the in-app guide: she narrates, teaches, and keeps you company between sessions.</p>
       <p class="about-p">This page is a design prototype — buttons run mock flows, nothing leaves your machine. The real build is React + Vite in front of a FastAPI pipeline.</p>
       <div class="row-end"><button type="button" class="ghost" data-close>Close</button></div>
@@ -670,7 +670,7 @@ dialog[open] { animation: dlg-in .18s var(--ease); }
 'use strict';
 /* ---------- script: ~100 looping lines ------------------------------- */
 const GREETING = [
-  { t: "Oh — hi! I'm Mita. Welcome to JustMaya.", e: 'happy' },
+  { t: "Oh — hi! I'm Mita. Welcome to Meet Mita.", e: 'happy' },
   { t: "Quick tour while you're here: this app turns documents into little playable lessons.", e: 'talking' },
   { t: "You bring a PDF — a chapter, a paper, lecture notes — and I help spin it into a visual novel you actually learn from.", e: 'talking' },
   { t: "The four buttons on the left run the whole place. Upload starts everything; Talk gets you me.", e: 'talking' },
@@ -679,7 +679,7 @@ const GREETING = [
 
 const IDLE = [
   // --- what the app does ---
-  { t: "JustMaya reads a document and sketches a lesson plan from it. Like a study guide that learned to talk back." },
+  { t: "Meet Mita reads a document and sketches a lesson plan from it. Like a study guide that learned to talk back." },
   { t: "Every upload becomes a roadmap: the big ideas, the order to learn them in, and where to check you actually got it." },
   { t: "Episodes are playable lessons. Scenes, dialogue, a character walking you through the material — that's the job." },
   { t: "Episode one is the full pipeline: scenes, choices, checkpoints, the works." },
@@ -698,7 +698,7 @@ const IDLE = [
   { t: "Wrong options at checkpoints get eliminated across attempts — a lucky guess still leaves the reasoning to you." },
   { t: "The story is a wrapper. The learning objectives underneath are the real product." },
   { t: "Everything on this page is me — the chatter, the reading, the mild impatience when a PDF sits un-uploaded." },
-  { t: "The name's JustMaya. I'm Mita. The app gets the brand, I get the personality." },
+  { t: "The name's Meet Mita — I'm Mita. The app borrows the name, I bring the personality." },
   // --- study talk ---
   { t: "Reading something twice feels productive. Recalling it once is productive. Rude, but true." },
   { t: "A question you nearly get wrong teaches more than one you ace.", e: 'thinking' },
@@ -783,8 +783,8 @@ const INTENTS = [
     "Hey! Good to see you. What can I clear up?",
     "Hi hi. Ask away — I'm in a chatty mood anyway.",
     "Hello! Fair warning: I answer app questions at length."]},
-  { re: /what (is|'s) (this|justmaya|the app)|about (this|the) app|what does (this|it|the app) do|what is justmaya/i, lines: [
-    "JustMaya turns a document into a playable visual-novel lesson. You upload a PDF, it plans a roadmap, generates an episode, and quizzes you inside the story.",
+  { re: /what (is|'s) (this|meet ?mita|the app)|about (this|the) app|what does (this|it|the app) do|what is meet mita|what is meetmita/i, lines: [
+    "Meet Mita turns a document into a playable visual-novel lesson. You upload a PDF, it plans a roadmap, generates an episode, and quizzes you inside the story.",
     "It's a study tool in a costume. PDF goes in, a little interactive lesson comes out — scenes, checkpoints, a tutor you can raise your hand for."]},
   { re: /how (does|do) (it|this|i|you)|get start|where (do i |to )?start|how to use|how does it work/i, lines: [
     "Three steps: hit Upload and give me a PDF, wait for the roadmap, then press Learn and play episode one. That's the whole loop.",
@@ -802,7 +802,7 @@ const INTENTS = [
     "Raising your hand pauses the episode and opens the tutor — it knows the document. You can ask for an explanation or a hint.",
     "Hints come in five levels: a conceptual nudge first, a parallel worked example at the far end. The point is helping you think, not thinking for you."]},
   { re: /who (are|r) (you|u)|your name|what are you|mita|maya/i, lines: [
-    "I'm Mita — the guide. JustMaya is the app; I'm the one who talks. I narrate episodes, answer these questions, and read whatever you upload.",
+    "I'm Mita — the guide the app's named for. I narrate episodes, answer these questions, and read whatever you upload. I narrate episodes, answer these questions, and read whatever you upload.",
     "Mita. Resident chatterbox, part-time instructor. In the real build I borrow a bigger stage, but I make do."]},
   { re: /free|cost|price|pay|money|subscription/i, lines: [
     "Free — it's a project build. The meter runs on whoever supplies the model API key, not on you.",
@@ -847,7 +847,7 @@ const maya = $('#maya'), dlgText = $('#dlgText'), cue = $('.dlg-cue'), dlgName =
       askInput = $('#askInput'), askSend = $('#askSend'), askNothing = $('#askNothing');
 /* Motion preference — mirrors src/motionPreference.ts: effective = device
    media query unless overridden in the menu; persisted + <html data-motion>. */
-const MOTION_KEY = 'justmaya:motion';
+const MOTION_KEY = 'meet-mita:motion';
 const motionMedia = matchMedia('(prefers-reduced-motion: reduce)');
 const motionRow = $('#motionRow'), motionReset = $('#motionReset');
 let motionOverride = (() => { try { const s = localStorage.getItem(MOTION_KEY); return s === 'reduce' || s === 'full' ? s : null } catch { return null } })();

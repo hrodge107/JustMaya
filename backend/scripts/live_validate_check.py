@@ -24,7 +24,7 @@ FIXTURE = REPO_ROOT / "docs" / "PDF_SAMPLE.pdf"
 
 
 def main() -> int:
-    data_dir = Path(tempfile.mkdtemp(prefix="justmaya-live-"))
+    data_dir = Path(tempfile.mkdtemp(prefix="meet-mita-live-"))
     with TestClient(create_app(data_dir=data_dir)) as client:
         with FIXTURE.open("rb") as handle:
             response = client.post("/api/documents", files={"file": (FIXTURE.name, handle, "application/pdf")})

@@ -109,7 +109,7 @@ export default function Review() {
 
   const assigned = new Set(roadmap?.episodes.flatMap(e => e.concepts.map(c => c.concept_id)))
   return <main className="review-root">
-    <header><p className="review-kicker">JustMaya / development tool</p><h1>Pipeline review</h1><p>Inspect saved outputs and confirm the first lesson.</p></header>
+    <header><p className="review-kicker">Meet Mita / development tool</p><h1>Pipeline review</h1><p>Inspect saved outputs and confirm the first lesson.</p></header>
     <section><h2>Document</h2><form onSubmit={upload}><label>PDF file <input name="file" type="file" accept="application/pdf" required /></label><button disabled={busy || dirty}>Upload PDF</button></form>
       <form onSubmit={e => { e.preventDefault(); history.replaceState(null, '', `?job=${encodeURIComponent(jobInput)}`); setRoadmap(null); setOutput(null); if (jobInput === jobId) void refresh(); else setJobId(jobInput) }}><label>Existing job ID <input value={jobInput} onChange={e => setJobInput(e.target.value)} /></label><button disabled={!jobInput || busy || dirty}>Load job</button></form>
       {job && <div><p>Status: <strong>{job.status}</strong> / {job.execution_state} | Tokens: {job.token_usage.total_tokens}</p>{job.error && <p role="alert">{job.error}</p>}

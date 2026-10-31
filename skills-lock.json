@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "skills": {
+    "ai-feedback-design-principles": {
+      "source": "garethmanning/education-agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/ai-learning-science/ai-feedback-design-principles/SKILL.md",
+      "computedHash": "58e6589b08a395b020006da797975979b0491a707ba560eeee55d661f5170bad"
+    },
+    "assessment-validity-checker": {
+      "source": "garethmanning/education-agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/curriculum-assessment/assessment-validity-checker/SKILL.md",
+      "computedHash": "e00d4d9b5413ee9ab4c93e2e3d584122e916a2f3106ea9a474b5da6c39ae4d16"
+    },
+    "formative-assessment-loop-designer": {
+      "source": "garethmanning/education-agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/ai-learning-science/formative-assessment-loop-designer/SKILL.md",
+      "computedHash": "aff644a242106ef45181b61c373bb93a9d024712b6350d0f607f51dc06ebc822"
+    },
+    "historical-thinking-assessment-designer": {
+      "source": "garethmanning/education-agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/historical-thinking/historical-thinking-assessment-designer/SKILL.md",
+      "computedHash": "f66e42734bc72faac50d0ab03f87d68e169c074fbbdafef18085ef2f91e0a280"
+    },
+    "intelligent-tutoring-dialogue-designer": {
+      "source": "garethmanning/education-agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/ai-learning-science/intelligent-tutoring-dialogue-designer/SKILL.md",
+      "computedHash": "fed7f9644331ee242ef01faf8259125a98776cadb3bc29bc539c7083303f0f4b"
+    },
+    "learning-progression-builder": {
+      "source": "garethmanning/education-agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/curriculum-assessment/learning-progression-builder/SKILL.md",
+      "computedHash": "d6e783ddda794ece8e5a54baa9182f7b1ddffe819424e41da836bf48f014685f"
+    },
+    "progressive-hint-ladder": {
+      "source": "garethmanning/education-agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/student-learning/progressive-hint-ladder/SKILL.md",
+      "computedHash": "2fea339ef6a487ab075a9dab40a320773406d9127a580f3eb533b0237de25e7f"
+    },
+    "udl-lesson-auditor": {
+      "source": "garethmanning/education-agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/inclusive-design/udl-lesson-auditor/SKILL.md",
+      "computedHash": "1f75f654bf65f5c2e0d648e3793e77eb98a9ce9c796d12b6eda10b8ad2244f83"
+    },
+    "unassisted-evidence-checkpoint": {
+      "source": "garethmanning/education-agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/student-learning/unassisted-evidence-checkpoint/SKILL.md",
+      "computedHash": "5621d636051a95ec75549691169070d5a7cee1587e06933b3150507c1232ec76"
+    }
+  }
+}

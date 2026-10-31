@@ -24,7 +24,7 @@ async def forbidden(*args, **kwargs):
 
 def main():
     MeteredProvider.generate_structured = forbidden
-    staged = Path(tempfile.mkdtemp(prefix="justmaya-recall-"))
+    staged = Path(tempfile.mkdtemp(prefix="meet-mita-recall-"))
     with sqlite3.connect(ROOT / "backend/data/app.db") as source, sqlite3.connect(staged / "app.db") as target:
         source.backup(target)
     with sqlite3.connect(staged / "app.db") as conn:
