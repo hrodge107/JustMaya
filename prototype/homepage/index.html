@@ -16,8 +16,11 @@
       Dialogue is player-driven: click it to complete a line, click again to
       advance; it auto-continues only after 10s of idleness.
     - Left rail beside the dialogue box: Talk / Upload / Learn.
-    - Talk -> choices [Input | Nothing]; Input answers app questions from a
-      keyword router with progressive fallback.
+    - Talk mirrors the player's raise-hand: choice strips [{input} | Nothing]
+      overlay the dimmed scene; the input strip focuses empty / sends full
+      (click/tap the strip — Enter in the field does not send, as shipped);
+      the sent question echoes as a "You" turn; Mita thinks, answers once,
+      and idle resumes — unlike raise-hand there is no follow-up compose.
     - Upload -> modal -> simulated progress (top-right) -> mascot 'reading'
       state -> dialogue beats at progress milestones -> Learn gets the result.
     - Learn lists generated episodes (Ep1 ready, 2-5 planned outlines only).
@@ -57,8 +60,10 @@ button { font: inherit; cursor: pointer; border: 0; min-height: 44px; }
 .room > * { display: none; position: absolute; }
 
 .stage { position: relative; min-height: 0; }
+.stage.ask-dim .maya { opacity: .35; }
+.stage.ask-dim::after { content: ''; position: absolute; inset: 0; z-index: 7; background: rgb(15 15 29 / .35); }
 .maya-wrap { position: absolute; inset: 0 0 -4px; display: flex; align-items: flex-end; justify-content: center; }
-.maya { position: relative; margin: 0; height: min(96%, 470px); display: grid; justify-items: center; align-items: end; transition: transform .4s var(--ease); }
+.maya { position: relative; margin: 0; height: min(96%, 470px); display: grid; justify-items: center; align-items: end; transition: opacity .25s var(--ease), transform .4s var(--ease); }
 .maya svg { height: 100%; width: auto; display: block; filter: drop-shadow(0 10px 18px rgb(0 0 0 / .22)); }
 .maya-tag { position: absolute; left: 50%; bottom: -6px; transform: translateX(-50%); padding: 3px 14px; border-radius: 999px; font-size: .78rem; font-weight: 800; white-space: nowrap; opacity: .85; }
 
@@ -81,12 +86,14 @@ button { font: inherit; cursor: pointer; border: 0; min-height: 44px; }
 .dlg-text { margin: 0; font-size: clamp(1.02rem,.94rem + .45vw,1.28rem); font-weight: 700; max-width: 72ch; overflow-wrap: anywhere; }
 .dlg-cue { position: absolute; right: 22px; bottom: 12px; font-size: 1rem; animation: cue-bob 1.2s var(--ease) infinite; pointer-events: none; }
 @keyframes cue-bob { 0%,100% { transform: translateY(0); opacity:.55 } 50% { transform: translateY(4px); opacity:1 } }
-.dlg-choices { display: flex; flex-wrap: wrap; gap: 10px; margin-top: auto; padding-top: 14px; }
-.dlg-choices button { padding: 9px 26px; font-weight: 850; border-radius: 12px; transition: transform .15s var(--ease), background .15s; }
-.dlg-choices button:active { transform: scale(.97); }
-.dlg-composer { display: flex; gap: 10px; margin-top: auto; padding-top: 14px; }
-.dlg-composer input { flex: 1; min-width: 0; min-height: 44px; padding: 8px 16px; font: inherit; font-weight: 700; border: 0; border-radius: 12px; }
-.dlg-composer button { padding: 8px 22px; font-weight: 850; border-radius: 12px; flex: none; }
+/* Talk overlay — mirrors vn-choice-overlay/vn-choices/vn-choice + vn-ask-strip:
+   strips hang in front of the dimmed scene, just above the dialogue box. */
+.ask-overlay { position: absolute; inset: 0; z-index: 8; display: flex; align-items: flex-end; justify-content: center; padding: 12px 16px 18px; }
+.ask-choices { display: grid; gap: 12px; width: min(100%, 44rem); max-height: 100%; overflow-y: auto; }
+.ask-strip, .ask-choice { position: relative; min-height: 48px; padding: 12px 18px; font-weight: 800; text-align: left; border-radius: 12px; }
+.ask-strip { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.ask-strip input { flex: 1; min-width: 0; border: 0; background: transparent; font: inherit; font-weight: 800; color: inherit; outline: none; }
+.ask-strip button { flex: none; min-height: 38px; padding: 6px 18px; border-radius: 10px; font-weight: 850; }
 
 /* Top-right upload progress chip (below the Menu trigger on desktop). */
 .upload-chip { position: fixed; top: 16px; right: 16px; z-index: 20; width: min(280px, 70vw); padding: 12px 16px 14px; border-radius: 14px; font-size: .82rem; font-weight: 800; }
@@ -278,9 +285,11 @@ dialog[open] { animation: dlg-in .18s var(--ease); }
   backdrop-filter: blur(3px); box-shadow: 0 8px 24px #a34a6a33; }
 [data-v='a'] .dlg-name { background: linear-gradient(#ffcfe0, #ffb8d1); color: #a03a5e; border-radius: 999px; border: 2px solid #ffffffd9; box-shadow: 0 3px 8px #a34a6a2e; }
 [data-v='a'] .dlg-cue { color: #a03a5e; }
-[data-v='a'] .dlg-choices button, [data-v='a'] .dlg-composer button { background: #fff; color: #b34a72; border: 2px solid #ffb8d1; }
-[data-v='a'] .dlg-choices button:hover, [data-v='a'] .dlg-composer button:hover { background: #fff0f6; }
-[data-v='a'] .dlg-composer input { background: #ffffffe8; color: #5a2c40; border: 2px solid #ffb8d1; }
+[data-v='a'] .ask-strip, [data-v='a'] .ask-choice { background: #fff6f9f2; color: #5a2c40; border: 2px solid #ffb8d1; }
+[data-v='a'] .ask-strip:hover, [data-v='a'] .ask-choice:hover { background: #fff; border-color: #ff9ec2; }
+[data-v='a'] .ask-strip input { color: #5a2c40; }
+[data-v='a'] .ask-strip input::placeholder { color: #c98aa3; }
+[data-v='a'] .ask-strip button { background: #ff8fb8; color: #fff; }
 [data-v='a'] .rail button { background: #ffffffb8; color: #a03a5e; border: 2px solid #ffc4d9; border-radius: 10px; box-shadow: 0 2px 6px #a34a6a26; }
 [data-v='a'] .rail button:hover { background: #fff; }
 [data-v='a'] .rail button[data-act='talk'] { background: #ff8fb8; color: #fff; border-color: #fff; }
@@ -326,11 +335,12 @@ dialog[open] { animation: dlg-in .18s var(--ease); }
 [data-v='b'] .dlg { border-radius: 24px; background: #f7f7faf2; color: var(--ink); box-shadow: 0 -6px 30px #30304c26; }
 [data-v='b'] .dlg-name { background: #626281; color: #fff; border: 2px solid #e1e1ed; border-radius: 22px; }
 [data-v='b'] .dlg-cue { color: var(--mint-ink); }
-[data-v='b'] .dlg-choices button { position: relative; background: var(--paper); color: var(--ink); border: 2px solid #626281; border-radius: 2px; padding-right: 32px; }
-[data-v='b'] .dlg-choices button::after { content: ''; position: absolute; right: 0; bottom: 0; width: 14px; height: 14px; background: var(--mint-ink); clip-path: polygon(100% 0, 100% 100%, 0 100%); }
-[data-v='b'] .dlg-choices button:hover { background: var(--wash); border-color: var(--mint-ink); }
-[data-v='b'] .dlg-composer input { background: var(--wash); color: var(--ink); box-shadow: inset 0 0 0 2px #626281; }
-[data-v='b'] .dlg-composer button { background: var(--mint-ink); color: var(--paper); }
+[data-v='b'] .ask-strip, [data-v='b'] .ask-choice { background: var(--paper); color: var(--ink); border: 2px solid #626281; border-radius: 2px; padding-right: 32px; }
+[data-v='b'] .ask-strip::after, [data-v='b'] .ask-choice::after { content: ''; position: absolute; right: 0; bottom: 0; width: 14px; height: 14px; background: var(--mint-ink); clip-path: polygon(100% 0, 100% 100%, 0 100%); }
+[data-v='b'] .ask-strip:hover, [data-v='b'] .ask-choice:hover { background: var(--wash); border-color: var(--mint-ink); }
+[data-v='b'] .ask-strip input { color: var(--ink); }
+[data-v='b'] .ask-strip input::placeholder { color: #77778b; }
+[data-v='b'] .ask-strip button { background: var(--mint-ink); color: var(--paper); border-radius: 2px; }
 [data-v='b'] .rail button { background: transparent; color: var(--paper); box-shadow: inset 0 0 0 2px #77778b; border-radius: 12px; }
 [data-v='b'] .rail button:hover { background: #ffffff14; }
 [data-v='b'] .rail button[data-act='talk'] { background: var(--mint-ink); box-shadow: none; }
@@ -401,10 +411,11 @@ dialog[open] { animation: dlg-in .18s var(--ease); }
 [data-v='c'] .dlg::before { left: 12%; } [data-v='c'] .dlg::after { right: 12%; transform: rotate(2deg); }
 [data-v='c'] .dlg-name { background: #e8d3ae; color: #7a4a12; border-radius: 6px 6px 0 0; border: 2px solid #d9c6a4; border-bottom: 0; top: -19px; }
 [data-v='c'] .dlg-cue { color: #a0681a; }
-[data-v='c'] .dlg-choices button { background: #3a2c22; color: #f4e9d6; border-radius: 8px; }
-[data-v='c'] .dlg-choices button:hover { background: #543e2e; }
-[data-v='c'] .dlg-composer input { background: #fffcf4; color: #3a2c22; border: 2px solid #d9c6a4; }
-[data-v='c'] .dlg-composer button { background: #c98a2e; color: #241a10; }
+[data-v='c'] .ask-strip, [data-v='c'] .ask-choice { background: #f4e9d6f2; color: #3a2c22; border: 2px solid #c9ab7c; border-radius: 8px; }
+[data-v='c'] .ask-strip:hover, [data-v='c'] .ask-choice:hover { background: #fdf3de; border-color: #c98a2e; }
+[data-v='c'] .ask-strip input { color: #3a2c22; }
+[data-v='c'] .ask-strip input::placeholder { color: #a68c64; }
+[data-v='c'] .ask-strip button { background: #c98a2e; color: #241a10; }
 [data-v='c'] .rail button { background: #f4e9d6e0; color: #5a4020; border: 1px solid #c9ab7c; border-radius: 8px; box-shadow: 0 3px 10px #00000040; }
 [data-v='c'] .rail button:hover { background: #fdf3de; }
 [data-v='c'] .rail button[data-act='talk'] { background: #c98a2e; color: #241a10; border-color: #e8b45c; }
@@ -460,7 +471,17 @@ dialog[open] { animation: dlg-in .18s var(--ease); }
     </button>
   </div>
 
-  <div class="stage">
+  <div class="stage" id="stage">
+    <div class="ask-overlay" id="askOverlay" hidden>
+      <div class="ask-choices">
+        <div class="ask-strip" id="askStrip" role="button" tabindex="0"
+             aria-label="Type a message, then select this strip to send it">
+          <input id="askInput" type="text" autocomplete="off" maxlength="240" placeholder="Type your question" aria-label="Your message" enterkeyhint="done">
+          <button type="button" id="askSend" hidden>Send</button>
+        </div>
+        <button type="button" class="ask-choice" id="askNothing">Nothing</button>
+      </div>
+    </div>
     <div class="maya-wrap">
       <figure class="maya" id="maya" data-state="idle" aria-label="Mita, your guide">
         <svg class="maya-svg" viewBox="0 0 320 400" aria-hidden="true">
@@ -563,14 +584,9 @@ dialog[open] { animation: dlg-in .18s var(--ease); }
       <button type="button" data-act="learn">Learn</button>
     </nav>
     <div class="dlg" id="dlg" role="button" tabindex="0" aria-label="Dialogue — click to advance">
-      <span class="dlg-name">Mita</span>
+      <span class="dlg-name" id="dlgName">Mita</span>
       <div class="dlg-body">
         <p class="dlg-text" id="dlgText" aria-live="polite"></p>
-        <div class="dlg-choices" id="dlgChoices" hidden></div>
-        <form class="dlg-composer" id="composer" hidden>
-          <input id="composerInput" type="text" autocomplete="off" maxlength="240" placeholder="Ask me anything about the app…" aria-label="Ask Mita about the app">
-          <button type="submit">Ask</button>
-        </form>
       </div>
       <span class="dlg-cue" aria-hidden="true">▾</span>
     </div>
@@ -803,13 +819,7 @@ const INTENTS = [
 const FALLBACKS = [
   "Hmm, I didn't quite catch that — try rephrasing?",
   "Let me try differently. Are you asking about uploads, episodes, checkpoints, or the tutor?",
-  "Still not landing — try one of the topic chips, or the About button covers the whole thing in a paragraph.",
-];
-const FALLBACK_TOPICS = [
-  { label: 'Uploads', q: 'how does upload work' },
-  { label: 'Episodes', q: 'what are episodes' },
-  { label: 'Checkpoints', q: 'what are checkpoints' },
-  { label: 'The tutor', q: 'how does the tutor work' },
+  "Still not landing — the About row in Menu covers the whole thing in a paragraph.",
 ];
 const TALK_END = [
   { t: "Okay — I'll keep the seat warm.", e: 'happy' },
@@ -820,10 +830,11 @@ const SAMPLE_NAME = 'rivers-and-cities-ch1.pdf';
 
 /* ---------- engine ---------------------------------------------------- */
 const $ = s => document.querySelector(s);
-const maya = $('#maya'), dlgText = $('#dlgText'), cue = $('.dlg-cue'),
-      dlgChoices = $('#dlgChoices'), composer = $('#composer'), composerInput = $('#composerInput'),
+const maya = $('#maya'), dlgText = $('#dlgText'), cue = $('.dlg-cue'), dlgName = $('#dlgName'),
       dlg = $('#dlg'), chip = $('#uploadChip'), upFill = $('#upFill'), upPct = $('#upPct'),
-      upStage = $('#upStage'), upName = $('#upName');
+      upStage = $('#upStage'), upName = $('#upName'), stage = $('#stage'),
+      askOverlay = $('#askOverlay'), askStrip = $('#askStrip'),
+      askInput = $('#askInput'), askSend = $('#askSend'), askNothing = $('#askNothing');
 /* Motion preference — mirrors src/motionPreference.ts: effective = device
    media query unless overridden in the menu; persisted + <html data-motion>. */
 const MOTION_KEY = 'justmaya:motion';
@@ -870,11 +881,12 @@ function finishType() {
   if (sayResolve) { const r = sayResolve; sayResolve = null; r(); }
 }
 
-function say(line, emotion) {
+function say(line, emotion, speaker) {
   const t = seq;
   const text = typeof line === 'string' ? line : line.t;
   const e = emotion || line.e || 'talking';
   setState(e);
+  dlgName.textContent = speaker || 'Mita';
   fullText = text;
   finishType();              // clear any previous typer deterministically
   return new Promise(resolve => {
@@ -929,92 +941,82 @@ async function ambient(t) {
   }
 }
 
-/* ---------- choices & composer ---------------------------------------- */
-function showChips(list) {
-  cue.hidden = true;         // the player acts through chips, not the ▾
-  dlgChoices.innerHTML = '';
-  list.forEach(c => {
-    const b = document.createElement('button');
-    b.type = 'button'; b.textContent = c.label;
-    b.addEventListener('click', ev => { ev.stopPropagation(); c.fn(); });
-    dlgChoices.appendChild(b);
-  });
-  dlgChoices.hidden = false;
-}
-function hideChips() { dlgChoices.hidden = true; dlgChoices.innerHTML = ''; }
-function showComposer() {
-  composer.hidden = false; composerInput.value = '';
-  setTimeout(() => composerInput.focus(), 30);
-}
-function hideComposer() { composer.hidden = true; }
-
-/* ---------- Talk ------------------------------------------------------- */
+/* ---------- Talk (mirrors the player's raise-hand flow) -------------------
+   Overlay strips [{input} | Nothing] on the dimmed scene; the sent question
+   echoes as a "You" turn; Mita thinks, answers once, and idle resumes —
+   no follow-up compose like raise-hand has. */
 function route(q) {
-  for (const it of INTENTS) if (it.re.test(q)) { misses = 0; return { text: pick(it.lines) }; }
+  for (const it of INTENTS) if (it.re.test(q)) { misses = 0; return { text: pick(it.lines), fallback: false }; }
   misses++;
-  if (misses === 2) return { text: FALLBACKS[1], topics: true };
-  if (misses >= 3) { misses = 1; return { text: FALLBACKS[2], topics: true }; }
-  return { text: FALLBACKS[0] };
+  if (misses === 2) return { text: FALLBACKS[1], fallback: true };
+  if (misses >= 3) { misses = 1; return { text: FALLBACKS[2], fallback: true }; }
+  return { text: FALLBACKS[0], fallback: true };
+}
+
+function openAsk() {
+  askInput.value = '';
+  askSend.hidden = true;
+  askStrip.setAttribute('aria-label', 'Type a message, then select this strip to send it');
+  stage.classList.add('ask-dim');     // scene dims while the strips are up
+  askOverlay.hidden = false;
+  askInput.focus({ preventScroll: true });
+}
+function closeAsk() {
+  askOverlay.hidden = true;
+  stage.classList.remove('ask-dim');  // undim, as the player does once a send lands
 }
 
 async function startTalk() {
   if (mode === 'read') return;
   seq++; const t = seq; mode = 'talk'; misses = 0;
-  hideComposer(); hideChips();
   await say(pick(TALK_INTRO), 'listening');
   if (t !== seq) return;
   setState('listening');
-  offerChoices();
+  openAsk();
 }
 
-function offerChoices() {
-  showChips([
-    { label: 'Input', fn: () => { hideChips(); showComposer(); setState('listening'); } },
-    { label: 'Nothing', fn: endTalk },
-  ]);
+// Shipped strip semantics: empty strip focuses the input, non-empty sends.
+// Enter inside the field does not send — activation is click/tap on the strip.
+function activateAsk() {
+  if (mode !== 'talk') return;
+  if (askInput.value.trim()) void sendAsk();
+  else askInput.focus({ preventScroll: true });
 }
-
-async function endTalk() {
+askStrip.addEventListener('click', e => { if (e.target === askInput || e.target === askSend) return; activateAsk(); });
+askStrip.addEventListener('keydown', e => {
+  if (e.target !== askStrip) return;
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activateAsk(); }
+});
+askInput.addEventListener('input', () => { askSend.hidden = !askInput.value.trim(); });
+askSend.addEventListener('click', e => { e.stopPropagation(); activateAsk(); });
+askNothing.addEventListener('click', async () => {
+  closeAsk();
   seq++; const t = seq; mode = 'idle';
-  hideComposer(); hideChips();
   await say(pick(TALK_END));
   if (t !== seq) return;
   setState('idle');
   ambient(seq);
-}
-
-composer.addEventListener('click', e => e.stopPropagation());
-composer.addEventListener('keydown', e => e.stopPropagation());
-dlgChoices.addEventListener('keydown', e => e.stopPropagation());
-composer.addEventListener('submit', async e => {
-  e.preventDefault(); e.stopPropagation();
-  const q = composerInput.value.trim();
-  if (!q || mode !== 'talk') return;
-  hideComposer();
-  const t = seq;
-  setState('thinking');
-  await wait(reduced ? 100 : 550);
-  if (t !== seq) return;
-  const a = route(q);
-  await say(a.text, a.topics ? 'confused' : 'talking');
-  if (t !== seq) return;
-  if (a.topics) {
-    showChips([
-      ...FALLBACK_TOPICS.map(tp => ({ label: tp.label, fn: () => { hideChips(); askCanned(tp.q); } })),
-      { label: 'Never mind', fn: endTalk },
-    ]);
-  } else offerChoices();
 });
 
-async function askCanned(q) {
+async function sendAsk() {
+  const q = askInput.value.trim();
+  if (!q || mode !== 'talk') return;
+  closeAsk();
   const t = seq;
+  await say('"' + q + '"', 'listening', 'You');   // sent question echoes as a You turn
+  if (t !== seq) return;
+  await wait(reduced ? 120 : 500);
+  if (t !== seq) return;
   setState('thinking');
-  await wait(reduced ? 100 : 450);
+  await wait(reduced ? 120 : 650);
   if (t !== seq) return;
   const a = route(q);
-  await say(a.text);
+  await say(a.text, a.fallback ? 'confused' : 'talking', 'Mita');
   if (t !== seq) return;
-  offerChoices();
+  // Talk ends here — no second compose. Idle picks up where it left off.
+  mode = 'idle';
+  setState('idle');
+  ambient(seq);
 }
 
 /* ---------- Upload ------------------------------------------------------ */
@@ -1046,7 +1048,7 @@ function progressTo(target, t) {
 async function startUpload(name) {
   uploadDlg.close();
   seq++; const t = seq; mode = 'read'; misses = 0;
-  hideComposer(); hideChips();
+  closeAsk();
   upFill.style.width = '0%'; upPct.textContent = '0%';
   upName.textContent = 'Reading ' + name;
   chip.hidden = false;
@@ -1086,7 +1088,7 @@ async function openModal(d) {
   // During a read the upload loop owns the stage: show the modal on top and
   // let the beats keep typing behind it. Otherwise cancel ambient/talk.
   const ambientActive = mode !== 'read';
-  if (ambientActive) { seq++; mode = 'modal'; hideComposer(); hideChips(); }
+  if (ambientActive) { seq++; mode = 'modal'; closeAsk(); }
   const t = seq;
   d.showModal();
   await new Promise(res => d.addEventListener('close', res, { once: true }));
