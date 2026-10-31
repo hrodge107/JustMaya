@@ -41,6 +41,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 const id = (value: string) => encodeURIComponent(value)
 export const api = {
   upload: (file: File) => { const body = new FormData(); body.append('file', file); return request<{ job_id: string; document_id: string }>('/api/documents', { method: 'POST', body }) },
+  documents: () => request<{ documents: { document_id: string; filename: string; page_count: number; created_at: string }[] }>('/api/documents'),
   job: (job: string) => request<Job>(`/api/jobs/${id(job)}`),
   run: (job: string) => request<Job>(`/api/jobs/${id(job)}/run`, { method: 'POST' }),
   roadmap: (document: string) => request<Roadmap>(`/api/documents/${id(document)}/curriculum`),

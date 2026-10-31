@@ -108,3 +108,6 @@ body:has(.learner) { margin: 0; background: #e9e9f1; color: #30304c; color-schem
 }
 /* Mirrors the effective motion setting (device or the player's menu override). */
 :root[data-motion='reduce'] .learner * { transition: none !important; animation: none !important; }
+
+.learner .document-list { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 8px; }
+.learner .document-list button { width: 100%; text-align: left; }
