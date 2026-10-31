@@ -205,7 +205,7 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
     }
   }
 
-  // The sample chapter runs a client-side mock of the whole pipeline — the
+  // The sample chapter runs a client-side mock of the whole pipeline. The
   // narrated stages and the ready card + play offer are identical to a real
   // run, but no upload or job ever leaves the browser.
   function useSample() {
@@ -232,7 +232,7 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
       const episode = episodeId ? await api.episode(episodeId) : null
       if (token !== jobGen.current) return
       card = { episodeId: episode?.episodeId ?? episodeId, title: episode?.title ?? '', docName: MOCK_DOC }
-    } catch { /* backend offline — the card still persists; play retries the resolve */ }
+    } catch { /* backend offline; the card still persists, play retries the resolve */ }
     setChip(c => ({ ...c, stage: 'episode ready', pct: 100 }))
     setReadyCard(card)
     void engine.endRead(readDoneTurns(MOCK_DOC, card.title), true)
@@ -380,7 +380,7 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
       </div>}
       {snap.offerOpen && <div className="ask-overlay vn-ask-overlay" role="group" aria-label="Play your finished episode now?">
         <div className="vn-choices">
-          <button type="button" className="vn-choice" onClick={() => void acceptOffer()}>Yes — play it</button>
+          <button type="button" className="vn-choice" onClick={() => void acceptOffer()}>Yes, play it</button>
           <button type="button" className="vn-choice" onClick={() => void engine.offerNo()}>Not now</button>
         </div>
       </div>}
@@ -426,15 +426,15 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
     </div>
 
     {chip.visible && (readyCard
-      // The finished episode persists as the same chip, now a playable card —
-      // this is the "access it later" surface Mita's No answer points at.
+      // The finished episode persists as the same chip, now a playable card.
+      // This is the "access it later" surface Mita's No answer points at.
       ? <div className="upload-chip ready" role="button" tabIndex={0}
           aria-label={`Episode ready: ${readyCard.title || readyCard.docName}. Activate to play it.`}
           onClick={() => void playReady()}
           onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); void playReady() } }}>
           <span className="up-name">{readyCard.title || readyCard.docName}</span>
           <div className="up-track" aria-hidden="true"><i className="up-fill" style={{ width: '100%' }} /></div>
-          <div className="up-foot"><span>{playingId === 'ready-card' ? 'Starting…' : 'Episode ready — tap to play'}</span><span aria-hidden="true">▸</span></div>
+          <div className="up-foot"><span>{playingId === 'ready-card' ? 'Starting…' : 'Episode ready. Tap to play'}</span><span aria-hidden="true">▸</span></div>
           {readyErr !== '' && <p className="up-err" role="alert">{readyErr}</p>}
         </div>
       : <div className="upload-chip" role="status" data-error={chip.error ? '' : undefined}>
