@@ -119,7 +119,7 @@ class MetaProvider:
         settings: Settings,
         transport: httpx.AsyncBaseTransport | None = None,
         max_attempts: int = _MAX_ATTEMPTS,
-        timeout: float = 60.0,
+        timeout: float | None = None,
     ):
         base = settings.meta_base_url.rstrip("/")
         self._url = f"{base}/chat/completions"
@@ -128,7 +128,7 @@ class MetaProvider:
         self._model = settings.meta_model
         self._transport = transport
         self._max_attempts = max_attempts
-        self._timeout = timeout
+        self._timeout = timeout if timeout is not None else settings.model_request_timeout_seconds
 
     async def generate_text(
         self,
