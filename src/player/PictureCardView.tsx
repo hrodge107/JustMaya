@@ -1,14 +1,14 @@
 import { useState, type RefObject } from 'react'
 import type { PictureCard } from '../learnerApi'
 
-export type EncounteredPictureNote = { sceneId: string; card: PictureCard }
+export type EncounteredPictureNote = { key: string; sceneId: string; card: PictureCard }
 export type PictureNoteView = 'gallery' | 'detail' | null
 
 function PictureNoteImage({ card, className, decorative = false }: { card: PictureCard; className?: string; decorative?: boolean }) {
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   return <span className={`vn-picture-image${className ? ` ${className}` : ''}`}>
     {status !== 'ready' && <span className="vn-picture-unavailable" role="status">{status === 'error' ? 'Image unavailable' : 'Loading image…'}</span>}
-    {status !== 'error' && <img width="320" height="200" loading="lazy" src={card.image.imageUrl} alt={decorative ? '' : card.title} onLoad={() => setStatus('ready')} onError={() => setStatus('error')} />}
+    {status !== 'error' && <img width="320" height="200" loading="lazy" src={card.image.imageUrl} alt={decorative ? '' : (card.image.alt || card.title)} onLoad={() => setStatus('ready')} onError={() => setStatus('error')} />}
   </span>
 }
 
@@ -56,7 +56,7 @@ export function PictureNotesDialog({ dialogRef, title, view, notes, selected, fr
   }}>
     <div className="vn-menu-heading"><h2 id="picture-dialog-title">{view === 'gallery' ? 'Gallery' : title}</h2><button ref={closeRef} type="button" className="vn-quiet" onClick={() => dialogRef.current?.close()}>Close</button></div>
     {view === 'gallery' && <div ref={galleryScrollRef} className="vn-picture-gallery">
-      {notes.length ? <div className="vn-picture-grid">{notes.map(note => <button ref={note.sceneId === selected?.sceneId ? returnTargetRef : null} type="button" className="vn-picture-front" key={note.sceneId} aria-haspopup="dialog" aria-label={`Open ${note.card.title}`} onClick={event => onSelect(note, event.currentTarget)}>
+      {notes.length ? <div className="vn-picture-grid">{notes.map(note => <button ref={note.key === selected?.key ? returnTargetRef : null} type="button" className="vn-picture-front" key={note.key} aria-haspopup="dialog" aria-label={`Open ${note.card.title}`} onClick={event => onSelect(note, event.currentTarget)}>
         <PictureNoteImage card={note.card} decorative /><span className="vn-picture-title">{note.card.title}</span>
       </button>)}</div> : <div className="vn-picture-empty"><p>No picture notes yet.</p><p>Notes collect here as you reach them in the lesson.</p></div>}
     </div>}
@@ -68,7 +68,7 @@ export function PictureNotesDialog({ dialogRef, title, view, notes, selected, fr
         const [start, end] = range.split(':')
         return <li key={range}><span>Page {start}{start !== end ? `–${end}` : ''}</span></li>
       })}</ul>
-      <h3>Image credit</h3><p><a href={selected.card.image.filePageUrl} target="_blank" rel="noreferrer">{selected.card.image.title}</a> by {selected.card.image.author}, <a href={selected.card.image.licenseUrl} target="_blank" rel="noreferrer">{selected.card.image.license}</a>. {selected.card.image.changes === 'None' ? 'No changes.' : selected.card.image.changes}</p>
+      <h3>Image credit</h3><p>{selected.card.image.credit}</p>
     </div>}
   </dialog>
 }

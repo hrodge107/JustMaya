@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     meta_api_key: SecretStr
     meta_base_url: str = "https://api.meta.ai/v1"
     meta_model: str = "muse-spark-1.3-contributor"
+    meta_image_model: str = "muse-image-1.0"
     model_request_timeout_seconds: float = 180.0
 
     data_dir: Path = DEFAULT_DATA_DIR
@@ -78,6 +79,11 @@ class Settings(BaseSettings):
 
     # B03 tutor: short answers; reasoning burns budget before content.
     tutor_max_tokens: int = 8_000
+
+    # Episode picture cards: target range fed to the nomination prompt; the
+    # max is also the hard cap on generated images per episode.
+    picture_card_min: int = 4
+    picture_card_max: int = 10
 
 
 def load_settings() -> Settings:

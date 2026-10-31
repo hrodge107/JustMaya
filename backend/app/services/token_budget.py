@@ -15,6 +15,7 @@ from app.config import Settings
 from app.services.model_provider import (
     GenerationProvider,
     GenerationResult,
+    ImageResult,
     ModelProviderError,
 )
 
@@ -195,6 +196,20 @@ class MeteredProvider:
         )
         record_usage(self._data_dir, job_id, stage, result.usage)
         return result.data
+
+    async def generate_image(
+        self,
+        *,
+        job_id: str,
+        stage: str,
+        prompt: str,
+        user: str = "",
+    ) -> ImageResult:
+        # No text-token gate: image spend is a different unit; usage is still
+        # recorded so per-stage cost stays observable in token_usage.
+        result = await self._provider.generate_image(prompt=prompt, user=user)
+        record_usage(self._data_dir, job_id, stage, result.usage)
+        return result
 
     async def _gate(
         self,

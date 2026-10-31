@@ -174,7 +174,7 @@ def _interpret(
             + settings.roadmap_interaction_minutes
         ),
         startSceneId=generated.scenes[0].sceneId,
-        scenes=[scene.model_copy(update={"pictureCard": None}) for scene in generated.scenes],
+        scenes=[scene.model_copy(update={"pictureCard": None, "pictureCards": []}) for scene in generated.scenes],
         status="draft",
     )
     violations = validate_script(

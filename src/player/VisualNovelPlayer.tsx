@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { api, ApiError, type AnswerRequest, type AwaitingKind, type Emotion, type Episode, type HelpMode, type Scene, type Session } from '../learnerApi'
+import { api, ApiError, type AnswerRequest, type AwaitingKind, type Emotion, type Episode, type HelpMode, type PictureCard, type Scene, type Session } from '../learnerApi'
 import { useReducedMotion } from '../motionPreference'
 import BacklogPanel, { type BacklogEntry } from './BacklogPanel'
 import MascotStage from './MascotStage'
@@ -32,6 +32,40 @@ function happyLinesReached(order: Scene[], session: Session): number {
     if (s.sceneId === session.sceneId) return n
   }
   return n
+}
+
+// A picture card surfaces at its anchor line and stays for PICTURE_TTL turns;
+// leaving playback (checkpoint, raise hand, scene end) or the learner's
+// dismiss removes it. Encountered cards rest in the Gallery either way.
+const PICTURE_TTL = 3
+
+function sceneCards(scene: Scene | undefined | null): PictureCard[] {
+  if (!scene) return []
+  return scene.pictureCards?.length ? scene.pictureCards : scene.pictureCard ? [scene.pictureCard] : []
+}
+
+function cardKey(sceneId: string, card: PictureCard): string {
+  return `${sceneId}:${card.lineId ?? ''}`
+}
+
+function cardAnchor(scene: Scene, card: PictureCard): number {
+  const i = scene.dialogue.findIndex(l => l.lineId === card.lineId)
+  return i < 0 ? 0 : i
+}
+
+// Cards whose anchor line has been reached and whose TTL has not lapsed.
+function liveCards(scene: Scene, dialogueIndex: number): PictureCard[] {
+  return sceneCards(scene).filter(card => {
+    const anchor = cardAnchor(scene, card)
+    return dialogueIndex >= anchor && dialogueIndex - anchor < PICTURE_TTL
+  })
+}
+
+// Cards the learner has reached so far — Gallery collects by anchor, not TTL.
+function encounteredCards(scene: Scene, dialogueIndex: number): EncounteredPictureNote[] {
+  return sceneCards(scene)
+    .filter(card => cardAnchor(scene, card) <= dialogueIndex)
+    .map(card => ({ key: cardKey(scene.sceneId, card), sceneId: scene.sceneId, card }))
 }
 
 // The backlog is a projection over the authoritative session plus episode:
@@ -199,7 +233,10 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
             }
           }
           const initialScene = e.scenes.find(item => item.sceneId === s.sceneId)
-          if (s.mode === 'playing' && initialScene?.pictureCard) setPictureNotes([{ sceneId: initialScene.sceneId, card: initialScene.pictureCard }])
+          if (initialScene) {
+            if (s.mode === 'playing') setPictureNotes(encounteredCards(initialScene, s.dialogueIndex))
+            else setDismissedPictures(liveCards(initialScene, s.dialogueIndex).map(card => cardKey(initialScene.sceneId, card)))
+          }
           setSession(s); setEpisode(e)
         }
       } catch (err) {
@@ -371,7 +408,15 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
     if (increment > 0) setNodTrigger(n => n + increment)
     observedNods.current = count
     const reachedScene = order.find(item => item.sceneId === next.sceneId)
-    if (next.mode === 'playing' && reachedScene?.pictureCard) setPictureNotes(current => current.some(item => item.sceneId === reachedScene.sceneId) ? current : [...current, { sceneId: reachedScene.sceneId, card: reachedScene.pictureCard! }])
+    if (reachedScene && next.mode === 'playing') {
+      const reached = encounteredCards(reachedScene, next.dialogueIndex)
+      if (reached.length) setPictureNotes(current => [...current, ...reached.filter(note => !current.some(item => item.key === note.key))])
+    } else if (reachedScene) {
+      // Leaving playback removes any showing card (raise hand, checkpoint);
+      // the card rests in the Gallery.
+      const leaving = liveCards(reachedScene, next.dialogueIndex).map(card => cardKey(reachedScene.sceneId, card))
+      if (leaving.length) setDismissedPictures(current => [...new Set([...current, ...leaving])])
+    }
     setSession(next)
   }
 
@@ -623,9 +668,12 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
       <section className={`vn-scene${question || inQuestion ? ' vn-checkpoint-scene' : ''}${inQuestion && askPhase !== 'compose' ? ' vn-undim' : ''}`} aria-label="Scene">
         <div className="vn-stage">
           {mascot}
-          {mode === 'playing' && scene.pictureCard && !dismissedPictures.includes(scene.sceneId) && <PictureCardView key={scene.sceneId} note={{ sceneId: scene.sceneId, card: scene.pictureCard }}
-            onOpen={trigger => openPictureDetail({ sceneId: scene.sceneId, card: scene.pictureCard! }, false, trigger)}
-            onDismiss={() => setDismissedPictures(current => current.includes(scene.sceneId) ? current : [...current, scene.sceneId])} />}
+          {mode === 'playing' && liveCards(scene, session.dialogueIndex).filter(card => !dismissedPictures.includes(cardKey(scene.sceneId, card))).map(card => {
+            const key = cardKey(scene.sceneId, card)
+            return <PictureCardView key={key} note={{ key, sceneId: scene.sceneId, card }}
+              onOpen={trigger => openPictureDetail({ key, sceneId: scene.sceneId, card }, false, trigger)}
+              onDismiss={() => setDismissedPictures(current => current.includes(key) ? current : [...current, key])} />
+          })}
           {mode === 'completed' && <div className="vn-prompt"><p className="vn-prompt-label">Episode complete</p><p className="vn-prompt-text">{episode.title}</p></div>}
         </div>
         {question && <RecallCheckpoint key={scene.sceneId} question={question} state={checkpoint ?? null} pending={pending}

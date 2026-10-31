@@ -91,22 +91,19 @@ class GeneratedRecallQuestion(RecallQuestion):
     options: list[GeneratedAnswerOption] = Field(min_length=3, max_length=3)
 
 
-class PictureCredit(BaseModel):
+class PictureImage(BaseModel):
     imageUrl: str
-    filePageUrl: str
-    title: str
-    author: str
-    license: str
-    licenseUrl: str
-    retrievedAt: str
-    changes: str = "None"
+    credit: str = "Illustration"
+    alt: str = ""
 
 
 class PictureCard(BaseModel):
     title: str
     description: str
     sourceRefs: list[EpisodeSourceRef] = Field(min_length=1)
-    image: PictureCredit
+    image: PictureImage
+    # Anchor dialogue turn; absent on legacy payloads (shown from scene start).
+    lineId: str = ""
 
 
 class EpisodeScene(BaseModel):
@@ -115,7 +112,9 @@ class EpisodeScene(BaseModel):
     dialogue: list[DialogueLine] = []
     question: RecallQuestion | None = None
     nextSceneId: str | None = None
+    # Parse-tolerated legacy field; new cards land in pictureCards.
     pictureCard: PictureCard | None = None
+    pictureCards: list[PictureCard] = []
 
 
 class GeneratedEpisodeScene(EpisodeScene):

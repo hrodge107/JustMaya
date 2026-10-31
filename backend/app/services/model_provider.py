@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 import random
 from dataclasses import dataclass, field
@@ -18,6 +19,13 @@ class GenerationResult:
 @dataclass
 class StructuredResult:
     data: dict[str, Any]
+    usage: dict[str, int] = field(default_factory=dict)
+
+
+@dataclass
+class ImageResult:
+    image: bytes
+    revised_prompt: str | None = None
     usage: dict[str, int] = field(default_factory=dict)
 
 
@@ -48,6 +56,13 @@ class GenerationProvider(Protocol):
         max_tokens: int | None = None,
         cache_key: str | None = None,
     ) -> StructuredResult: ...
+
+    async def generate_image(
+        self,
+        *,
+        prompt: str,
+        user: str = "",
+    ) -> ImageResult: ...
 
     async def count_input_tokens(self, *, system: str, user: str) -> int: ...
 
@@ -124,8 +139,10 @@ class MetaProvider:
         base = settings.meta_base_url.rstrip("/")
         self._url = f"{base}/chat/completions"
         self._count_url = f"{base}/responses/input_tokens"
+        self._images_url = f"{base}/images/generations"
         self._key = settings.meta_api_key.get_secret_value()
         self._model = settings.meta_model
+        self._image_model = settings.meta_image_model
         self._transport = transport
         self._max_attempts = max_attempts
         self._timeout = timeout if timeout is not None else settings.model_request_timeout_seconds
@@ -170,6 +187,55 @@ class MetaProvider:
             ) from exc
         _validate(data, schema)
         return StructuredResult(data=data, usage=body.get("usage", {}))
+
+    async def generate_image(
+        self,
+        *,
+        prompt: str,
+        user: str = "",
+    ) -> ImageResult:
+        body = await self._request(
+            self._images_url,
+            {
+                "model": self._image_model,
+                "prompt": prompt,
+                "n": 1,
+                "size": "1024x640",
+                "output_format": "webp",
+                "response_format": "b64_json",
+                # ponytail: single pass — note-card art is decorative; the
+                # iterative "high" pass isn't worth the added latency/spend
+                "reasoning_strength": "low",
+                "tool_enablement": {
+                    "enable_image_search": False,
+                    "enable_web_search": False,
+                    "enable_shell": False,
+                },
+                "user": user or "justmaya",
+            },
+        )
+        try:
+            item = body["data"][0]
+            raw = item["b64_json"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise ModelProviderError(
+                "BAD_RESPONSE", f"Unexpected image response: {str(body)[:200]}"
+            ) from exc
+        if not isinstance(raw, str) or not raw:
+            raise ModelProviderError(
+                "BAD_RESPONSE", "Image response missing b64_json data"
+            )
+        try:
+            image = base64.b64decode(raw, validate=True)
+        except ValueError as exc:
+            raise ModelProviderError(
+                "BAD_RESPONSE", "Image data is not valid base64"
+            ) from exc
+        return ImageResult(
+            image=image,
+            revised_prompt=item.get("revised_prompt"),
+            usage=body.get("usage", {}),
+        )
 
     async def count_input_tokens(self, *, system: str, user: str) -> int:
         """Server-side input-token count for a would-be request (no generation).

@@ -38,6 +38,7 @@ async function fixture(browser, options = {}) {
   function advance() {
     state.session.version++
     if (state.session.sceneId === 'ending') { state.session.mode = 'completed'; state.session.status = 'completed' }
+    else if (state.session.sceneId === 'intro' && state.session.dialogueIndex < state.episode.scenes[0].dialogue.length - 1) state.session.dialogueIndex++
     else if (state.session.dialogueIndex === 0) state.session.dialogueIndex = 1
     else { state.session.sceneId = 'checkpoint'; state.session.dialogueIndex = 0; state.session.mode = 'checkpoint' }
   }
@@ -57,6 +58,12 @@ async function fixture(browser, options = {}) {
       }
       if (!accepted.has(call.body.request_id)) { advance(); accepted.set(call.body.request_id, structuredClone(state.session)) }
       return route.fulfill({ json: accepted.get(call.body.request_id) })
+    }
+    if (url.pathname.endsWith('/raise-hand')) { state.session.mode = 'question'; state.session.version++; return route.fulfill({ json: state.session }) }
+    if (url.pathname.endsWith('/resume')) { state.session.mode = 'playing'; state.session.version++; return route.fulfill({ json: state.session }) }
+    if (url.pathname.includes('/pictures/')) {
+      if (state.pictureError) return route.abort()
+      return route.fulfill({ status: 200, contentType: 'image/webp', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64') })
     }
     if (url.pathname.includes('/sessions/')) {
       if (state.loadGate) await state.loadGate
@@ -187,14 +194,18 @@ async function main() {
   const browser = await chromium.launch({ ...(process.env.PLAYER_VERIFY_EXECUTABLE ? { executablePath: process.env.PLAYER_VERIFY_EXECUTABLE } : { channel: process.env.PLAYER_VERIFY_BROWSER || 'msedge' }), headless: true })
   try {
     const picture = await fixture(browser)
-    picture.state.episode.scenes[0].pictureCard = { title: 'Ziggurat', description: 'A ziggurat was a temple platform.', sourceRefs: [{ chunkId: 'c', documentId: 'd', pageStart: 2, pageEnd: 2 }], image: { imageUrl: 'https://upload.wikimedia.org/test.png', filePageUrl: 'https://commons.wikimedia.org/wiki/File:Test', title: 'Test image', author: 'Example', license: 'CC0 1.0', licenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/', changes: 'None' } }
-    await picture.page.route('https://upload.wikimedia.org/**', route => route.fulfill({ status: 200, contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64') }))
+    picture.state.episode.scenes[0].dialogue.push(
+      { lineId: 'three', speaker: 'mascot', text: 'Cities stored grain and planned together.', emotion: 'talking' },
+      { lineId: 'four', speaker: 'narrator', text: 'Shared rules kept the canals clear.', emotion: 'idle' },
+      { lineId: 'five', speaker: 'mascot', text: 'Soon a temple watched over the harvest.', emotion: 'happy' },
+    )
+    picture.state.episode.scenes[0].pictureCards = [{ title: 'Ziggurat', description: 'A ziggurat was a temple platform.', lineId: 'one', sourceRefs: [{ chunkId: 'c', documentId: 'd', pageStart: 2, pageEnd: 2 }], image: { imageUrl: '/api/episodes/fixture-episode/pictures/intro-one.webp', credit: 'AI-generated illustration (muse-image)', alt: 'Ziggurat' } }]
     await picture.go()
     const cardButton = picture.page.getByRole('button', { name: 'Ziggurat', exact: true })
     await cardButton.focus(); await picture.page.keyboard.press('Enter')
     assert.equal(await picture.page.getByRole('heading', { name: 'PDF citations' }).isVisible(), true)
     assert.equal(await picture.page.getByText('Page 2', { exact: true }).isVisible(), true)
-    assert.equal(await picture.page.getByText('Example', { exact: false }).count() > 0, true)
+    assert.equal(await picture.page.getByText('AI-generated illustration', { exact: false }).count() > 0, true)
     await picture.page.keyboard.press('Escape')
     assert.equal(await picture.page.evaluate(() => document.activeElement.getAttribute('aria-haspopup')), 'dialog')
     const galleryButton = picture.page.getByRole('button', { name: 'Gallery', exact: true })
@@ -216,14 +227,30 @@ async function main() {
     await picture.page.reload(); await picture.page.locator('.vn-picture').waitFor()
     assert.equal(await picture.page.getByRole('button', { name: 'Ziggurat', exact: true }).isVisible(), true)
     await picture.page.screenshot({ path: path.join(output, 'picture-card.png') })
-    await picture.page.unroute('https://upload.wikimedia.org/**')
-    await picture.page.route('https://upload.wikimedia.org/**', route => route.abort())
+    await picture.page.getByRole('button', { name: 'Raise your hand to ask a question' }).click()
+    await picture.page.waitForFunction(() => !document.querySelector('.vn-picture'))
+    await picture.page.getByRole('button', { name: 'Resume the lesson' }).click()
+    await picture.page.locator('.vn-raise').waitFor()
+    assert.equal(await picture.page.locator('.vn-picture').count(), 0, 'Raise hand removes the card for good')
+    await picture.page.reload(); await picture.page.locator('.vn-picture').waitFor()
+    const pictureTarget = picture.page.locator('.vn-dialogue-target')
+    await pictureTarget.click(); await picture.page.waitForFunction(() => document.querySelector('.vn-text')?.textContent.includes('Water made farming'))
+    assert.equal(await picture.page.locator('.vn-picture').count(), 1)
+    await pictureTarget.click(); await picture.page.waitForFunction(() => document.querySelector('.vn-text')?.textContent.includes('Cities stored grain'))
+    assert.equal(await picture.page.locator('.vn-picture').count(), 1)
+    await pictureTarget.click(); await picture.page.waitForFunction(() => document.querySelector('.vn-text')?.textContent.includes('Shared rules kept'))
+    assert.equal(await picture.page.locator('.vn-picture').count(), 0, 'Card removed after three dialogue turns')
+    await galleryButton.click()
+    assert.equal(await picture.page.getByRole('button', { name: 'Open Ziggurat' }).isVisible(), true)
+    await picture.page.getByRole('button', { name: 'Close', exact: true }).click()
+    picture.state.pictureError = true
+    picture.state.session.dialogueIndex = 0
     await picture.page.reload(); await picture.page.locator('.vn-frame').waitFor()
     await picture.page.locator('.vn-picture-unavailable').waitFor()
     await picture.page.getByRole('button', { name: 'Gallery', exact: true }).click()
     assert.equal(await picture.page.getByRole('button', { name: 'Open Ziggurat' }).isVisible(), true)
     assert.equal(await picture.page.getByRole('button', { name: 'Reveal or advance dialogue' }).isVisible(), true)
-    evidence.push({ check: 'picture card, SVG-only Gallery control, encountered-note collection, modal citations, dismissal retention, keyboard and image error recovery', result: 'PASS' })
+    evidence.push({ check: 'picture card, SVG-only Gallery control, encountered-note collection, modal citations, dismissal retention, raise-hand removal, three-turn lifetime, keyboard and image error recovery', result: 'PASS' })
     await picture.context.close()
     const emptyGallery = await fixture(browser)
     await emptyGallery.go()
