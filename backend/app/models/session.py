@@ -71,6 +71,7 @@ TUTOR_MOVES = (
     "resolved",
 )
 AWAITING_KINDS = ("none", "attempt", "reflection", "clarification")
+TUTOR_RELATIONS = ("on_document", "on_topic", "off_topic")
 
 
 class TutorFlow(BaseModel):
@@ -94,6 +95,7 @@ class TutorInteraction(BaseModel):
     sourceRefs: list[EpisodeSourceRef] = []
     createdAt: str
     groundingStatus: Literal["supported", "partial", "unsupported"] | None = None
+    relation: Literal[*TUTOR_RELATIONS] | None = None
     requestId: str | None = None
     flow: TutorFlow | None = None
     position: Position | None = None

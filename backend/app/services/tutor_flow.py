@@ -183,10 +183,11 @@ def apply_policy(
     observed_move: str | None,
     engagement: str | None,
     grounding: str,
+    relation: str | None = None,
 ) -> TutorFlow:
     """Bound the model's observations into authoritative flow metadata."""
     move, awaiting, level = _decide(
-        ctx, request, observed_move, engagement, grounding
+        ctx, request, observed_move, engagement, grounding, relation
     )
     return TutorFlow(
         threadId=ctx.thread_id,
@@ -208,8 +209,11 @@ def _decide(
     observed_move: str | None,
     engagement: str | None,
     grounding: str,
+    relation: str | None = None,
 ) -> tuple[str, str, int | None]:
     level = ctx.hint_level if ctx.help_mode == "hint" else None
+    if relation == "off_topic":
+        return "unsupported", "none", level
     if engagement == "resolved" or observed_move == "resolved":
         return "resolved", "none", level
     if grounding == "unsupported" or observed_move == "unsupported":
