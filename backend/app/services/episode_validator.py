@@ -343,7 +343,7 @@ async def validate_and_publish(
                 )
     report = build_report(det, verdict, regenerated=regenerated, settings=settings)
     if report_passing(report):
-        await attach_picture_cards(script, lesson_context, passages)
+        await attach_picture_cards(script, lesson_context, passages, provider, job_id)
         publish_episode(data_dir, script, report, roadmap.curriculum_id)
     else:
         record_validation(data_dir, script.episodeId, report)

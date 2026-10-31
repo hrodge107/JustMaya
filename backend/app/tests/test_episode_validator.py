@@ -594,7 +594,7 @@ async def test_publish_preserves_picture_card(settings, data_dir, monkeypatch):
         async def __aexit__(self, *args): pass
         async def get(self, *args, **kwargs): return Response()
     monkeypatch.setattr(cards.httpx, 'AsyncClient', Client)
-    stub = ReviewStub([{'verdict': 'pass', 'violations': []}])
+    stub = ReviewStub([{'verdict': 'pass', 'violations': []}, {'index': 0}])
     _, report = await validate_and_publish(data_dir, script, _roadmap(ctx), ctx, [passage], CHUNKS, MeteredProvider(stub, settings, data_dir), 'j1', settings)
     restored = read_episode_by_id(data_dir, 'ep-1')
     assert report_passing(report)

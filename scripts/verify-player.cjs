@@ -185,7 +185,7 @@ async function main() {
   const browser = await chromium.launch({ channel: process.env.PLAYER_VERIFY_BROWSER || 'msedge', headless: true })
   try {
     const picture = await fixture(browser)
-    picture.state.episode.scenes[0].pictureCard = { title: 'Ziggurat', description: 'A ziggurat was a temple platform.', sourceRefs: [{ chunkId: 'c', documentId: 'd', pageStart: 2, pageEnd: 2 }], image: { imageUrl: 'https://upload.wikimedia.org/test.png', filePageUrl: 'https://commons.wikimedia.org/wiki/File:Test', title: 'Test image', author: 'Example', license: 'CC BY 4.0', licenseUrl: 'https://creativecommons.org/licenses/by/4.0/', changes: 'None' } }
+    picture.state.episode.scenes[0].pictureCard = { title: 'Ziggurat', description: 'A ziggurat was a temple platform.', sourceRefs: [{ chunkId: 'c', documentId: 'd', pageStart: 2, pageEnd: 2 }], image: { imageUrl: 'https://upload.wikimedia.org/test.png', filePageUrl: 'https://commons.wikimedia.org/wiki/File:Test', title: 'Test image', author: 'Example', license: 'CC0 1.0', licenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/', changes: 'None' } }
     await picture.page.route('https://upload.wikimedia.org/**', route => route.fulfill({ status: 200, contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64') }))
     await picture.go()
     const cardButton = picture.page.getByRole('button', { name: 'Ziggurat +' })
@@ -197,6 +197,11 @@ async function main() {
     await picture.page.reload(); await picture.page.locator('.vn-picture').waitFor()
     assert.equal(await picture.page.getByRole('button', { name: 'Ziggurat +' }).isVisible(), true)
     await picture.page.screenshot({ path: path.join(output, 'picture-card.png') })
+    await picture.page.unroute('https://upload.wikimedia.org/**')
+    await picture.page.route('https://upload.wikimedia.org/**', route => route.abort())
+    await picture.page.reload(); await picture.page.locator('.vn-frame').waitFor()
+    await picture.page.locator('.vn-picture').waitFor({ state: 'detached' })
+    assert.equal(await picture.page.getByRole('button', { name: 'Reveal or advance dialogue' }).isVisible(), true)
     evidence.push({ check: 'picture card reload, keyboard disclosure, citation and separate credit', result: 'PASS' })
     await picture.context.close()
     for (const [width, height] of [[390, 844], [320, 568], [844, 390], [800, 1024], [1280, 800]]) {
