@@ -67,17 +67,31 @@ button { font: inherit; cursor: pointer; border: 0; min-height: 44px; }
 .maya svg { height: 100%; width: auto; display: block; filter: drop-shadow(0 10px 18px rgb(0 0 0 / .22)); }
 .maya-tag { position: absolute; left: 50%; bottom: -6px; transform: translateX(-50%); padding: 3px 14px; border-radius: 999px; font-size: .78rem; font-weight: 800; white-space: nowrap; opacity: .85; }
 
-/* Dialogue + rail dock. Rail sits vertically centred on the dialogue box. */
-.dock { position: relative; display: flex; flex-direction: column; gap: 8px; padding: 0 clamp(10px,3vw,36px) clamp(10px,3vh,26px); }
+/* Dialogue + rail dock. Desktop: rail column beside the dialogue (foot is
+   display:contents so its children join the row). Mobile: the dialogue sits
+   above a bottom action row — rail centred under it, Menu at the right end. */
+.dock { position: relative; display: flex; flex-direction: column; gap: 8px; padding: 0 clamp(10px,3vw,36px) calc(clamp(10px,3vh,26px) + env(safe-area-inset-bottom, 0px)); }
+.foot { display: contents; }
 .rail { display: flex; gap: 8px; justify-content: center; }
 .rail button { padding: 8px 18px; font-weight: 800; border-radius: 12px; letter-spacing: .01em; transition: transform .15s var(--ease), background .15s var(--ease), opacity .15s; }
 .rail button:active { transform: scale(.96); }
 .rail button[aria-disabled='true'] { opacity: .45; cursor: default; }
 @media (min-width: 720px) {
   .dock { flex-direction: row; align-items: center; }
-  .rail { flex-direction: column; align-items: stretch; gap: 7px; }
+  .rail { order: -1; flex-direction: column; align-items: stretch; gap: 7px; }
   .rail button { min-width: 96px; }
   .dlg { flex: 1; }
+}
+@media (max-width: 719px) {
+  .foot { position: relative; display: flex; align-items: center; }
+  .rail { margin: 0 auto; gap: 6px; }
+  .rail button { min-height: 44px; padding: 8px 12px; }
+  .foot .menu-rail { position: absolute; right: 0; top: 50%; transform: translateY(-50%); }
+  .foot .menu-trigger { min-height: 44px; padding: 10px 14px; }
+  .menu-label { display: none; }           /* icon-only in the mobile action row */
+}
+@media (max-width: 380px) {
+  .rail button { padding: 8px 8px; }
 }
 
 .dlg { position: relative; min-height: clamp(140px, 24dvh, 210px); }
@@ -105,7 +119,7 @@ button { font: inherit; cursor: pointer; border: 0; min-height: 44px; }
 .menu-trigger:active { transform: scale(.97); }
 .menu-icon { display: grid; gap: 4px; width: 20px; }
 .menu-icon > span { height: 2px; border-radius: 1px; background: currentColor; }
-@media (max-width: 999px) {
+@media (min-width: 720px) and (max-width: 999px) {
   .menu-rail { right: 14px; bottom: 16px; }
   .dock { padding-bottom: 88px; }
 }
@@ -464,13 +478,6 @@ dialog[open] { animation: dlg-in .18s var(--ease); }
     <a href="?v=c" data-var="c" title="After-hours">C</a>
   </nav>
 
-  <div class="menu-rail">
-    <button type="button" class="menu-trigger" id="menuTrigger" aria-haspopup="dialog" aria-controls="menuDlg">
-      <span class="menu-icon" aria-hidden="true"><span></span><span></span><span></span></span>
-      Menu
-    </button>
-  </div>
-
   <div class="stage" id="stage">
     <div class="ask-overlay" id="askOverlay" hidden>
       <div class="ask-choices">
@@ -578,17 +585,25 @@ dialog[open] { animation: dlg-in .18s var(--ease); }
   </div>
 
   <div class="dock">
-    <nav class="rail" aria-label="Home actions">
-      <button type="button" data-act="talk">Talk</button>
-      <button type="button" data-act="upload">Upload</button>
-      <button type="button" data-act="learn">Learn</button>
-    </nav>
     <div class="dlg" id="dlg" role="button" tabindex="0" aria-label="Dialogue — click to advance">
       <span class="dlg-name" id="dlgName">Mita</span>
       <div class="dlg-body">
         <p class="dlg-text" id="dlgText" aria-live="polite"></p>
       </div>
       <span class="dlg-cue" aria-hidden="true">▾</span>
+    </div>
+    <div class="foot">
+      <nav class="rail" aria-label="Home actions">
+        <button type="button" data-act="talk">Talk</button>
+        <button type="button" data-act="upload">Upload</button>
+        <button type="button" data-act="learn">Learn</button>
+      </nav>
+      <div class="menu-rail">
+        <button type="button" class="menu-trigger" id="menuTrigger" aria-label="Menu" aria-haspopup="dialog" aria-controls="menuDlg">
+          <span class="menu-icon" aria-hidden="true"><span></span><span></span><span></span></span>
+          <span class="menu-label">Menu</span>
+        </button>
+      </div>
     </div>
   </div>
 
@@ -994,6 +1009,7 @@ askNothing.addEventListener('click', async () => {
   seq++; const t = seq; mode = 'idle';
   await say(pick(TALK_END));
   if (t !== seq) return;
+  if (!await hold(ADVANCE_MS, t)) return;   // the line rests — click or 10s idle resumes
   setState('idle');
   ambient(seq);
 });
@@ -1011,10 +1027,10 @@ async function sendAsk() {
   await wait(reduced ? 120 : 650);
   if (t !== seq) return;
   const a = route(q);
+  mode = 'idle';                            // Talk is over the moment the answer lands
   await say(a.text, a.fallback ? 'confused' : 'talking', 'Mita');
   if (t !== seq) return;
-  // Talk ends here — no second compose. Idle picks up where it left off.
-  mode = 'idle';
+  if (!await hold(ADVANCE_MS, t)) return;   // answer rests — click or 10s idle resumes
   setState('idle');
   ambient(seq);
 }
