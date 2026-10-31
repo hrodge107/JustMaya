@@ -145,7 +145,10 @@ def _system() -> str:
         "uncertain, say so plainly rather than guessing. Do not claim to "
         "have checked the entire PDF when only retrieved passages were "
         "checked, and never present model knowledge as document evidence. "
-        "Begin with the substance; do not praise the learner for asking "
+        "Begin with the substance — never open with a statement about "
+        "what the passages or document do or do not cover; any scope note "
+        "belongs inside or after the answer, not ahead of it. Do not "
+        "praise the learner for asking "
         "or disagreeing. When the learner challenges a prior answer, "
         "compare the prior claim and its citations with retrieved "
         "passages. Bare disagreement is not contrary evidence: explain "
@@ -187,6 +190,21 @@ _BEYOND_TERMS = (
     "doesn't name", "does not name", "don't name", "do not name",
     "no mention",
 )
+
+
+def _is_meta_only_disclaimer(line: str) -> bool:
+    """A line whose whole content is a coverage statement — the stock-
+    disclaimer shape the spec forbids from opening an answer. Multi-clause
+    nudges ("don't verify that, so hold it as…") carry advice, not just a
+    label, and stay."""
+    low = line.lower()
+    return (
+        any(term in low for term in _DOC_TERMS)
+        and any(term in low for term in _BEYOND_TERMS)
+        and "," not in line
+        and "—" not in line
+        and len(line.split()) <= 12
+    )
 
 
 def _has_provenance_signal(lines: list[str]) -> bool:
@@ -431,6 +449,11 @@ async def answer_question(
             refs = []
             grounding = "unsupported"
             move = "unsupported"
+        # A stock disclaimer never opens a served answer — drop leading
+        # meta-only coverage lines so substance leads, then enforce the
+        # honesty floor.
+        while lines and _is_meta_only_disclaimer(lines[0]):
+            lines.pop(0)
         if not lines:
             lines = [_FALLBACK_LINE]
         elif grounding == "unsupported" and not _has_provenance_signal(lines):
