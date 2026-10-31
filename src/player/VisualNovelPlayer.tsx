@@ -666,7 +666,7 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
         ;(event.shiftKey ? last : first).focus()
       }
     }}>
-      <div className="vn-menu-heading"><h2 id="episode-menu-title">Episode menu</h2><button ref={closeRef} type="button" className="vn-quiet" onClick={() => dialogRef.current?.close()}>Close</button></div>
+      <div className="vn-menu-heading"><h2 id="episode-menu-title">Menu</h2><button ref={closeRef} type="button" className="vn-quiet" onClick={() => dialogRef.current?.close()}>Close</button></div>
       <MotionToggle />
       <button type="button" className="vn-motion vn-menu-backlog"
         onClick={() => { const from = menuRef.current; dialogRef.current?.close(); openBacklog(from) }}>

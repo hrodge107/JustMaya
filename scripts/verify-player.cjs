@@ -154,7 +154,7 @@ async function modalCheck(page, count) {
   const before = count()
   const menu = page.getByRole('button', { name: 'Menu', exact: true })
   await menu.click()
-  const dialog = page.getByRole('dialog', { name: 'Episode menu' })
+  const dialog = page.getByRole('dialog', { name: 'Menu' })
   await dialog.waitFor()
   await page.waitForFunction(() => document.activeElement?.textContent === 'Close')
   const measurements = await dialog.evaluate(el => {
