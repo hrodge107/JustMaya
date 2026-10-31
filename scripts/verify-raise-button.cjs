@@ -1,7 +1,6 @@
-// Placement + icon check for the raise-hand / resume action (.vn-raise):
-// it lives inside the .vn-rail action dock beside the dialogue, clear of the
-// choice strips, SVG icon plus visible label (no text-glyph emojis).
-// Stubbed APIs, no backend needed.
+// Placement + icon check for the raise-hand / resume tile (.vn-raise):
+// fully above the dialogue's top-right, clear of the bottom-anchored strips,
+// SVG icons only (no text-glyph emojis). Stubbed APIs, no backend needed.
 const { chromium } = (() => { try { return require('playwright') } catch { return require('playwright-core') } })()
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
@@ -46,13 +45,13 @@ async function fixture(browser, mode, viewport) {
 function measure(page) {
   return page.evaluate(() => {
     const rect = sel => { const el = document.querySelector(sel); if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, right: r.right, bottom: r.bottom, width: r.width, height: r.height } }
-    const raise = rect('.vn-raise'), dialogue = rect('.vn-dialogue'), rail = rect('.vn-rail')
+    const raise = rect('.vn-raise'), dialogue = rect('.vn-dialogue')
     const strips = [...document.querySelectorAll('.vn-choice')].map(el => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, right: r.right, bottom: r.bottom } })
     const overlap = (a, b) => a && b && a.x < b.right - 1 && a.right > b.x + 1 && a.y < b.bottom - 1 && a.bottom > b.y + 1
     return {
-      raise, dialogue, rail, vw: innerWidth,
-      inRail: !!rail && raise.y >= rail.y - 1 && raise.bottom <= rail.bottom + 1 && raise.x >= rail.x - 1 && raise.right <= rail.right + 1,
-      clearDialogue: !overlap(raise, dialogue),
+      raise, dialogue, vw: innerWidth,
+      aboveDialogue: raise.bottom <= dialogue.y - 1,
+      inTopRight: raise.right <= dialogue.right + 1 && raise.right >= dialogue.right - 90,
       stripHits: strips.filter(s => overlap(raise, s)).length,
       emojiFree: !/[\u{1F300}-\u{1FAFF}\u{2700}-\u{27BF}\u{2B00}-\u{2BFF}]/u.test(document.querySelector('.vn-raise').textContent),
       iconCount: document.querySelector('.vn-raise svg') ? 1 : 0,
@@ -71,13 +70,13 @@ async function main() {
         const f = await fixture(browser, mode, viewport)
         const m = await measure(f.page)
         assert.ok(m.raise, `${mode}: no .vn-raise`)
-        assert.ok(m.inRail, `${mode} ${m.vw}: action not inside the rail ${JSON.stringify(m)}`)
-        assert.ok(m.clearDialogue, `${mode} ${m.vw}: action overlaps the dialogue ${JSON.stringify(m)}`)
-        assert.equal(m.stripHits, 0, `${mode} ${m.vw}: action covers a strip ${JSON.stringify(m)}`)
+        assert.ok(m.aboveDialogue, `${mode} ${m.vw}: tile overlaps dialogue top edge ${JSON.stringify(m)}`)
+        assert.ok(m.inTopRight, `${mode} ${m.vw}: tile not at dialogue top-right ${JSON.stringify(m)}`)
+        assert.equal(m.stripHits, 0, `${mode} ${m.vw}: tile covers a strip ${JSON.stringify(m)}`)
         assert.ok(m.emojiFree && m.iconCount === 1, `${mode}: expected one SVG icon, no emoji`)
         assert.ok(m.tapSize, `${mode}: touch target under 44px`)
         await f.page.screenshot({ path: path.join(output, `raise-${mode}-${viewport.width}x${viewport.height}.png`) })
-        evidence.push({ check: `${mode} ${viewport.width}x${viewport.height}: inRail=${m.inRail} clear=${m.clearDialogue} stripHits=${m.stripHits} icon=${m.label}`, result: 'PASS' })
+        evidence.push({ check: `${mode} ${viewport.width}x${viewport.height}: above=${m.aboveDialogue} topRight=${m.inTopRight} stripHits=${m.stripHits} icon=${m.label}`, result: 'PASS' })
         await f.context.close()
       }
     }
