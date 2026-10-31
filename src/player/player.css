@@ -110,6 +110,15 @@ body:has(.player) { margin: 0; background: #e9e9f1; color: #30304c; color-scheme
 .mascot[data-emotion='listening'] .eye { height: 24%; }
 .mascot[data-emotion='listening'] .brow { opacity: 1; transform: rotate(6deg) translateY(-2px); }
 .mascot[data-emotion='listening'] .mascot-mark::before { content: ')))'; letter-spacing: -.06em; }
+/* 'reading' is the home screen's upload state: eyes lowered into the book,
+   brows relaxed, the ellipsis mark of someone mid-page. */
+.mascot[data-emotion='reading'] .eye { height: 8%; transform: translateY(9px); }
+.mascot[data-emotion='reading'] .brow { opacity: 1; transform: rotate(-4deg) translateY(3px); }
+.mascot[data-emotion='reading'] .mascot-mark::before { content: '...'; letter-spacing: .08em; }
+.mascot-book { position: absolute; left: 50%; bottom: -16%; transform: translateX(-50%); width: 52%; height: 19%; border-radius: 4px 4px 8px 8px; background: var(--paper); box-shadow: inset 0 -5px 0 #d9d9e6; display: none; }
+.mascot-book::before { content: ''; position: absolute; left: 50%; top: 12%; bottom: 12%; width: 2px; background: #b9b9cc; }
+.mascot-book::after { content: ''; position: absolute; left: 10%; right: 10%; top: 24%; height: 2px; background: #b9b9cc; box-shadow: 0 6px 0 #b9b9cc, 0 12px 0 #b9b9cc; }
+.mascot[data-emotion='reading'] .mascot-book { display: block; }
 .mascot[data-speaking] .mouth { animation: mouth-talk .26s var(--ease) infinite alternate; }
 
 .mascot-state { display: flex; flex-wrap: wrap; justify-content: center; gap: 0 4px; max-width: 220px; font-size: .9rem; font-weight: 800; text-align: center; }

@@ -3,9 +3,11 @@ import type { Emotion } from '../learnerApi'
 import { reducedMotion } from '../motionPreference'
 
 // Replaceable presentation adapter. The player and tutor depend only on these
-// props; the priority-23 VRM stage must accept the same contract.
+// props; the priority-23 VRM stage must accept the same contract. The home
+// screen adds one display-only value, 'reading' (book + lowered eyes); a VRM
+// stage should map it to a reading pose.
 export type MascotStageProps = {
-  emotion: Emotion
+  emotion: Emotion | 'reading'
   isSpeaking: boolean
   nodTrigger: number
   customAnimationTrigger: string | null
@@ -58,6 +60,7 @@ export default function MascotStage({ emotion, isSpeaking, nodTrigger, customAni
         <span className="mouth" />
       </div>
       <span className="mascot-mark" />
+      <span className="mascot-book" />
     </div>
     <figcaption className="mascot-state">
       <span className="mascot-emotion">{emotion}</span>

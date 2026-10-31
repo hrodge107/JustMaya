@@ -324,7 +324,7 @@ async function timerAndInput(browser) {
     if (!duringAnswer) await leaving.page.waitForFunction(() => document.querySelectorAll('.vn-choice[data-correct]').length === 1)
     await leaving.page.getByRole('button', { name: 'Menu', exact: true }).click()
     await leaving.page.getByRole('button', { name: 'Leave episode', exact: true }).click()
-    await leaving.page.locator('.learner').waitFor()
+    await leaving.page.locator('.home').waitFor()
     if (release) { release(); leaving.state.gate = null }
     const before = leaving.state.calls.length
     await leaving.page.clock.runFor(60000)
