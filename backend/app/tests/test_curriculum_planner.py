@@ -43,6 +43,15 @@ async def test_plans_short_inventory_as_untrusted_metered_input():
 
 
 @pytest.mark.anyio
+async def test_prompt_targets_ten_minutes_and_breadth():
+    meter = FakeMeter()
+    await plan_curriculum(inventory(), meter, "job", Settings(meta_api_key="test"))
+    system = meter.calls[0]["system"]
+    assert "ten minutes" in system
+    assert "four to six concepts" in system and "one to three objectives" in system
+
+
+@pytest.mark.anyio
 async def test_oversized_input_fails_before_generation():
     limit = Settings(meta_api_key="test").roadmap_max_input_tokens
     meter = FakeMeter(count=limit + 1)

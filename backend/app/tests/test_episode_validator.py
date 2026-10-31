@@ -217,6 +217,28 @@ def test_short_episode_not_failed_for_duration(settings):
     )
 
 
+def test_dialogue_minimum_relative_to_target(settings):
+    # _script() carries 5 dialogue words.
+    violations = deterministic_check(
+        _script(), CHUNKS, OBJECTIVES, set(), settings, target_dialogue_words=8
+    )
+    assert any("Dialogue words 5 below minimum 6" in v for v in violations)
+    assert deterministic_check(
+        _script(), CHUNKS, OBJECTIVES, set(), settings, target_dialogue_words=7
+    ) == []
+
+
+def test_small_target_keeps_small_floor(settings):
+    # A thin outline (target 5) floors at 4 — the 5-word script stays legal.
+    assert deterministic_check(
+        _script(), CHUNKS, OBJECTIVES, set(), settings, target_dialogue_words=5
+    ) == []
+    violations = deterministic_check(
+        _script(), CHUNKS, OBJECTIVES, set(), settings
+    )
+    assert not any("below minimum" in v for v in violations)
+
+
 def test_citation_leak_flagged(settings):
     scenes = _script().scenes
     scenes[0].dialogue[0].text = "See doc-1-p0001-000 for details."
@@ -247,6 +269,7 @@ def test_configurable_checkpoint_count(settings):
 def test_build_report_bounds(settings):
     report = build_report(["v"], settings=settings)
     assert report.bounds["checkpoint_count"] == 2
+    assert report.bounds["min_target_fraction"] == 0.8
     assert report.deterministic_violations == ["v"]
 
 
@@ -315,7 +338,7 @@ def _roadmap(ctx) -> Roadmap:
                 title="Writing Before Paper",
                 objective_ids=["obj-1"],
                 concepts=[OrderedConcept(concept_id="c1", basis="source_order", explanation="first")],
-                dialogue_words=700,
+                dialogue_words=5,
                 words_per_minute=140.0,
                 interaction_minutes=2.0,
                 status="selected",
@@ -453,6 +476,24 @@ async def test_deterministic_failure_spends_no_tokens(settings, data_dir):
     assert not report_passing(report)
     assert stub.calls == []
     assert any("nextSceneId" in v for v in report.deterministic_violations)
+    assert job_usage(data_dir, "j1")["total_tokens"] == 0
+
+
+@pytest.mark.anyio
+async def test_undersized_draft_fails_without_tokens(settings, data_dir):
+    _seed_document(data_dir)
+    ctx = _lesson_context()
+    save_episode_draft(data_dir, _script(), "cur-1")
+    roadmap = _roadmap(ctx)
+    roadmap.episodes[0].dialogue_words = 100
+    stub = ReviewStub([])
+    _, report = await validate_and_publish(
+        data_dir, _script(), roadmap, ctx, [], CHUNKS,
+        MeteredProvider(stub, settings, data_dir), "j1", settings,
+    )
+    assert not report_passing(report)
+    assert stub.calls == []
+    assert any("below minimum 80" in v for v in report.deterministic_violations)
     assert job_usage(data_dir, "j1")["total_tokens"] == 0
 
 

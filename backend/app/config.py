@@ -65,12 +65,14 @@ class Settings(BaseSettings):
     generation_max_passages: int = 24
 
     # A08 validation bounds: deterministic ceilings on the draft plus sizing
-    # for the single semantic review call. No minimum duration — short locked
-    # scope may produce a sub-five-minute episode without filler.
+    # for the single semantic review call. The dialogue floor is relative to
+    # the confirmed outline's own target, never an absolute duration — a thin
+    # locked scope keeps a thin floor.
     validation_max_scenes: int = 24
     validation_max_dialogue_words: int = 2200
     validation_checkpoint_count: int = 2
     validation_max_minutes: float = 15.0
+    validation_min_target_fraction: float = 0.8
     validation_max_input_tokens: int = 48_000
     validation_max_tokens: int = 20_000
 

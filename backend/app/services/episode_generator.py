@@ -178,6 +178,15 @@ def _interpret(
         {o.id for o in lesson_context.objectives},
         {s.url for s in lesson_context.supplements},
     )
+    minimum = int(
+        outline.dialogue_words * settings.validation_min_target_fraction
+    )
+    if words < minimum:
+        violations.append(
+            f"Dialogue words {words} below minimum {minimum} "
+            f"({settings.validation_min_target_fraction} of target "
+            f"{outline.dialogue_words})"
+        )
     return script, [], violations
 
 
