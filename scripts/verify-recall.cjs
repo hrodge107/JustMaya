@@ -58,7 +58,7 @@ async function start(browser, options = {}) {
   return f
 }
 async function waitFeedback(f, text) {
-  await f.page.waitForFunction(text => document.querySelector('.vn-dialogue .sr-only[aria-live]')?.textContent === `Instructor: ${text}`, text)
+  await f.page.waitForFunction(text => document.querySelector('.vn-dialogue .sr-only[aria-live]')?.textContent === `Mita: ${text}`, text)
 }
 async function advanceAfterReading(f, state) {
   const wait = f.page.waitForResponse(r => r.url().endsWith('/advance') && r.request().method() === 'POST')

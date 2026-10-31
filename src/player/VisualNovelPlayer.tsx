@@ -9,7 +9,6 @@ import { BACK_TO_LESSON, STRIP_LABEL, closingCue, drawCue } from './tutorCues'
 import useReadingAdvance from './useReadingAdvance'
 import './player.css'
 
-const SPEAKER: Record<string, string> = { mascot: 'Instructor', narrator: 'Narrator' }
 const REVEAL_MS = 18
 
 // Linear scene order from startSceneId; the server owns transitions, this is display only.
@@ -442,7 +441,8 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
   const sceneNumber = order.indexOf(scene) + 1
   const emotion: Emotion = returnBeat ? (revealed ? 'listening' : 'talking') : inQuestion ? awaiting ? (revealed ? 'thinking' : 'listening') : lastTurn && !revealed ? 'talking' : 'listening' : mode === 'checkpoint' ? session.checkpoint?.isCorrect === true ? 'happy' : session.checkpoint?.isCorrect === false ? 'confused' : 'thinking' : mode === 'completed' ? 'happy' : line?.emotion ?? 'idle'
   const isSpeaking = !revealed && (!!returnBeat || !!question || inQuestion && askPhase !== 'pending' || mode === 'playing' && line?.speaker === 'mascot')
-  const speaker = inQuestion && awaiting ? 'You' : returnBeat || inQuestion || question ? 'Instructor' : line ? SPEAKER[line.speaker] ?? line.speaker : ''
+  // Mita names every model-spoken turn; mascot/narrator stays as the speaker kind for animation.
+  const speaker = inQuestion && awaiting ? 'You' : returnBeat || inQuestion || question || line ? 'Mita' : ''
   const canRaise = mode === 'playing' && !!line || mode === 'checkpoint'
   const lookTarget = inQuestion ? awaiting ? (revealed ? { x: 0.7, y: -0.7 } : { x: 0, y: 0.85 }) : { x: 0, y: 0.85 } : emotion === 'thinking' ? { x: 0.7, y: -0.7 } : null
   const mascot = <MascotStage emotion={emotion} isSpeaking={isSpeaking} nodTrigger={nodTrigger} customAnimationTrigger={null} lookTargetOffset={lookTarget} enablePointerTracking={mode === 'playing'} />

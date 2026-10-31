@@ -50,7 +50,7 @@ export default function MascotStage({ emotion, isSpeaking, nodTrigger, customAni
     return () => window.removeEventListener('pointermove', onMove)
   }, [lookX, lookY, enablePointerTracking])
 
-  return <figure className="mascot" ref={ref} data-emotion={emotion} data-nod-trigger={nodTrigger} data-speaking={isSpeaking || undefined} aria-label={`Instructor stand-in, ${emotion}${isSpeaking ? ', speaking' : ''}`}>
+  return <figure className="mascot" ref={ref} data-emotion={emotion} data-nod-trigger={nodTrigger} data-speaking={isSpeaking || undefined} aria-label={`Mita stand-in, ${emotion}${isSpeaking ? ', speaking' : ''}`}>
     <div className="mascot-body" ref={body} aria-hidden="true">
       <div className="mascot-face">
         <span className="brow" />
