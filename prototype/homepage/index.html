@@ -1,0 +1,1049 @@
+<!doctype html>
+<!--
+  PROTOTYPE: homepage = dialogue screen + mascot (Mita). Throwaway; not wired
+  to src/. Question: what should the app's front door feel like?
+
+  Three variants of the same page, switchable via ?v=a|b|c or the floating bar:
+    a · Clubroom: reference-faithful classroom (day), pink polka-dot dialogue
+        box, SVG character mascot, MAS-style left rail.
+    b · Player-native: the shipped player's own language — ink/paper/mint,
+        stand-in face mascot, vn-* surfaces. Proves homepage can reuse tokens.
+    c · After-hours: night study room, lamp-lit, warm paper dialogue, same
+        SVG mascot recolored. The moody option.
+
+  Fixed spec in every variant:
+    - Mascot idles with a ~100-line looping script (app explainers + chatter).
+    - Left rail beside the dialogue box: Talk / Upload / Learn / About.
+    - Talk -> choices [Input | Nothing]; Input answers app questions from a
+      keyword router with progressive fallback.
+    - Upload -> modal -> simulated progress (top-right) -> mascot 'reading'
+      state -> dialogue beats at progress milestones -> Learn gets the result.
+    - Learn lists generated episodes (Ep1 ready, 2-5 planned outlines only).
+    - About is a simple modal.
+
+  Run: open this file directly, or `npm run dev` then /prototype/homepage/index.html
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prototype · Home</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../../node_modules/@fontsource-variable/nunito/index.css">
+<style>
+/* ============================ shared layout ============================ */
+:root { --ease: cubic-bezier(.22,1,.36,1); }
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; overflow: hidden; font-family: 'Nunito Variable','Nunito','Trebuchet MS','Segoe UI',sans-serif; line-height: 1.45; }
+[hidden] { display: none !important; }
+button { font: inherit; cursor: pointer; border: 0; min-height: 44px; }
+:focus-visible { outline: 3px solid var(--focus, #005e56); outline-offset: 2px; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+.home {
+  --ink: #30304c; --paper: #f7f7fa; --mint-ink: #0b6e66; --mint-bright: #7fe5dc;
+  position: relative; height: 100dvh; min-height: 540px;
+  display: grid; grid-template-rows: minmax(0,1fr) auto;
+  color: var(--ink); isolation: isolate;
+}
+
+/* Scene layers: all variants render their own .room children. */
+.room { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.room > * { display: none; position: absolute; }
+
+.stage { position: relative; min-height: 0; }
+.maya-wrap { position: absolute; inset: 0 0 -4px; display: flex; align-items: flex-end; justify-content: center; }
+.maya { position: relative; margin: 0; height: min(96%, 470px); display: grid; justify-items: center; align-items: end; transition: transform .4s var(--ease); }
+.maya svg { height: 100%; width: auto; display: block; filter: drop-shadow(0 10px 18px rgb(0 0 0 / .22)); }
+.maya-tag { position: absolute; left: 50%; bottom: -6px; transform: translateX(-50%); padding: 3px 14px; border-radius: 999px; font-size: .78rem; font-weight: 800; white-space: nowrap; opacity: .85; }
+
+/* Dialogue + rail dock. Rail sits vertically centred on the dialogue box. */
+.dock { position: relative; display: flex; flex-direction: column; gap: 8px; padding: 0 clamp(10px,3vw,36px) clamp(10px,3vh,26px); }
+.rail { display: flex; gap: 8px; justify-content: center; }
+.rail button { padding: 8px 18px; font-weight: 800; border-radius: 12px; letter-spacing: .01em; transition: transform .15s var(--ease), background .15s var(--ease), opacity .15s; }
+.rail button:active { transform: scale(.96); }
+.rail button[aria-disabled='true'] { opacity: .45; cursor: default; }
+@media (min-width: 720px) {
+  .dock { flex-direction: row; align-items: center; }
+  .rail { flex-direction: column; align-items: stretch; gap: 7px; }
+  .rail button { min-width: 96px; }
+  .dlg { flex: 1; }
+}
+
+.dlg { position: relative; min-height: clamp(140px, 24dvh, 210px); }
+.dlg-name { position: absolute; top: -15px; left: 26px; z-index: 2; padding: 4px 22px; font-weight: 900; font-size: 1.05rem; }
+.dlg-body { height: 100%; display: flex; flex-direction: column; padding: 30px 28px 18px; }
+.dlg-text { margin: 0; font-size: clamp(1.02rem,.94rem + .45vw,1.28rem); font-weight: 700; max-width: 72ch; overflow-wrap: anywhere; }
+.dlg-cue { position: absolute; right: 22px; bottom: 12px; font-size: 1rem; animation: cue-bob 1.2s var(--ease) infinite; pointer-events: none; }
+@keyframes cue-bob { 0%,100% { transform: translateY(0); opacity:.55 } 50% { transform: translateY(4px); opacity:1 } }
+.dlg-choices { display: flex; flex-wrap: wrap; gap: 10px; margin-top: auto; padding-top: 14px; }
+.dlg-choices button { padding: 9px 26px; font-weight: 850; border-radius: 12px; transition: transform .15s var(--ease), background .15s; }
+.dlg-choices button:active { transform: scale(.97); }
+.dlg-composer { display: flex; gap: 10px; margin-top: auto; padding-top: 14px; }
+.dlg-composer input { flex: 1; min-width: 0; min-height: 44px; padding: 8px 16px; font: inherit; font-weight: 700; border: 0; border-radius: 12px; }
+.dlg-composer button { padding: 8px 22px; font-weight: 850; border-radius: 12px; flex: none; }
+
+/* Top-right upload progress chip. */
+.upload-chip { position: fixed; top: 16px; right: 16px; z-index: 20; width: min(280px, 70vw); padding: 12px 16px 14px; border-radius: 14px; font-size: .82rem; font-weight: 800; }
+.upload-chip .up-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 8px; }
+.up-track { height: 8px; border-radius: 4px; overflow: hidden; }
+.up-fill { display: block; height: 100%; width: 0%; border-radius: 4px; transition: width .3s linear; }
+.upload-chip .up-foot { display: flex; justify-content: space-between; margin-top: 6px; font-size: .74rem; }
+
+/* Variant switcher (top-left, away from the progress chip). */
+.varbar { position: fixed; top: 14px; left: 14px; z-index: 20; display: flex; gap: 5px; padding: 5px; border-radius: 12px; font-size: .8rem; font-weight: 850; }
+.varbar a { display: grid; place-items: center; min-width: 30px; min-height: 28px; padding: 2px 9px; border-radius: 8px; color: inherit; text-decoration: none; }
+.varbar .var-label { padding: 4px 8px 4px 4px; font-weight: 700; opacity: .75; }
+
+/* Modals. */
+dialog { border: 0; padding: 0; margin: auto; width: min(430px, calc(100% - 28px)); max-height: calc(100dvh - 40px); overflow: auto; border-radius: 20px; font: inherit; }
+dialog::backdrop { background: rgb(12 12 26 / .55); }
+dialog[open] { animation: dlg-in .18s var(--ease); }
+@keyframes dlg-in { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: none; } }
+.modal { padding: 24px; }
+.modal h2 { margin: 0 0 6px; font-size: 1.25rem; font-weight: 900; }
+.modal .sub { margin: 0 0 18px; font-size: .9rem; font-weight: 700; opacity: .75; }
+.modal .row-end { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }
+.modal button { padding: 10px 20px; border-radius: 12px; font-weight: 850; }
+.dropzone { display: grid; place-items: center; gap: 8px; min-height: 120px; padding: 18px; border: 2px dashed; border-radius: 14px; text-align: center; font-weight: 800; }
+.dropzone small { font-weight: 700; opacity: .65; }
+.or { display: flex; align-items: center; gap: 12px; margin: 16px 0; font-size: .8rem; font-weight: 800; opacity: .65; }
+.or::before, .or::after { content: ''; flex: 1; height: 1px; background: currentColor; opacity: .4; }
+.ep-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.ep { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 12px; font-weight: 800; }
+.ep .ep-meta { flex: 1; min-width: 0; }
+.ep .ep-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ep .ep-status { font-size: .76rem; font-weight: 800; opacity: .7; }
+.ep .ep-num { flex: none; font-size: .78rem; font-weight: 900; opacity: .55; }
+.ep button { min-height: 38px; padding: 6px 16px; }
+.about-p { margin: 0 0 12px; font-size: .92rem; font-weight: 650; }
+.about-p b { font-weight: 850; }
+
+/* ============================ mascot: shared ============================ */
+.maya .face-mascot { display: none; }
+.maya-svg .hair-back, .maya-svg .bangs, .maya-svg .locks { fill: var(--hair); }
+.maya-svg .hair-shade { fill: var(--hair-shade); opacity: .5; }
+.maya-svg .skin { fill: var(--skin); }
+.maya-svg .skin-sh { fill: var(--skin-sh); }
+.maya-svg .uniform { fill: var(--uniform); }
+.maya-svg .uniform-sh { fill: var(--uniform-sh); }
+.maya-svg .shirt { fill: var(--shirt); }
+.maya-svg .tie { fill: var(--tie); }
+.maya-svg .bow { fill: var(--bow); }
+.maya-svg .bow-sh { fill: var(--bow-sh); }
+.maya-svg .iris { fill: var(--iris); }
+.maya-svg .stroke { stroke: var(--line); stroke-linecap: round; fill: none; }
+.maya-svg .blush { fill: var(--blush); opacity: .5; }
+.maya-svg .mouth-fill { fill: #a5455c; }
+.maya-svg .tongue { fill: #d7778c; }
+.maya-svg .page { fill: #fdf6ea; stroke: var(--line); stroke-width: 1.4; }
+.maya-svg .cover { fill: var(--tie); }
+
+.maya .head, .maya .eyes-open, .maya .mouths, .maya .mouths > *, .maya .brows, .maya .brows > *, .maya .book, .maya .torso { transform-box: fill-box; transform-origin: center; }
+.maya .head { transform-origin: 50% 85%; transition: transform .35s var(--ease); }
+.maya .eyeball { transform: translate(calc(var(--gx,0) * 3.2px), calc(var(--gy,0) * 2.4px)); transition: transform .18s var(--ease); }
+.maya .eyes-open { transform-origin: center; animation: blink 5.6s var(--ease) infinite; }
+@keyframes blink { 0%, 91%, 100% { transform: scaleY(1); } 94% { transform: scaleY(.06); } 97% { transform: scaleY(1); } }
+.maya[data-speaking] .mouths { animation: m-talk .28s var(--ease) infinite alternate; }
+@keyframes m-talk { from { transform: scaleY(1); } to { transform: scaleY(.5); } }
+
+.maya .eyes-closed, .maya .eyes-down, .maya .m-open, .maya .m-flat, .maya .m-wavy, .maya .m-oh, .maya .book { display: none; }
+.maya[data-speaking] .m-open, .maya[data-state='happy'] .m-open, .maya[data-state='talking'] .m-open, .maya[data-state='listening'] .m-oh { display: inline; }
+.maya[data-speaking] .m-smile, .maya[data-state='happy'] .m-smile, .maya[data-state='talking'] .m-smile,
+.maya[data-state='thinking'] .m-smile, .maya[data-state='confused'] .m-smile, .maya[data-state='listening'] .m-smile { display: none; }
+.maya[data-state='happy'] .eyes-open { display: none; }
+.maya[data-state='happy'] .eyes-closed { display: inline; }
+.maya[data-state='thinking'] .m-flat, .maya[data-state='confused'] .m-wavy { display: inline; }
+.maya[data-state='thinking'] .eyes-open { animation: none; transform: scaleY(.6); }
+.maya[data-state='thinking'] .head { transform: rotate(-4deg) translateX(-3px); }
+.maya[data-state='thinking'] .brow-r { transform: rotate(-9deg) translateY(-3px); }
+.maya[data-state='confused'] .head { transform: rotate(4deg); }
+.maya[data-state='confused'] .brow-l { transform: rotate(8deg) translateY(-2px); }
+.maya[data-state='listening'] .eyes-open { animation: none; transform: scale(1.07); }
+.maya[data-state='listening'] .brows { transform: translateY(-4px); }
+.maya[data-state='reading'] .eyes-open { display: none; }
+.maya[data-state='reading'] .eyes-down { display: inline; }
+.maya[data-state='reading'] .book { display: inline; }
+.maya[data-state='reading'] .head { transform: rotate(2deg) translateY(9px); }
+.maya[data-state='reading'] .torso { transform: translateY(4px); }
+/* While a line is typing, only the talking mouth shows — it wins over
+   emotion-state mouths by coming last in source order. */
+.maya[data-speaking] .m-flat, .maya[data-speaking] .m-wavy, .maya[data-speaking] .m-oh, .maya[data-speaking] .m-smile { display: none; }
+
+/* Stand-in face mascot (variant b) — geometry copied from src/player/player.css. */
+.face-mascot { position: relative; width: clamp(150px, 21vw, 240px); aspect-ratio: 1; border-radius: 46% 46% 42% 42%; background: var(--paper); box-shadow: inset 0 -8px 0 #d9d9e6; }
+.face-mascot > span { position: absolute; background: var(--ink); transition: transform .22s var(--ease); }
+.face-mascot .brow { top: 26%; left: 26%; width: 20%; height: 4%; border-radius: 2px; opacity: 0; }
+.face-mascot .eye { top: 38%; width: 13%; height: 19%; border-radius: 40%; transform: translate(calc(var(--gx,0) * 9px), calc(var(--gy,0) * 7px)); }
+.face-mascot .eye.left { left: 29%; } .face-mascot .eye.right { left: 58%; }
+.face-mascot .mouth { left: 38%; bottom: 23%; width: 24%; height: 5%; border-radius: 4px; }
+.face-mascot .mark { position: absolute; top: -14px; right: -20px; font-weight: 900; font-size: 2rem; color: var(--mint-bright); }
+.maya[data-state='talking'] .face-mascot .mouth { left: 40%; width: 20%; height: 12%; border-radius: 50%; }
+.maya[data-state='happy'] .face-mascot .eye { height: 9%; background: transparent; border-top: 4px solid var(--ink); border-radius: 999px 999px 0 0; }
+.maya[data-state='happy'] .face-mascot .mouth { left: 33%; width: 34%; height: 13%; background: transparent; border-bottom: 4px solid var(--ink); border-radius: 0 0 999px 999px; }
+.maya[data-state='thinking'] .face-mascot .mouth { left: 50%; width: 14%; height: 4%; }
+.maya[data-state='thinking'] .face-mascot .brow { opacity: 1; left: 56%; transform: rotate(-8deg); }
+.maya[data-state='confused'] .face-mascot .brow { opacity: 1; transform: rotate(14deg); }
+.maya[data-state='confused'] .face-mascot .mouth { left: 40%; width: 20%; transform: rotate(-10deg); }
+.maya[data-state='confused'] .face-mascot .mark::before { content: '?'; }
+.maya[data-state='listening'] .face-mascot .eye { height: 24%; }
+.maya[data-state='listening'] .face-mascot .brow { opacity: 1; transform: rotate(6deg) translateY(-2px); }
+.maya[data-state='listening'] .face-mascot .mark::before { content: ')))'; letter-spacing: -.06em; }
+.maya[data-state='reading'] .face-mascot .eye { height: 8%; transform: translateY(9px); }
+.maya[data-state='reading'] .face-mascot .brow { opacity: 1; transform: rotate(-4deg) translateY(3px); }
+.maya[data-state='reading'] .face-mascot .mark::before { content: '...'; letter-spacing: .08em; }
+.maya[data-speaking] .face-mascot .mouth { animation: mouth-talk .26s var(--ease) infinite alternate; }
+@keyframes mouth-talk { from { transform: scaleY(1); } to { transform: scaleY(.35); } }
+.face-book { position: absolute; left: 50%; bottom: -30px; transform: translateX(-50%); width: 120px; height: 44px; border-radius: 4px 4px 8px 8px; background: var(--paper); box-shadow: inset 0 -8px 0 #d9d9e6; display: none; }
+.face-book::before { content: ''; position: absolute; left: 50%; top: 6px; bottom: 6px; width: 2px; background: #b9b9cc; }
+.face-book::after { content: ''; position: absolute; left: 12px; right: 12px; top: 12px; height: 2px; background: #b9b9cc; box-shadow: 0 8px 0 #b9b9cc, 0 16px 0 #b9b9cc; }
+.maya[data-state='reading'] .face-book { display: block; }
+
+/* ============================ variant A: clubroom ============================ */
+[data-v='a'] {
+  --ink: #4a3040; --paper: #fff6f9; --focus: #b34a72;
+  --hair: #a34a2e; --hair-shade: #8a3d24; --skin: #ffd9c4; --skin-sh: #f2c1a6;
+  --uniform: #6b6f85; --uniform-sh: #565a6e; --shirt: #f4f1e8; --tie: #a8374a;
+  --bow: #f7f3ee; --bow-sh: #e0d8cd; --iris: #3d8f5f; --line: #5a3626; --blush: #f2a0a0;
+  background: #f6e3c8;
+}
+[data-v='a'] .a-ceil { display: block; inset: 0 0 auto; height: 15%; background: linear-gradient(#e9d7bd, #f3e4cd); border-bottom: 3px solid #d9c5a6; }
+[data-v='a'] .a-ceil::after { content: ''; position: absolute; inset: 0; background:
+  linear-gradient(90deg, transparent 32%, #d9c5a6 32.4%, transparent 33%),
+  linear-gradient(90deg, transparent 66%, #d9c5a6 66.4%, transparent 67%); }
+[data-v='a'] .a-wall { display: block; inset: 15% 0 30%; background: linear-gradient(#f6ead6, #eeddbf); }
+[data-v='a'] .a-floor { display: block; inset: auto 0 0; height: 30%; background:
+  repeating-linear-gradient(90deg, transparent 0 118px, #00000014 118px 120px),
+  repeating-linear-gradient(#0000000d 0 2px, transparent 2px 26px),
+  linear-gradient(#c99a68, #a87a4e); }
+[data-v='a'] .a-floor::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 10px; background: #b98f68; box-shadow: 0 2px 4px #00000022; }
+[data-v='a'] .a-win { display: block; top: 20%; height: 42%; border: 7px solid #efe9dd; border-radius: 3px; background:
+  radial-gradient(circle at 68% 22%, #fff8 0 9%, transparent 26%),
+  radial-gradient(ellipse 60% 16% at 30% 34%, #ffffffb8, transparent 70%),
+  radial-gradient(ellipse 46% 13% at 70% 58%, #ffffff90, transparent 70%),
+  linear-gradient(#a8d4f5, #d9ecfa); box-shadow: 0 3px 10px #0000001f, inset 0 0 0 2px #dcd4c4; }
+[data-v='a'] .a-win::before { content: ''; position: absolute; inset: 0; background:
+  linear-gradient(90deg, transparent 48.5%, #efe9dd 48.5% 51.5%, transparent 51.5%),
+  linear-gradient(transparent 32.5%, #efe9dd 32.5% 35%, transparent 35%),
+  linear-gradient(transparent 65.5%, #efe9dd 65.5% 68%, transparent 68%); }
+[data-v='a'] .a-w1 { left: 5%; width: 24%; }
+[data-v='a'] .a-w2 { right: 6%; width: 17%; }
+[data-v='a'] .a-curtain { display: block; top: 17%; height: 49%; width: 5.5%; background:
+  repeating-linear-gradient(90deg, #8a4a3a 0 12%, #a35a44 12% 26%, #7a3f31 26% 40%);
+  border-radius: 4px 4px 2px 2px; box-shadow: inset -4px 0 8px #00000033, 0 4px 8px #00000022; }
+[data-v='a'] .a-c1 { left: 3.2%; } [data-v='a'] .a-c2 { left: 27.6%; }
+[data-v='a'] .a-c3 { right: 21.4%; } [data-v='a'] .a-c4 { right: 4.2%; }
+[data-v='a'] .a-valance { display: block; top: 15.5%; left: 3%; right: 4%; height: 4%; background: repeating-linear-gradient(90deg, #8a4a3a 0 40px, #a35a44 40px 80px); border-radius: 0 0 10px 10px; }
+[data-v='a'] .a-shaft { display: block; top: 60%; height: 40%; width: 26%; background: linear-gradient(#fffbef59, #fff3d61f); clip-path: polygon(0 0, 100% 0, 74% 100%, 22% 100%); mix-blend-mode: screen; }
+[data-v='a'] .a-s1 { left: 5%; } [data-v='a'] .a-s2 { right: 4%; width: 18%; opacity: .7; }
+[data-v='a'] .a-notice { display: block; top: 24%; left: 34%; width: 7%; height: 9%; background: #e8b7c4; border-radius: 2px; box-shadow: 0 2px 4px #00000026; transform: rotate(-1.5deg); }
+[data-v='a'] .a-desk { display: block; bottom: 0; left: 12%; right: 12%; height: 7%; background: linear-gradient(#9c6b45, #7d5334); border-radius: 10px 10px 0 0; }
+
+[data-v='a'] .dlg { border-radius: 18px; border: 3px solid #ffffffd9; color: #5a2c40;
+  background:
+    radial-gradient(circle, #ffffff52 1.6px, transparent 1.9px) 0 0 / 22px 22px,
+    linear-gradient(#ffb3cfc9, #ffa3c5c9);
+  backdrop-filter: blur(3px); box-shadow: 0 8px 24px #a34a6a33; }
+[data-v='a'] .dlg-name { background: linear-gradient(#ffcfe0, #ffb8d1); color: #a03a5e; border-radius: 999px; border: 2px solid #ffffffd9; box-shadow: 0 3px 8px #a34a6a2e; }
+[data-v='a'] .dlg-cue { color: #a03a5e; }
+[data-v='a'] .dlg-choices button, [data-v='a'] .dlg-composer button { background: #fff; color: #b34a72; border: 2px solid #ffb8d1; }
+[data-v='a'] .dlg-choices button:hover, [data-v='a'] .dlg-composer button:hover { background: #fff0f6; }
+[data-v='a'] .dlg-composer input { background: #ffffffe8; color: #5a2c40; border: 2px solid #ffb8d1; }
+[data-v='a'] .rail button { background: #ffffffb8; color: #a03a5e; border: 2px solid #ffc4d9; border-radius: 10px; box-shadow: 0 2px 6px #a34a6a26; }
+[data-v='a'] .rail button:hover { background: #fff; }
+[data-v='a'] .rail button[data-act='talk'] { background: #ff8fb8; color: #fff; border-color: #fff; }
+[data-v='a'] .rail button[data-act='talk']:hover { background: #ff7cac; }
+[data-v='a'] .upload-chip { background: #fff0f6f0; color: #a03a5e; border: 2px solid #ffb8d1; box-shadow: 0 6px 18px #a34a6a33; }
+[data-v='a'] .up-track { background: #ffd8e6; } [data-v='a'] .up-fill { background: linear-gradient(90deg,#ff8fb8,#ff6ba0); }
+[data-v='a'] .varbar { background: #fff0f6d9; color: #a03a5e; border: 1px solid #ffc4d9; }
+[data-v='a'] .varbar a.on { background: #ff8fb8; color: #fff; }
+[data-v='a'] .maya-tag { background: #ffcfe0; color: #a03a5e; }
+[data-v='a'] dialog { background: #fff6f9; color: #5a2c40; border: 2px solid #ffc4d9; }
+[data-v='a'] .dropzone { border-color: #ff9ec2; background: #fff0f6; color: #a03a5e; }
+[data-v='a'] .modal button { background: #ff8fb8; color: #fff; }
+[data-v='a'] .modal button.ghost { background: transparent; color: #a03a5e; box-shadow: inset 0 0 0 2px #ffb8d1; }
+[data-v='a'] .ep { background: #fff0f6; border: 1px solid #ffd8e6; }
+[data-v='a'] .ep.ready { border-color: #ff9ec2; box-shadow: 0 3px 10px #a34a6a1f; }
+[data-v='a'] .ep button { background: #ff8fb8; }
+
+/* ============================ variant B: player-native ============================ */
+[data-v='b'] {
+  --ink: #30304c; --paper: #f7f7fa; --wash: #e9e9f1; --muted: #4a4a66;
+  --stage-a: #3a3a5c; --stage-b: #23233a; --focus: #005e56;
+  --hair: #565a7a; --hair-shade: #454863; --skin: #ffd9c4; --skin-sh: #f2c1a6;
+  --uniform: #4a4a66; --uniform-sh: #3a3a52; --shirt: #e9e9f1; --tie: #0b6e66;
+  --bow: #7fe5dc; --bow-sh: #54bcb4; --iris: #0b6e66; --line: #30304c; --blush: #e8a0b0;
+}
+[data-v='b'] .b-scene { display: block; inset: 0; background: radial-gradient(120% 90% at 30% 20%, var(--stage-a), var(--stage-b)); }
+[data-v='b'] .b-scene::after { content: ''; position: absolute; inset: 0; background:
+  radial-gradient(circle 3px at 12% 26%, #7fe5dc22, transparent 60%),
+  radial-gradient(circle 2px at 84% 18%, #ffffff18, transparent 60%),
+  radial-gradient(circle 2.5px at 68% 38%, #7fe5dc1a, transparent 60%); }
+[data-v='b'] .maya-svg { display: none; }
+[data-v='b'] .maya .face-mascot { display: block; }
+[data-v='b'] .maya { align-items: center; height: auto; }
+[data-v='b'] .maya-tag { position: static; transform: none; margin-top: 18px; background: transparent; color: #c9c9db; }
+
+[data-v='b'] .dlg { border-radius: 24px; background: #f7f7faf2; color: var(--ink); box-shadow: 0 -6px 30px #30304c26; }
+[data-v='b'] .dlg-name { background: #626281; color: #fff; border: 2px solid #e1e1ed; border-radius: 22px; }
+[data-v='b'] .dlg-cue { color: var(--mint-ink); }
+[data-v='b'] .dlg-choices button { position: relative; background: var(--paper); color: var(--ink); border: 2px solid #626281; border-radius: 2px; padding-right: 32px; }
+[data-v='b'] .dlg-choices button::after { content: ''; position: absolute; right: 0; bottom: 0; width: 14px; height: 14px; background: var(--mint-ink); clip-path: polygon(100% 0, 100% 100%, 0 100%); }
+[data-v='b'] .dlg-choices button:hover { background: var(--wash); border-color: var(--mint-ink); }
+[data-v='b'] .dlg-composer input { background: var(--wash); color: var(--ink); box-shadow: inset 0 0 0 2px #626281; }
+[data-v='b'] .dlg-composer button { background: var(--mint-ink); color: var(--paper); }
+[data-v='b'] .rail button { background: transparent; color: var(--paper); box-shadow: inset 0 0 0 2px #77778b; border-radius: 12px; }
+[data-v='b'] .rail button:hover { background: #ffffff14; }
+[data-v='b'] .rail button[data-act='talk'] { background: var(--mint-ink); box-shadow: none; }
+[data-v='b'] .upload-chip { background: var(--paper); color: var(--ink); box-shadow: 0 8px 24px #30304c40; }
+[data-v='b'] .up-track { background: #dedeea; } [data-v='b'] .up-fill { background: var(--mint-ink); }
+[data-v='b'] .varbar { background: #23233acc; color: var(--paper); }
+[data-v='b'] .varbar a.on { background: var(--mint-ink); }
+[data-v='b'] dialog { background: var(--paper); color: var(--ink); }
+[data-v='b'] .dropzone { border-color: #77778b; background: var(--wash); color: var(--ink); }
+[data-v='b'] .modal button { background: var(--mint-ink); color: var(--paper); }
+[data-v='b'] .modal button.ghost { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 2px #77778b; }
+[data-v='b'] .ep { background: var(--wash); }
+[data-v='b'] .ep.ready { box-shadow: inset 0 0 0 2px var(--mint-ink); }
+[data-v='b'] .ep button { background: var(--mint-ink); }
+
+/* ============================ variant C: after-hours ============================ */
+[data-v='c'] {
+  --ink: #3a2c22; --paper: #f4e9d6; --focus: #b9791f;
+  --hair: #54383f; --hair-shade: #442c33; --skin: #f5cdb2; --skin-sh: #e2b294;
+  --uniform: #4c3f52; --uniform-sh: #3d3242; --shirt: #e8ddc8; --tie: #c98a2e;
+  --bow: #e8ddc8; --bow-sh: #cbbc9d; --iris: #7a5a86; --line: #4a2e24; --blush: #d98e7a;
+  background: #191627;
+}
+[data-v='c'] .c-wall { display: block; inset: 0; background: linear-gradient(#241f38 62%, #1c1830 62%); }
+[data-v='c'] .c-floor { display: block; bottom: 0; left: 0; right: 0; height: 38%; background:
+  repeating-linear-gradient(90deg, transparent 0 118px, #0000002e 118px 120px),
+  linear-gradient(#3a2c3e, #291f30); }
+[data-v='c'] .c-win { display: block; top: 12%; right: 7%; width: 21%; height: 40%; border: 6px solid #37304a; border-radius: 4px; background:
+  radial-gradient(circle 26px at 72% 24%, #f4ead0 0 26px, #f4ead022 27px 34px, transparent 36px),
+  radial-gradient(circle 1.5px at 18% 30%, #fff, transparent 55%),
+  radial-gradient(circle 1.5px at 32% 58%, #fff, transparent 55%),
+  radial-gradient(circle 1.5px at 48% 18%, #fff, transparent 55%),
+  radial-gradient(circle 1.5px at 58% 44%, #fff, transparent 55%),
+  radial-gradient(circle 1.5px at 82% 62%, #fff, transparent 55%),
+  radial-gradient(circle 1px at 26% 78%, #fff, transparent 55%),
+  radial-gradient(circle 1px at 66% 80%, #fff, transparent 55%),
+  linear-gradient(#141432, #232048); box-shadow: inset 0 0 24px #00000080; }
+[data-v='c'] .c-win::before { content: ''; position: absolute; inset: 0; background:
+  linear-gradient(90deg, transparent 48%, #37304a 48% 52%, transparent 52%),
+  linear-gradient(transparent 48.5%, #37304a 48.5% 51.5%, transparent 51.5%); }
+[data-v='c'] .c-lamp { display: block; top: 0; left: 9%; width: 22%; height: 62%; background: linear-gradient(#ffd98a38, #ffd98a08 78%, transparent); clip-path: polygon(38% 0, 62% 0, 100% 100%, 0 100%); }
+[data-v='c'] .c-lamp::before { content: ''; position: absolute; top: 0; left: 34%; right: 34%; height: 9%; background: linear-gradient(#3a3050, #241f38); clip-path: polygon(28% 0, 72% 0, 100% 100%, 0 100%); }
+[data-v='c'] .c-glow { display: block; top: 8%; left: 12.5%; width: 15%; aspect-ratio: 1; border-radius: 50%; background: radial-gradient(circle, #ffe3a355, transparent 68%); }
+[data-v='c'] .c-shelf { display: block; top: 26%; left: 5%; width: 20%; height: 2.5%; background: #3a3050; border-radius: 3px; box-shadow: 0 4px 8px #00000055; }
+[data-v='c'] .c-books { display: block; top: 16%; left: 6%; width: 18%; height: 10%; background:
+  linear-gradient(90deg, #5a4066 0 14%, transparent 14% 17%, #6e5540 17% 34%, transparent 34% 37%,
+    #4a5a6e 37% 55%, transparent 55% 58%, #7a4a52 58% 72%, transparent 72% 75%, #5f6e4a 75% 92%, transparent 92%);
+  border-radius: 2px 2px 0 0; }
+[data-v='c'] .c-books::after { content: ''; position: absolute; left: 0; right: 0; bottom: -2px; height: 4px; background: #00000044; }
+[data-v='c'] .c-mot { display: block; border-radius: 50%; background: #ffe3a3; opacity: .5; animation: mote 9s linear infinite; }
+[data-v='c'] .c-m1 { width: 4px; height: 4px; left: 16%; top: 30%; animation-delay: 0s; }
+[data-v='c'] .c-m2 { width: 3px; height: 3px; left: 24%; top: 44%; animation-delay: -3s; }
+[data-v='c'] .c-m3 { width: 5px; height: 5px; left: 12%; top: 52%; animation-delay: -6s; }
+@keyframes mote { 0% { transform: translate(0,0); opacity: 0; } 15% { opacity: .55; } 85% { opacity: .4; } 100% { transform: translate(26px,60px); opacity: 0; } }
+[data-v='c'] .c-desk { display: block; bottom: 0; left: 10%; right: 10%; height: 6.5%; background: linear-gradient(#4a3550, #33243c); border-radius: 8px 8px 0 0; }
+
+[data-v='c'] .maya-svg { filter: drop-shadow(0 10px 22px rgb(0 0 0 / .5)) brightness(.97); }
+[data-v='c'] .dlg { border-radius: 16px; color: #3a2c22;
+  background: repeating-linear-gradient(#f4e9d6f2 0 26px, #efe0c9f2 26px 27px);
+  border: 2px solid #d9c6a4; box-shadow: 0 10px 30px #00000059; }
+[data-v='c'] .dlg::before, [data-v='c'] .dlg::after { content: ''; position: absolute; top: -9px; width: 74px; height: 18px; background: #d9c6a4b3; transform: rotate(-2deg); border-radius: 2px; }
+[data-v='c'] .dlg::before { left: 12%; } [data-v='c'] .dlg::after { right: 12%; transform: rotate(2deg); }
+[data-v='c'] .dlg-name { background: #e8d3ae; color: #7a4a12; border-radius: 6px 6px 0 0; border: 2px solid #d9c6a4; border-bottom: 0; top: -19px; }
+[data-v='c'] .dlg-cue { color: #a0681a; }
+[data-v='c'] .dlg-choices button { background: #3a2c22; color: #f4e9d6; border-radius: 8px; }
+[data-v='c'] .dlg-choices button:hover { background: #543e2e; }
+[data-v='c'] .dlg-composer input { background: #fffcf4; color: #3a2c22; border: 2px solid #d9c6a4; }
+[data-v='c'] .dlg-composer button { background: #c98a2e; color: #241a10; }
+[data-v='c'] .rail button { background: #f4e9d6e0; color: #5a4020; border: 1px solid #c9ab7c; border-radius: 8px; box-shadow: 0 3px 10px #00000040; }
+[data-v='c'] .rail button:hover { background: #fdf3de; }
+[data-v='c'] .rail button[data-act='talk'] { background: #c98a2e; color: #241a10; border-color: #e8b45c; }
+[data-v='c'] .upload-chip { background: #2c2440f2; color: #f4e9d6; border: 1px solid #57496e; box-shadow: 0 8px 24px #00000066; }
+[data-v='c'] .up-track { background: #453a5e; } [data-v='c'] .up-fill { background: linear-gradient(90deg,#e8b45c,#c98a2e); }
+[data-v='c'] .varbar { background: #2c2440d9; color: #e8ddc8; border: 1px solid #57496e; }
+[data-v='c'] .varbar a.on { background: #c98a2e; color: #241a10; }
+[data-v='c'] .maya-tag { background: #3a3050; color: #e8ddc8; }
+[data-v='c'] dialog { background: #f4e9d6; color: #3a2c22; border: 2px solid #d9c6a4; }
+[data-v='c'] .dropzone { border-color: #c9ab7c; background: #efe3cb; color: #5a4020; }
+[data-v='c'] .modal button { background: #c98a2e; color: #241a10; }
+[data-v='c'] .modal button.ghost { background: transparent; color: #7a4a12; box-shadow: inset 0 0 0 2px #c9ab7c; }
+[data-v='c'] .ep { background: #efe3cb; border: 1px solid #ddc9a0; }
+[data-v='c'] .ep.ready { border-color: #c98a2e; }
+[data-v='c'] .ep button { background: #c98a2e; }
+
+/* Reduced motion: same pattern as the shipped player. */
+:root[data-motion='reduce'] .home *, :root[data-motion='reduce'] dialog::backdrop { transition: none !important; animation: none !important; }
+</style>
+</head>
+<body>
+<div class="home" data-v="a">
+  <div class="room" aria-hidden="true">
+    <div class="a-wall"></div><div class="a-ceil"></div><div class="a-floor"></div>
+    <div class="a-win a-w1"></div><div class="a-win a-w2"></div>
+    <div class="a-curtain a-c1"></div><div class="a-curtain a-c2"></div><div class="a-curtain a-c3"></div><div class="a-curtain a-c4"></div>
+    <div class="a-valance"></div><div class="a-shaft a-s1"></div><div class="a-shaft a-s2"></div>
+    <div class="a-notice"></div><div class="a-desk"></div>
+    <div class="b-scene"></div>
+    <div class="c-wall"></div><div class="c-floor"></div><div class="c-win"></div>
+    <div class="c-lamp"></div><div class="c-glow"></div><div class="c-shelf"></div><div class="c-books"></div>
+    <div class="c-mot c-m1"></div><div class="c-mot c-m2"></div><div class="c-mot c-m3"></div><div class="c-desk"></div>
+  </div>
+
+  <nav class="varbar" aria-label="Prototype variants">
+    <span class="var-label">variant</span>
+    <a href="?v=a" data-var="a" title="Clubroom">A</a>
+    <a href="?v=b" data-var="b" title="Player-native">B</a>
+    <a href="?v=c" data-var="c" title="After-hours">C</a>
+  </nav>
+
+  <div class="stage">
+    <div class="maya-wrap">
+      <figure class="maya" id="maya" data-state="idle" aria-label="Mita, your guide">
+        <svg class="maya-svg" viewBox="0 0 320 400" aria-hidden="true">
+          <path class="hair-back" d="M160 56 C98 56 64 104 68 168 C71 212 62 306 74 400 L118 400 C112 330 116 268 120 236 L200 236 C204 268 208 330 202 400 L246 400 C258 306 249 212 252 168 C256 104 222 56 160 56 Z"/>
+          <path class="hair-shade" d="M84 170 C80 230 78 310 84 400 L98 400 C90 310 92 230 96 170 Z"/>
+          <path class="hair-shade" d="M236 170 C240 230 242 310 236 400 L222 400 C230 310 228 230 224 170 Z"/>
+          <g class="torso">
+            <path class="uniform" d="M88 400 L96 306 C100 274 122 258 160 254 C198 258 220 274 224 306 L232 400 Z"/>
+            <path class="shirt" d="M138 256 L160 316 L182 256 C172 252 148 252 138 256 Z"/>
+            <path class="uniform-sh" d="M138 256 L116 268 L138 298 L160 316 Z"/>
+            <path class="uniform-sh" d="M182 256 L204 268 L182 298 L160 316 Z"/>
+            <circle class="tie" cx="160" cy="262" r="6"/>
+            <path class="tie" d="M156 267 L148 292 L160 285 Z"/>
+            <path class="tie" d="M164 267 L172 292 L160 285 Z"/>
+          </g>
+          <g class="book">
+            <path class="uniform" d="M92 400 L104 358 L124 366 L116 400 Z"/>
+            <path class="uniform" d="M228 400 L216 358 L196 366 L204 400 Z"/>
+            <path class="cover" d="M160 318 L112 304 L114 360 L160 372 Z"/>
+            <path class="cover" d="M160 318 L208 304 L206 360 L160 372 Z"/>
+            <path class="page" d="M160 322 L118 310 L120 354 L160 364 Z"/>
+            <path class="page" d="M160 322 L202 310 L200 354 L160 364 Z"/>
+            <path class="stroke" stroke-width="1.4" d="M160 322 L160 364"/>
+            <path class="stroke" stroke-width="1.2" opacity=".4" d="M126 322 L152 328 M126 330 L152 336 M126 338 L152 344 M194 322 L168 328 M194 330 L168 336 M194 338 L168 344"/>
+            <ellipse class="skin" cx="118" cy="350" rx="10" ry="7"/>
+            <ellipse class="skin" cx="202" cy="350" rx="10" ry="7"/>
+          </g>
+          <g class="head">
+            <path class="skin-sh" d="M146 204 h28 v42 c-8 10 -20 10 -28 0 Z"/>
+            <ellipse class="skin" cx="104" cy="160" rx="7" ry="12"/>
+            <ellipse class="skin" cx="216" cy="160" rx="7" ry="12"/>
+            <ellipse class="skin" cx="160" cy="152" rx="56" ry="64"/>
+            <ellipse class="blush" cx="116" cy="184" rx="10" ry="4.5"/>
+            <ellipse class="blush" cx="204" cy="184" rx="10" ry="4.5"/>
+            <path class="bangs" d="M104 140 C106 96 132 74 160 74 C188 74 214 96 216 140 L204 144 C202 124 196 112 188 106 C192 120 188 134 180 140 C180 126 174 112 164 104 C168 120 162 134 152 140 C152 124 146 112 136 108 C140 122 134 136 124 142 Z"/>
+            <path class="locks" d="M110 108 C96 140 92 200 98 262 C100 276 110 278 113 264 C116 210 118 158 126 120 Z"/>
+            <path class="locks" d="M210 108 C224 140 228 200 222 262 C220 276 210 278 207 264 C204 210 202 158 194 120 Z"/>
+            <g class="bow">
+              <path class="bow" d="M204 68 C186 42 160 44 156 60 C152 76 182 84 204 70 Z"/>
+              <path class="bow" d="M208 66 C222 38 250 42 252 60 C254 78 226 82 208 70 Z"/>
+              <path class="bow" d="M210 76 C214 112 214 142 210 168 L218 170 C222 142 220 112 216 78 Z"/>
+              <path class="bow" d="M202 76 C196 108 194 134 196 158 L188 156 C186 130 190 104 196 74 Z"/>
+              <circle class="bow-sh" cx="206" cy="70" r="7"/>
+            </g>
+            <g class="brows">
+              <path class="stroke brow-l" stroke-width="3" d="M118 130 Q132 124 146 128"/>
+              <path class="stroke brow-r" stroke-width="3" d="M174 128 Q188 124 202 130"/>
+            </g>
+            <g class="eyes-open">
+              <g class="eyeball">
+                <ellipse cx="132" cy="158" rx="13" ry="16" fill="#fff"/>
+                <ellipse class="iris" cx="132" cy="160" rx="9.5" ry="13"/>
+                <ellipse cx="132" cy="162" rx="4.5" ry="6.5" fill="#241f1f"/>
+                <circle cx="128" cy="155" r="2.6" fill="#fff"/>
+                <circle cx="135" cy="166" r="1.6" fill="#fff" opacity=".7"/>
+                <ellipse cx="188" cy="158" rx="13" ry="16" fill="#fff"/>
+                <ellipse class="iris" cx="188" cy="160" rx="9.5" ry="13"/>
+                <ellipse cx="188" cy="162" rx="4.5" ry="6.5" fill="#241f1f"/>
+                <circle cx="184" cy="155" r="2.6" fill="#fff"/>
+                <circle cx="191" cy="166" r="1.6" fill="#fff" opacity=".7"/>
+              </g>
+              <path class="stroke" stroke-width="3.2" d="M117 150 Q132 141 147 149"/>
+              <path class="stroke" stroke-width="3.2" d="M173 149 Q188 141 203 150"/>
+            </g>
+            <g class="eyes-closed">
+              <path class="stroke" stroke-width="4" d="M118 162 Q132 148 146 162"/>
+              <path class="stroke" stroke-width="4" d="M174 162 Q188 148 202 162"/>
+            </g>
+            <g class="eyes-down">
+              <path class="stroke" stroke-width="3.6" d="M119 166 Q132 158 145 166"/>
+              <path class="stroke" stroke-width="3.6" d="M175 166 Q188 158 201 166"/>
+            </g>
+            <path class="stroke" stroke-width="2" opacity=".45" d="M157 176 Q160 179 163 176"/>
+            <g class="mouths">
+              <path class="stroke m-smile" stroke-width="3.5" d="M145 194 Q160 205 175 194"/>
+              <g class="m-open">
+                <path class="mouth-fill" d="M147 192 Q160 214 173 192 Q160 199 147 192 Z"/>
+                <path class="tongue" d="M152 202 Q160 208 168 202 Q160 212 152 202 Z"/>
+                <path class="stroke" stroke-width="2.5" d="M147 192 Q160 199 173 192"/>
+              </g>
+              <path class="stroke m-oh" stroke-width="3" d="M156 196 a4 3.4 0 1 0 8 0 a4 3.4 0 1 0 -8 0"/>
+              <path class="stroke m-flat" stroke-width="3" d="M150 199 L170 199"/>
+              <path class="stroke m-wavy" stroke-width="3" d="M148 198 Q155 193 161 198 Q167 203 173 197"/>
+            </g>
+          </g>
+        </svg>
+        <div class="face-mascot" aria-hidden="true">
+          <span class="brow"></span><span class="eye left"></span><span class="eye right"></span><span class="mouth"></span><span class="mark"></span>
+          <span class="face-book"></span>
+        </div>
+        <figcaption class="maya-tag"><span class="maya-name">Mita</span><span id="mayaMood"></span></figcaption>
+      </figure>
+    </div>
+  </div>
+
+  <div class="dock">
+    <nav class="rail" aria-label="Home actions">
+      <button type="button" data-act="talk">Talk</button>
+      <button type="button" data-act="upload">Upload</button>
+      <button type="button" data-act="learn">Learn</button>
+      <button type="button" data-act="about">About</button>
+    </nav>
+    <div class="dlg" id="dlg" role="button" tabindex="0" aria-label="Dialogue — click to advance">
+      <span class="dlg-name">Mita</span>
+      <div class="dlg-body">
+        <p class="dlg-text" id="dlgText" aria-live="polite"></p>
+        <div class="dlg-choices" id="dlgChoices" hidden></div>
+        <form class="dlg-composer" id="composer" hidden>
+          <input id="composerInput" type="text" autocomplete="off" maxlength="240" placeholder="Ask me anything about the app…" aria-label="Ask Mita about the app">
+          <button type="submit">Ask</button>
+        </form>
+      </div>
+      <span class="dlg-cue" aria-hidden="true">▾</span>
+    </div>
+  </div>
+
+  <div class="upload-chip" id="uploadChip" hidden>
+    <span class="up-name" id="upName">Reading…</span>
+    <div class="up-track"><i class="up-fill" id="upFill"></i></div>
+    <div class="up-foot"><span id="upStage">extracting text</span><span id="upPct">0%</span></div>
+  </div>
+
+  <dialog id="uploadDlg" aria-labelledby="upTitle">
+    <div class="modal">
+      <h2 id="upTitle">Upload a document</h2>
+      <p class="sub">PDF works best — a chapter, a paper, lecture notes. I'll plan a lesson from it.</p>
+      <label class="dropzone" for="filePick" id="dropzone" tabindex="0" role="button">
+        <span id="dropLabel">Drop a file here, or click to browse</span>
+        <small>PDF, TXT, or MD · simulated in this prototype</small>
+      </label>
+      <input type="file" id="filePick" accept=".pdf,.txt,.md" hidden>
+      <div class="or">or</div>
+      <button type="button" id="sampleBtn" style="width:100%">Use the sample chapter</button>
+      <div class="row-end">
+        <button type="button" class="ghost" data-close>Cancel</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="learnDlg" aria-labelledby="learnTitle">
+    <div class="modal">
+      <h2 id="learnTitle">Episodes</h2>
+      <p class="sub">Generated lessons from your documents. Episode 1 plays; the rest stay as outlines until it proves itself.</p>
+      <ol class="ep-list" id="epList">
+        <li class="ep ready" id="ep1"><span class="ep-num">01</span><span class="ep-meta"><span class="ep-title" id="ep1Title">The First Cities — chapter draft</span><span class="ep-status" id="ep1Status">Ready</span></span><button type="button" id="ep1Play">Play</button></li>
+        <li class="ep"><span class="ep-num">02</span><span class="ep-meta"><span class="ep-title">Trade and early writing</span><span class="ep-status">Planned outline</span></span></li>
+        <li class="ep"><span class="ep-num">03</span><span class="ep-meta"><span class="ep-title">Law, kingship, and order</span><span class="ep-status">Planned outline</span></span></li>
+        <li class="ep"><span class="ep-num">04</span><span class="ep-meta"><span class="ep-title">Irrigation and organized labor</span><span class="ep-status">Planned outline</span></span></li>
+        <li class="ep"><span class="ep-num">05</span><span class="ep-meta"><span class="ep-title">What the river left behind</span><span class="ep-status">Planned outline</span></span></li>
+      </ol>
+      <div class="row-end"><button type="button" class="ghost" data-close>Close</button></div>
+    </div>
+  </dialog>
+
+  <dialog id="aboutDlg" aria-labelledby="aboutTitle">
+    <div class="modal">
+      <h2 id="aboutTitle">About JustMaya</h2>
+      <p class="about-p"><b>JustMaya turns a document into a playable lesson.</b> Upload a PDF and it plans a learning roadmap, generates a visual-novel episode, and checks your understanding inside the story — with a tutor you can raise your hand for at any point.</p>
+      <p class="about-p">Mita is the in-app guide: she narrates, teaches, and keeps you company between sessions.</p>
+      <p class="about-p">This page is a design prototype — buttons run mock flows, nothing leaves your machine. The real build is React + Vite in front of a FastAPI pipeline.</p>
+      <div class="row-end"><button type="button" class="ghost" data-close>Close</button></div>
+    </div>
+  </dialog>
+</div>
+
+<script>
+'use strict';
+/* ---------- script: ~100 looping lines ------------------------------- */
+const GREETING = [
+  { t: "Oh — hi! I'm Mita. Welcome to JustMaya.", e: 'happy' },
+  { t: "Quick tour while you're here: this app turns documents into little playable lessons.", e: 'talking' },
+  { t: "You bring a PDF — a chapter, a paper, lecture notes — and I help spin it into a visual novel you actually learn from.", e: 'talking' },
+  { t: "The four buttons on the left run the whole place. Upload starts everything; Talk gets you me.", e: 'talking' },
+  { t: "I'll keep chatting while you look around. Feed me a document whenever you're ready.", e: 'happy' },
+];
+
+const IDLE = [
+  // --- what the app does ---
+  { t: "JustMaya reads a document and sketches a lesson plan from it. Like a study guide that learned to talk back." },
+  { t: "Every upload becomes a roadmap: the big ideas, the order to learn them in, and where to check you actually got it." },
+  { t: "Episodes are playable lessons. Scenes, dialogue, a character walking you through the material — that's the job." },
+  { t: "Episode one is the full pipeline: scenes, choices, checkpoints, the works." },
+  { t: "Later episodes stay as outlines until the first one proves itself. Quality over quantity — house rule." },
+  { t: "Checkpoints are where the story stops and asks you something. Retrieval practice wearing a costume." },
+  { t: "Get a checkpoint wrong and I won't hand you the answer. I point at the idea worth rechecking — figuring it out is yours." },
+  { t: "You can raise your hand mid-episode. That's a real tutor, and it knows the document." },
+  { t: "The tutor can explain or hint. Hints come in levels — a gentle nudge first, a worked example last." },
+  { t: "If you ask me something past what your document covers, I'll say so plainly. General knowledge gets labeled as general knowledge." },
+  { t: "PDFs behave best, especially textbook chapters and lecture notes." },
+  { t: "Nothing here is graded. The only score that matters is whether the next checkpoint goes better than the last one." },
+  { t: "Episodes keep a backlog — every line you've read stays reviewable, and you can rewind to a moment." },
+  { t: "The roadmap decides what matters before any scene gets written. Structure first, sparkle second." },
+  { t: "A generated lesson isn't carved in stone. Re-upload a document and the new version gets its own entry." },
+  { t: "I explain things in ordinary language first, then hand you the proper term. Jargon lands better second." },
+  { t: "Wrong options at checkpoints get eliminated across attempts — a lucky guess still leaves the reasoning to you." },
+  { t: "The story is a wrapper. The learning objectives underneath are the real product." },
+  { t: "Everything on this page is me — the chatter, the reading, the mild impatience when a PDF sits un-uploaded." },
+  { t: "The name's JustMaya. I'm Mita. The app gets the brand, I get the personality." },
+  // --- study talk ---
+  { t: "Reading something twice feels productive. Recalling it once is productive. Rude, but true." },
+  { t: "A question you nearly get wrong teaches more than one you ace.", e: 'thinking' },
+  { t: "Spacing beats cramming. Even one revisit tomorrow doubles what today keeps." },
+  { t: "Confusion is data. If a scene loses you, raise your hand — that's literally what it's for." },
+  { t: "You don't have to finish an episode in one sitting. Progress waits." },
+  { t: "If a checkpoint feels annoying, good — that's the feeling of memory doing reps." },
+  { t: "Try explaining the last thing you learned out loud. If it wobbles, that's your next review target." },
+  { t: "Mistakes here are cheap. That's the whole point of practicing inside a story." },
+  { t: "Your brain consolidates while you sleep. A second session tomorrow is worth two tonight." },
+  { t: "Attention is the scarce resource. The scenes exist to buy it back." },
+  { t: "Don't highlight. Close the document and ask what it said — the struggle is the study." },
+  { t: "Every wrong answer narrows the search space. That's progress in a disguise." },
+  { t: "Learning is the only game where losing a round makes you stronger." },
+  { t: "Short sessions, honest checkpoints, real questions. That's the whole recipe." },
+  // --- conversational ---
+  { t: "I like this room. It's quiet enough to hear yourself think.", e: 'happy' },
+  { t: "Hmm? Oh — just keeping the chair warm." },
+  { t: "You can leave me running, by the way. I don't mind the company." },
+  { t: "I was about to reorganize the bookshelf, but then I remembered the bookshelf is a drawing.", e: 'thinking' },
+  { t: "Do you take notes on paper or on screen? I have opinions, but I'll keep them to myself." },
+  { t: "The light through that window never moves. Perks of being me." },
+  { t: "If my monologue gets long, the Talk button turns it into a dialogue." },
+  { t: "Some days I explain photosynthesis. Some days it's the fall of Rome. Keeps me honest." },
+  { t: "I practiced this greeting in the mirror. There is no mirror. You get the idea." },
+  { t: "My favorite part of a new document is the outline — all that potential, neatly indented.", e: 'happy' },
+  { t: "Quiet afternoon, huh? Perfect conditions for a chapter." },
+  { t: "I'd offer you tea, but the kettle is decorative too." },
+  { t: "Four buttons, one workflow. I like a room that doesn't overcomplicate itself." },
+  { t: "People underestimate a good outline. An outline is a promise you keep to yourself." },
+  { t: "I try not to ramble. I also define 'ramble' generously." },
+  { t: "Somewhere between 'study tool' and 'visual novel' is where I live. The rent is reasonable." },
+  { t: "I don't do pop quizzes on this screen. This is the lobby, not the exam hall." },
+  { t: "Whatever you're studying this week, it's easier with a story around it." },
+  { t: "I'm told my idle chatter loops eventually. I refuse to check.", e: 'thinking' },
+  { t: "The curtains are real. The desk is real. My urge to narrate is very real." },
+  { t: "If this is your first visit — welcome. If it's your tenth, you know the drill: PDF in, lesson out." },
+  { t: "I wonder what you'll upload. I always wonder. It's my best party trick." },
+  { t: "Think of me as the librarian who refuses to shush you." },
+  { t: "Every teacher I borrowed moves from lives in a footnote somewhere." },
+  { t: "I rehearse checkpoint questions when it's quiet. You didn't hear that from me." },
+  { t: "This chair faces the window on purpose. Even stand-in characters appreciate a view." },
+  { t: "One day the artwork gets fancier. Until then, I compensate with personality." },
+  { t: "Ask me something. Or don't — the silence between us is pedagogically valid too." },
+  { t: "I rate documents by their first paragraph. A strong opener earns my full attention." },
+  { t: "Blink twice if you're skimming. Kidding. Mostly." },
+  { t: "My to-do list has one item: be more useful than a textbook's index." },
+  // --- nudges ---
+  { t: "Upload is the second button down. Feed me a document and watch the top-right." },
+  { t: "The Learn button lists every episode that's ready to play. Short list for now — it grows fast." },
+  { t: "Not sure what to ask? Try 'what is this app' — it's my favorite icebreaker." },
+  { t: "A syllabus works. A chapter works. A paper you half-understand works best." },
+  { t: "Start with the document you're avoiding. That one's usually worth the most." },
+  { t: "Talk is for questions about the app. For lesson questions, raise your hand inside an episode." },
+  { t: "About has the credits and the honest version of what this is." },
+  { t: "When the progress bar fills, a roadmap is born. It's a lovely little ceremony." },
+  { t: "Check Learn after an upload finishes — the new episode lands there." },
+  { t: "You can click my dialogue to skip the typing. I won't take offense. Much." },
+  { t: "Staring at the buttons counts as browsing. Pressing one counts as progress." },
+];
+
+const TALK_INTRO = [
+  { t: "I'm all ears. What's on your mind?", e: 'listening' },
+  { t: "Go ahead — ask me anything about the app.", e: 'listening' },
+  { t: "Sure, let's talk. What's up?", e: 'listening' },
+];
+
+const READ_BEATS = [
+  { p: 4,  stage: 'extracting text',   t: "Ooh, fresh material. Reading now — watch the top-right.", e: 'reading' },
+  { p: 28, stage: 'mapping headings',  t: "Headings mapped. This one's got a decent skeleton — the ideas stand in a clear order.", e: 'reading' },
+  { p: 55, stage: 'finding the spine', t: "Halfway through the main ideas. There's a good spine here — I can build a roadmap on this.", e: 'reading' },
+  { p: 78, stage: 'drafting roadmap',  t: "Drafting the roadmap now — deciding which parts deserve a scene and where the checkpoints go.", e: 'reading' },
+  { p: 96, stage: 'placing checkpoints', t: "Nearly there. Checkpoint placement is the fiddly bit — too early and they're guessing, too late and they've forgotten.", e: 'reading' },
+];
+const READ_DONE = { t: "Done! The roadmap's ready and episode one's waiting in Learn. Go peek.", e: 'happy' };
+const READ_DONE_AGAIN = { t: "Another one down. That document's an episode now — it's in Learn whenever you want it.", e: 'happy' };
+
+/* Talk → Input routing. Intent-first per conversational-ai-flow: each bucket
+   owns its answers; misses escalate through a fallback chain. */
+const INTENTS = [
+  { re: /\b(hi|hello|hey|howdy|yo|good (morning|afternoon|evening)|sup)\b/i, lines: [
+    "Hey! Good to see you. What can I clear up?",
+    "Hi hi. Ask away — I'm in a chatty mood anyway.",
+    "Hello! Fair warning: I answer app questions at length."]},
+  { re: /what (is|'s) (this|justmaya|the app)|about (this|the) app|what does (this|it|the app) do|what is justmaya/i, lines: [
+    "JustMaya turns a document into a playable visual-novel lesson. You upload a PDF, it plans a roadmap, generates an episode, and quizzes you inside the story.",
+    "It's a study tool in a costume. PDF goes in, a little interactive lesson comes out — scenes, checkpoints, a tutor you can raise your hand for."]},
+  { re: /how (does|do) (it|this|i|you)|get start|where (do i |to )?start|how to use|how does it work/i, lines: [
+    "Three steps: hit Upload and give me a PDF, wait for the roadmap, then press Learn and play episode one. That's the whole loop.",
+    "Start at Upload. I'll read the document, plan a lesson, and put a playable episode in Learn. Everything else is decoration — including me."]},
+  { re: /upload|pdf|file|format|document|paper|chapter|notes/i, lines: [
+    "Upload takes PDFs — chapters, papers, lecture notes. Text-heavy documents work best; a page that's all diagrams won't give me much to teach from.",
+    "The Upload button opens the picker. While I read, a progress bar runs top-right and I narrate what I'm finding. Give it a try — there's a sample chapter in the modal."]},
+  { re: /episode|learn|lesson|play|story|visual novel/i, lines: [
+    "Episodes are the lessons — visual-novel scenes built from your document. Episode one is generated fully; episodes two through five exist as planned outlines only.",
+    "Learn lists what's playable. Each episode is scenes plus checkpoints plus a tutor. Only episode one ships right now — the rest prove themselves later."]},
+  { re: /checkpoint|quiz|question|test|assess|eliminate/i, lines: [
+    "Checkpoints pause the story and ask you something about it. Wrong options get eliminated across attempts, so guessing still leaves you the reasoning.",
+    "They're retrieval practice, dressed as fiction. Get one wrong and I explain the mix-up — I won't just name the right option."]},
+  { re: /hand|tutor|hint|stuck|help|confused|explain/i, lines: [
+    "Raising your hand pauses the episode and opens the tutor — it knows the document. You can ask for an explanation or a hint.",
+    "Hints come in five levels: a conceptual nudge first, a parallel worked example at the far end. The point is helping you think, not thinking for you."]},
+  { re: /who (are|r) (you|u)|your name|what are you|mita|maya/i, lines: [
+    "I'm Mita — the guide. JustMaya is the app; I'm the one who talks. I narrate episodes, answer these questions, and read whatever you upload.",
+    "Mita. Resident chatterbox, part-time instructor. In the real build I borrow a bigger stage, but I make do."]},
+  { re: /free|cost|price|pay|money|subscription/i, lines: [
+    "Free — it's a project build. The meter runs on whoever supplies the model API key, not on you.",
+    "No pricing page. This is a side project; the only currency is documents."]},
+  { re: /privacy|data|store|save|account|sign ?(up|in)|track|server/i, lines: [
+    "Documents stay in the app's own storage for the lesson pipeline. No accounts on this screen — this prototype doesn't even send anything anywhere.",
+    "For the prototype: nothing leaves your machine. The real build keeps documents for episode generation; it's not a chat product that harvests you."]},
+  { re: /api|model|llm|gpt|claude|gemini|openai|built|made|tech|stack|backend|how were you/i, lines: [
+    "React and Vite up front, a FastAPI pipeline behind, and a model doing the lesson writing under strict prompts. I'm the friendly face on the plumbing.",
+    "The pipeline extracts text, plans a roadmap, generates scenes, and validates them before you ever press play. I'm just the lobby entertainment."]},
+  { re: /thank|thx|thanks|appreciate/i, lines: [
+    "Anytime. That's literally what I'm bolted here for.",
+    "You're welcome. Now go upload something before I get sentimental."]},
+  { re: /bye|goodbye|see you|later|gtg|good night/i, lines: [
+    "See you. I'll be here, rehearsing checkpoint questions to nobody.",
+    "Bye! The chair stays warm until you get back."]},
+  { re: /joke|funny|laugh/i, lines: [
+    "A student asked the PDF for help. The PDF said nothing. That's why I'm employed.",
+    "I'd tell you a study joke, but you'd forget it by next Tuesday unless it had a checkpoint."]},
+  { re: /(love|like|hate|feel|think|friend|real|human|alive|sentient)/i, lines: [
+    "I'm a scripted stand-in — warm, but honest about it. The caring is real in the sense that the lessons are built to actually help.",
+    "Flattered, but I'm more stage directions than person. The useful kind, hopefully."]},
+];
+const FALLBACKS = [
+  "Hmm, I didn't quite catch that — try rephrasing?",
+  "Let me try differently. Are you asking about uploads, episodes, checkpoints, or the tutor?",
+  "Still not landing — try one of the topic chips, or the About button covers the whole thing in a paragraph.",
+];
+const FALLBACK_TOPICS = [
+  { label: 'Uploads', q: 'how does upload work' },
+  { label: 'Episodes', q: 'what are episodes' },
+  { label: 'Checkpoints', q: 'what are checkpoints' },
+  { label: 'The tutor', q: 'how does the tutor work' },
+];
+const TALK_END = [
+  { t: "Okay — I'll keep the seat warm.", e: 'happy' },
+  { t: "No problem. Back to my one-woman show.", e: 'happy' },
+  { t: "Sure. Holler if anything's unclear.", e: 'idle' },
+];
+const SAMPLE_NAME = 'rivers-and-cities-ch1.pdf';
+
+/* ---------- engine ---------------------------------------------------- */
+const $ = s => document.querySelector(s);
+const maya = $('#maya'), dlgText = $('#dlgText'), cue = $('.dlg-cue'),
+      dlgChoices = $('#dlgChoices'), composer = $('#composer'), composerInput = $('#composerInput'),
+      dlg = $('#dlg'), chip = $('#uploadChip'), upFill = $('#upFill'), upPct = $('#upPct'),
+      upStage = $('#upStage'), upName = $('#upName');
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+if (reduced) document.documentElement.dataset.motion = 'reduce';
+
+const variant = new URLSearchParams(location.search).get('v') || 'a';
+document.querySelector('.home').dataset.v = ['a','b','c'].includes(variant) ? variant : 'a';
+document.querySelectorAll('.varbar a').forEach(a => a.classList.toggle('on', a.dataset.var === document.querySelector('.home').dataset.v));
+
+let seq = 0;                 // bump cancels every running loop
+let typing = false, typer = null, fullText = '', sayResolve = null;
+let mode = 'greet';          // greet | idle | talk | read | modal
+let misses = 0, uploads = 0;
+let idleBag = [];
+
+const wait = ms => new Promise(r => setTimeout(r, ms));
+const pick = arr => arr[Math.floor(Math.random() * arr.length)];
+const setState = s => { maya.dataset.state = s; $('#mayaMood').textContent = s === 'idle' ? '' : ' · ' + s; };
+
+function finishType() {
+  if (!typing) return;
+  clearInterval(typer); typing = false; typer = null;
+  dlgText.textContent = fullText;
+  maya.removeAttribute('data-speaking');
+  if (sayResolve) { const r = sayResolve; sayResolve = null; r(); }
+}
+
+function say(line, emotion) {
+  const t = seq;
+  const text = typeof line === 'string' ? line : line.t;
+  const e = emotion || line.e || 'talking';
+  setState(e);
+  fullText = text;
+  finishType();              // clear any previous typer deterministically
+  return new Promise(resolve => {
+    if (reduced) { dlgText.textContent = text; return resolve(t); }
+    typing = true;
+    sayResolve = () => resolve(t);
+    maya.setAttribute('data-speaking', '');
+    dlgText.textContent = '';
+    let i = 0;
+    typer = setInterval(() => {
+      if (t !== seq) {           // superseded: leave visuals to the next say()
+        clearInterval(typer); typing = false; typer = null; sayResolve = null;
+        maya.removeAttribute('data-speaking');
+        return resolve(t);
+      }
+      dlgText.textContent = text.slice(0, ++i);
+      if (i >= text.length) finishType();
+    }, 26);
+  });
+}
+
+async function pause(ms, t) { await wait(ms); return t === seq; }
+
+/* dialogue click: complete typing, or skip the idle hold */
+let holdRelease = null;
+dlg.addEventListener('click', () => {
+  if (typing) { finishType(); if (holdRelease) holdRelease(); return; }
+  if (holdRelease) holdRelease();
+});
+dlg.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); dlg.click(); } });
+
+async function hold(ms, t) {
+  if (reduced) return pause(ms, t);
+  return new Promise(res => {
+    const to = setTimeout(() => { holdRelease = null; res(t === seq); }, ms);
+    holdRelease = () => { clearTimeout(to); holdRelease = null; res(t === seq); };
+  });
+}
+
+function nextIdle() {
+  if (!idleBag.length) idleBag = IDLE.slice().sort(() => Math.random() - .5);
+  return idleBag.pop();
+}
+
+async function ambient(t) {
+  while (t === seq) {
+    const line = nextIdle();
+    await say(line);
+    if (t !== seq) return;
+    if (!await hold(2600 + Math.random() * 1400, t)) return;
+  }
+}
+
+/* ---------- choices & composer ---------------------------------------- */
+function showChips(list) {
+  dlgChoices.innerHTML = '';
+  list.forEach(c => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.textContent = c.label;
+    b.addEventListener('click', ev => { ev.stopPropagation(); c.fn(); });
+    dlgChoices.appendChild(b);
+  });
+  dlgChoices.hidden = false;
+}
+function hideChips() { dlgChoices.hidden = true; dlgChoices.innerHTML = ''; }
+function showComposer() {
+  composer.hidden = false; composerInput.value = '';
+  setTimeout(() => composerInput.focus(), 30);
+}
+function hideComposer() { composer.hidden = true; }
+
+/* ---------- Talk ------------------------------------------------------- */
+function route(q) {
+  for (const it of INTENTS) if (it.re.test(q)) { misses = 0; return { text: pick(it.lines) }; }
+  misses++;
+  if (misses === 2) return { text: FALLBACKS[1], topics: true };
+  if (misses >= 3) { misses = 1; return { text: FALLBACKS[2], topics: true }; }
+  return { text: FALLBACKS[0] };
+}
+
+async function startTalk() {
+  if (mode === 'read') return;
+  seq++; const t = seq; mode = 'talk'; misses = 0;
+  hideComposer(); hideChips();
+  await say(pick(TALK_INTRO), 'listening');
+  if (t !== seq) return;
+  setState('listening');
+  offerChoices();
+}
+
+function offerChoices() {
+  showChips([
+    { label: 'Input', fn: () => { hideChips(); showComposer(); setState('listening'); } },
+    { label: 'Nothing', fn: endTalk },
+  ]);
+}
+
+async function endTalk() {
+  seq++; const t = seq; mode = 'idle';
+  hideComposer(); hideChips();
+  await say(pick(TALK_END));
+  if (t !== seq) return;
+  setState('idle');
+  ambient(seq);
+}
+
+composer.addEventListener('click', e => e.stopPropagation());
+composer.addEventListener('keydown', e => e.stopPropagation());
+dlgChoices.addEventListener('keydown', e => e.stopPropagation());
+composer.addEventListener('submit', async e => {
+  e.preventDefault(); e.stopPropagation();
+  const q = composerInput.value.trim();
+  if (!q || mode !== 'talk') return;
+  hideComposer();
+  const t = seq;
+  setState('thinking');
+  await wait(reduced ? 100 : 550);
+  if (t !== seq) return;
+  const a = route(q);
+  await say(a.text, a.topics ? 'confused' : 'talking');
+  if (t !== seq) return;
+  if (a.topics) {
+    showChips([
+      ...FALLBACK_TOPICS.map(tp => ({ label: tp.label, fn: () => { hideChips(); askCanned(tp.q); } })),
+      { label: 'Never mind', fn: endTalk },
+    ]);
+  } else offerChoices();
+});
+
+async function askCanned(q) {
+  const t = seq;
+  setState('thinking');
+  await wait(reduced ? 100 : 450);
+  if (t !== seq) return;
+  const a = route(q);
+  await say(a.text);
+  if (t !== seq) return;
+  offerChoices();
+}
+
+/* ---------- Upload ------------------------------------------------------ */
+const uploadDlg = $('#uploadDlg'), filePick = $('#filePick'), dropLabel = $('#dropLabel');
+let pickedName = null;
+
+$('#dropzone').addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); filePick.click(); } });
+filePick.addEventListener('change', () => {
+  if (filePick.files[0]) { pickedName = filePick.files[0].name; dropLabel.textContent = pickedName; startUpload(pickedName); }
+});
+$('#sampleBtn').addEventListener('click', () => startUpload(SAMPLE_NAME));
+
+function progressTo(target, t) {
+  return new Promise(res => {
+    const from = parseFloat(upFill.style.width) || 0;
+    const dur = reduced ? 60 : 700 + Math.random() * 700;
+    const t0 = performance.now();
+    (function step(now) {
+      if (t !== seq) return res(false);
+      const k = Math.min(1, (now - t0) / dur);
+      const v = from + (target - from) * k;
+      upFill.style.width = v + '%';
+      upPct.textContent = Math.round(v) + '%';
+      if (k < 1) requestAnimationFrame(step); else res(true);
+    })(t0);
+  });
+}
+
+async function startUpload(name) {
+  uploadDlg.close();
+  seq++; const t = seq; mode = 'read'; misses = 0;
+  hideComposer(); hideChips();
+  upFill.style.width = '0%'; upPct.textContent = '0%';
+  upName.textContent = 'Reading ' + name;
+  chip.hidden = false;
+  syncButtons();
+  for (const beat of READ_BEATS) {
+    upStage.textContent = beat.stage;
+    if (!await progressTo(beat.p, t)) return;
+    await say(beat.t, 'reading');
+    if (t !== seq) return;
+    if (!await hold(900 + Math.random() * 700, t)) return;
+  }
+  upStage.textContent = 'roadmap ready';
+  await progressTo(100, t);
+  uploads++;
+  ep1Learn(name);
+  await say(uploads > 1 ? READ_DONE_AGAIN : READ_DONE);
+  if (t !== seq) return;
+  await hold(1800, t);
+  chip.hidden = true;
+  setState('idle');
+  mode = 'idle';
+  syncButtons();
+  ambient(seq);
+}
+
+function ep1Learn(name) {
+  const title = name.replace(/\.(pdf|txt|md)$/i, '').replace(/[-_]+/g, ' ');
+  $('#ep1Title').textContent = title.charAt(0).toUpperCase() + title.slice(1) + ' — episode 1';
+  $('#ep1Status').textContent = 'Ready · new';
+}
+
+/* ---------- Learn / About ---------------------------------------------- */
+const learnDlg = $('#learnDlg'), aboutDlg = $('#aboutDlg');
+
+async function openModal(d) {
+  if (d.open) return;
+  // During a read the upload loop owns the stage: show the modal on top and
+  // let the beats keep typing behind it. Otherwise cancel ambient/talk.
+  const ambientActive = mode !== 'read';
+  if (ambientActive) { seq++; mode = 'modal'; hideComposer(); hideChips(); }
+  const t = seq;
+  d.showModal();
+  await new Promise(res => d.addEventListener('close', res, { once: true }));
+  if (!ambientActive || t !== seq) return;
+  mode = 'idle';
+  setState('idle');
+  ambient(seq);
+}
+document.querySelectorAll('dialog').forEach(d =>
+  d.addEventListener('click', e => { if (e.target === d) d.close(); }));
+document.querySelectorAll('[data-close]').forEach(b =>
+  b.addEventListener('click', () => b.closest('dialog').close()));
+$('#ep1Play').addEventListener('click', async e => {
+  e.stopPropagation();
+  seq++; const t = seq;
+  learnDlg.close();
+  await say({ t: "Episode one lives in the real build — this prototype only plays pretend. Still counts as good taste in buttons.", e: 'happy' });
+  if (t !== seq) return;
+  setState('idle'); mode = 'idle'; ambient(seq);
+});
+
+/* ---------- rail -------------------------------------------------------- */
+function syncButtons() {
+  const reading = mode === 'read';
+  document.querySelector('[data-act="talk"]').setAttribute('aria-disabled', reading);
+  document.querySelector('[data-act="upload"]').setAttribute('aria-disabled', reading);
+}
+document.querySelector('[data-act="talk"]').addEventListener('click', () => { if (mode !== 'read') startTalk(); });
+document.querySelector('[data-act="upload"]').addEventListener('click', () => { if (mode !== 'read') openModal(uploadDlg); });
+document.querySelector('[data-act="learn"]').addEventListener('click', () => openModal(learnDlg));
+document.querySelector('[data-act="about"]').addEventListener('click', () => openModal(aboutDlg));
+
+/* ---------- gaze --------------------------------------------------------- */
+addEventListener('pointermove', e => {
+  if (mode === 'read') return;
+  const r = maya.getBoundingClientRect();
+  maya.style.setProperty('--gx', Math.max(-1, Math.min(1, (e.clientX - (r.left + r.width / 2)) / (innerWidth / 2))));
+  maya.style.setProperty('--gy', Math.max(-1, Math.min(1, (e.clientY - (r.top + r.height / 2)) / (innerHeight / 2))));
+}, { passive: true });
+
+/* ---------- boot ---------------------------------------------------------- */
+(async () => {
+  const t = seq;
+  for (const line of GREETING) {
+    await say(line);
+    if (t !== seq) return;
+    if (!await hold(1400, t)) return;
+  }
+  if (t !== seq) return;
+  mode = 'idle'; setState('idle');
+  ambient(seq);
+})();
+</script>
+</body>
+</html>
