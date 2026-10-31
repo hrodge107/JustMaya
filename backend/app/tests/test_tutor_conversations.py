@@ -48,7 +48,8 @@ class ScriptProvider(StubProvider):
 
 
 def _resp(move="explain", engagement="engaged", grounding="supported",
-          lines=("beat",), note="topic"):
+          lines=("beat",), note="topic",
+          relation=None):
     return {
         "lines": list(lines),
         "cited_chunk_ids": ["c1"] if grounding == "supported" else [],
@@ -56,6 +57,11 @@ def _resp(move="explain", engagement="engaged", grounding="supported",
         "learning_note": note,
         "move": move,
         "engagement": engagement,
+        "relation": (
+            relation
+            if relation is not None
+            else ("on_document" if grounding == "supported" else "on_topic")
+        ),
     }
 
 

@@ -45,6 +45,7 @@ class StubProvider:
                 "learning_note": "verification topic",
                 "move": "explain",
                 "engagement": "engaged",
+                "relation": "on_document",
             },
             usage={"prompt_tokens": 12, "completion_tokens": 7, "total_tokens": 19},
         )
@@ -72,7 +73,12 @@ def main():
         source.backup(target)
     with sqlite3.connect(staged / "app.db") as conn:
         episodes = [json.loads(r[0]) for r in conn.execute("SELECT payload FROM episodes WHERE status='ready'")]
-    episode = next(e for e in episodes if "scene-03-checkpoint-1" in {s["sceneId"] for s in e["scenes"]})
+    episode, checkpoint_scene = next(
+        (e, s["sceneId"])
+        for e in episodes
+        for s in e["scenes"]
+        if s["kind"] == "checkpoint"
+    )
 
     settings = Settings(_env_file=None, data_dir=staged)
     app = create_app(data_dir=staged)
@@ -89,13 +95,13 @@ def main():
 
         session = post(f"/api/episodes/{episode['episodeId']}/sessions")
         sid = session["sessionId"]
-        while session["sceneId"] != "scene-03-checkpoint-1":
+        while session["sceneId"] != checkpoint_scene:
             session = post(f"/api/sessions/{sid}/advance", {"request_id": uuid.uuid4().hex, "expected_version": session["version"]})
 
         # raise hand from the checkpoint -> snapshot + question mode
         raised = post(f"/api/sessions/{sid}/raise-hand", {"request_id": uuid.uuid4().hex, "expected_version": session["version"]})
         assert raised["mode"] == "question"
-        assert raised["resumeSnapshot"] == {"sceneId": "scene-03-checkpoint-1", "dialogueIndex": 0, "mode": "checkpoint"}
+        assert raised["resumeSnapshot"] == {"sceneId": checkpoint_scene, "dialogueIndex": 0, "mode": "checkpoint"}
         assert raised["tutorThreadId"] == f"{sid}:{raised['version']}"
         nested = client.post(f"/api/sessions/{sid}/raise-hand", json={"request_id": uuid.uuid4().hex, "expected_version": raised["version"]})
         assert nested.status_code == 409 and nested.json()["error"]["code"] == "INVALID_SESSION_TRANSITION"
@@ -143,7 +149,7 @@ def main():
 
         # resume restores the checkpoint exactly
         resumed = post(f"/api/sessions/{sid}/resume", {"request_id": uuid.uuid4().hex, "expected_version": anchored["session"]["version"]})
-        assert resumed["mode"] == "checkpoint" and resumed["sceneId"] == "scene-03-checkpoint-1"
+        assert resumed["mode"] == "checkpoint" and resumed["sceneId"] == checkpoint_scene
         assert resumed["resumeSnapshot"] is None and resumed["checkpoint"]["attemptsUsed"] == 0
         assert "attemptsRemaining" not in resumed["checkpoint"]
         evidence.append({"check": "resume restores checkpoint position and clears the snapshot", "result": "PASS"})
