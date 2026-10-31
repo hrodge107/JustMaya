@@ -25,16 +25,25 @@ async function run(browser, variant) {
   page.on('response', r => { if (r.status() >= 400) errors.push(`[${variant}] ${r.status()} ${r.url()}`) })
   await page.goto(`${base}?v=${variant}`, { waitUntil: 'load' })
 
-  // Fixed spec: dialogue box, left rail with the three main actions, mascot.
+  // Fixed spec: dialogue box, action rail (Talk/Upload/Learn/Menu), mascot.
   await page.waitForSelector('.dlg')
-  const rail = await page.$$('.rail button')
-  assert.equal(rail.length, 3, `[${variant}] rail buttons`)
+  const rail = await page.$$('.rail button[data-act]')
+  assert.equal(rail.length, 4, `[${variant}] rail buttons`)
   const labels = await Promise.all(rail.map(b => b.textContent()))
-  assert.deepEqual(labels.map(s => s.trim()), ['Talk', 'Upload', 'Learn'], `[${variant}] rail labels`)
+  assert.deepEqual(labels.map(s => s.trim()), ['Talk', 'Upload', 'Learn', 'Menu'], `[${variant}] rail labels`)
+  for (const b of rail) assert.ok(await b.$('svg.bi'), `[${variant}] rail button icon`)
 
-  // Menu trigger sits top-right on desktop (1280px wide here).
-  const mtBox = await (await page.$('.menu-trigger')).boundingBox()
-  assert.ok(mtBox.x > 1100 && mtBox.y < 80, `[${variant}] menu trigger top-right on desktop`)
+  // Icon toggle: off-state hides action icons and reparks the toggle up front.
+  const tgl = await page.$('#iconToggle')
+  const box1 = await tgl.boundingBox()
+  await tgl.click()
+  assert.equal(await page.evaluate(() => document.querySelector('.home').dataset.icons), 'off')
+  assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.rail button[data-act="talk"] .bi')).display), 'none', `[${variant}] talk icon hidden`)
+  assert.equal(await tgl.getAttribute('aria-checked'), 'false')
+  const box2 = await tgl.boundingBox()
+  assert.ok(Math.abs(box2.x - box1.x) > 1 || Math.abs(box2.y - box1.y) > 1, `[${variant}] toggle reparked when icons off`)
+  await tgl.click()
+  assert.equal(await page.evaluate(() => document.querySelector('.home').dataset.icons), 'on')
   const mascotSel = variant === 'b' ? '.face-mascot' : '.maya-svg'
   assert.ok(await page.$(`${mascotSel}:visible`), `[${variant}] mascot rendered`)
   await page.waitForFunction(() => document.getElementById('dlgText').textContent.length > 3)
@@ -142,19 +151,22 @@ async function main() {
   const browser = await chromium.launch({ executablePath: findBrowser() })
   try {
     for (const v of ['a', 'b', 'c']) await run(browser, v)
-    // Mobile: rail sits below the dialogue box, centred to it, Menu on the same row.
+    // Mobile: one action row under the dialogue — rail centred to it,
+    // Menu a rail member, toggle at the row's end, no horizontal overflow.
     const mp = await browser.newPage({ viewport: { width: 420, height: 800 }, reducedMotion: 'reduce' })
     mp.on('pageerror', e => errors.push(`[mobile] ${e.message}`))
     await mp.goto(`${base}?v=a`, { waitUntil: 'load' })
     const dlg = await (await mp.$('#dlg')).boundingBox()
     const rail = await (await mp.$('.rail')).boundingBox()
-    const mm = await (await mp.$('.menu-trigger')).boundingBox()
     assert.ok(rail.y >= dlg.y + dlg.height - 2, '[mobile] rail below the dialogue box')
     const railCx = rail.x + rail.width / 2, dlgCx = dlg.x + dlg.width / 2
     assert.ok(Math.abs(railCx - dlgCx) < 40, `[mobile] rail centred to dialogue (${railCx.toFixed(0)} vs ${dlgCx.toFixed(0)})`)
-    assert.ok(mm.y + mm.height > rail.y && mm.y < rail.y + rail.height, '[mobile] Menu on the same row')
-    assert.ok(mm.x + mm.width > 380, '[mobile] Menu at the right end')
-    assert.ok(mm.x >= rail.x + rail.width - 2, '[mobile] no Menu/rail overlap')
+    assert.ok(rail.x >= 0 && rail.x + rail.width <= 420, `[mobile] no horizontal overflow (${rail.x.toFixed(0)}..${(rail.x + rail.width).toFixed(0)})`)
+    const mm = await (await mp.$('#menuTrigger')).boundingBox()
+    assert.ok(mm.y + mm.height > rail.y && mm.y < rail.y + rail.height, '[mobile] Menu in the rail row')
+    const acts = await mp.$$('.rail button[data-act]')
+    assert.equal(acts.length, 4, '[mobile] 4 rail actions')
+    assert.ok(await mp.$('#iconToggle'), '[mobile] icon toggle present')
     await mp.screenshot({ path: path.join(out, 'mobile-foot.png') })
     await mp.close()
     console.log('mobile rail/menu placement: ok')
