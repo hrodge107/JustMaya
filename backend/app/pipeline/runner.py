@@ -13,6 +13,7 @@ from app.config import Settings
 from app.pipeline.graph import build_graph
 from app.pipeline.stage import Stage, StageContext
 from app.storage.documents import set_document_status
+from app.storage.curriculum import read_draft
 from app.storage.jobs import (
     ELIGIBLE_RUN,
     EXECUTION_COMPLETE,
@@ -29,6 +30,16 @@ from app.storage.jobs import (
     needs_generate_resume,
     resolve_outcome,
 )
+
+
+def _needs_detail(data_dir: Path, document_id: str) -> bool:
+    """The roadmap is confirmed but lacks the lesson context only the
+    detail stage can build (jobs confirmed after the stage was added)."""
+    try:
+        draft, _, _ = read_draft(data_dir, document_id)
+    except LookupError:
+        return False
+    return draft.confirmed and draft.lesson_context is None
 
 
 def run_job(
@@ -74,10 +85,18 @@ def run_job(
                     raise ValueError("Analysis checkpoint is missing its inventory")
                 if current["stage"] == "plan" and not checkpoint.values.get("curriculum_id"):
                     raise ValueError("Planning checkpoint is missing its roadmap")
-                graph.update_state(config, {}, as_node=current["stage"])
+                resume_as = current["stage"]
+                if resume_as in ("generate", "validate") and _needs_detail(data_dir, document_id):
+                    # Pre-detail checkpoints parked past the new node: resume
+                    # as plan so the graph runs detail (plan's successor).
+                    resume_as = "plan"
+                graph.update_state(config, {}, as_node=resume_as)
                 checkpoint = graph.get_state(config)
             elif resume_generated:
-                graph.update_state(config, {}, as_node="generate")
+                # Same reroute: confirmed without a lesson context needs the
+                # detail stage (and a regenerate) before validate.
+                resume_as = "plan" if _needs_detail(data_dir, document_id) else "generate"
+                graph.update_state(config, {}, as_node=resume_as)
                 checkpoint = graph.get_state(config)
             if checkpoint.next:
                 graph.invoke(None, config)

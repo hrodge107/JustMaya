@@ -1,5 +1,6 @@
-"""Pipeline A stages: extract (A02), index (A03), analyze (A04),
-plan (A05/A06), generate (A07), validate (A08).
+"""Pipeline A stages: extract (A02), index (A03), analyze/survey (A04),
+plan (A05/A06), detail (confirmed-scope deep analysis), generate (A07),
+validate (A08).
 
 Each stage is a declared `Stage(name, run)` in STAGES; run(ctx, state)
 does its work against deterministic artifacts and returns a partial
@@ -21,9 +22,10 @@ from app.models.document import ExtractedDocument
 from app.models.concept import ConceptInventory
 from app.pipeline.stage import Stage, StageContext
 from app.pipeline.state import PipelineState
+from app.services.curriculum_review import build_lesson_context, detail_scope
 from app.services.episode_generator import GenerationError, passages_for_lesson
 from app.services.episode_validator import ValidationFailed, report_passing
-from app.storage.curriculum import save_draft
+from app.storage.curriculum import attach_lesson_context, save_draft
 from app.storage.documents import resolve_document_path
 from app.storage.episodes import read_episode, read_episode_state, save_episode_draft
 from app.storage.jobs import mark_stage
@@ -60,7 +62,7 @@ def _analyze(ctx: StageContext, state: PipelineState) -> dict:
     mark_stage(ctx.data_dir, state["job_id"], "analyze")
     extracted = ctx.artifacts.load(state["extracted_path"], ExtractedDocument)
     inventory = asyncio.run(
-        ctx.services.analyze_document(
+        ctx.services.survey_document(
             extracted, ctx.provider, state["job_id"],
             settings=ctx.settings, data_dir=ctx.data_dir,
         )
@@ -86,6 +88,38 @@ def _plan(ctx: StageContext, state: PipelineState) -> dict:
     )
     save_draft(ctx.data_dir, roadmap, inventory, state["job_id"])
     return {"curriculum_id": roadmap.curriculum_id}
+
+
+def _detail(ctx: StageContext, state: PipelineState) -> dict:
+    check = ctx.roadmap_guard(state["document_id"], state["job_id"])
+    if check.draft is None:
+        # Nothing planned yet — park like validate; plan always runs first.
+        return {}
+    if check.foreign:
+        raise ValueError("Roadmap belongs to a different job")
+    if check.draft.lesson_context is not None:
+        # Idempotent re-execution: context already built — no re-spend.
+        return {"curriculum_id": check.draft.curriculum_id}
+    if not check.draft.confirmed:
+        # Draft still awaits human review — park like generate.
+        return {}
+    mark_stage(ctx.data_dir, state["job_id"], "detail")
+    extracted = ctx.artifacts.load(state["extracted_path"], ExtractedDocument)
+    survey = ctx.artifacts.load(state["inventory_path"], ConceptInventory)
+    scope = detail_scope(check.draft, survey, ctx.settings)
+    detail = asyncio.run(
+        ctx.services.detail_analysis(
+            extracted, check.draft, survey, scope,
+            ctx.provider, state["job_id"],
+            settings=ctx.settings, data_dir=ctx.data_dir,
+        )
+    )
+    ctx.artifacts.save(
+        state["document_id"], "concepts-detail", detail.model_dump_json()
+    )
+    context = build_lesson_context(check.draft, detail, survey)
+    attach_lesson_context(ctx.data_dir, state["document_id"], context)
+    return {"curriculum_id": check.draft.curriculum_id}
 
 
 def _generate(ctx: StageContext, state: PipelineState) -> dict:
@@ -177,6 +211,7 @@ STAGES = (
     Stage("index", _index),
     Stage("analyze", _analyze),
     Stage("plan", _plan),
+    Stage("detail", _detail),
     Stage("generate", _generate),
     Stage("validate", _validate),
 )

@@ -40,6 +40,7 @@ from app.storage.jobs import (
     ELIGIBLE_RUN,
     EXECUTION_FAILED,
     EXECUTION_PARTIAL,
+    EXECUTION_REVIEW,
     EXECUTION_RUNNING,
     EXECUTION_STATES,
     claim_job,
@@ -57,12 +58,27 @@ DOC_ID = "doc-1"
 JOB_ID = "job-1"
 
 
-async def _fake_analyze(document, provider, job_id, **kwargs):
+async def _fake_survey(document, provider, job_id, **kwargs):
     _, coverage = analysis_windows(document)
     ref = {"document_id": document.document_id, "page_start": 1, "page_end": 1, "section_id": None}
     return ConceptInventory(document_id=document.document_id, concepts=[{"id": "c", "title": "Topic", "explanation": "Content", "evidence": [ref]}],
                             learning_objectives=[{"id": "o", "description": "Learn", "concept_ids": ["c"], "evidence": [ref]}],
                             prerequisite_edges=[], coverage=coverage)
+
+
+async def _fake_detail(document, locked, survey, scope_pages, provider, job_id, **kwargs):
+    first = locked.episodes[0]
+    ref = {"document_id": document.document_id, "page_start": 1, "page_end": 1, "section_id": None}
+    return ConceptInventory(
+        document_id=document.document_id,
+        concepts=[{"id": item.concept_id, "title": "Topic", "explanation": "Deep", "evidence": [ref]}
+                  for item in first.concepts],
+        learning_objectives=[{"id": oid, "description": "Learn",
+                              "concept_ids": [first.concepts[0].concept_id], "evidence": [ref]}
+                             for oid in first.objective_ids],
+        prerequisite_edges=[],
+        coverage=[c for c in survey.coverage if c.page_number in scope_pages],
+    )
 
 
 async def _fake_plan(inventory, provider, job_id, settings):
@@ -75,7 +91,8 @@ async def _fake_plan(inventory, provider, job_id, settings):
 
 def _services(**overrides):
     return replace(
-        StageServices(analyze_document=_fake_analyze, plan_curriculum=_fake_plan),
+        StageServices(survey_document=_fake_survey, plan_curriculum=_fake_plan,
+                      detail_analysis=_fake_detail),
         **overrides,
     )
 
@@ -296,7 +313,7 @@ def test_analysis_failure_resumes_without_repeating_prior_nodes(tmp_path, fixtur
         settings, tmp_path,
         extract_document=spy_extract(extract_calls),
         index_document=stub_index(index_calls),
-        analyze_document=fail,
+        survey_document=fail,
     ))
     assert first["job"]["execution_state"] == "failed"
     assert previous.read_text(encoding="utf-8") == "previous"
@@ -313,7 +330,7 @@ def test_analysis_failure_resumes_without_repeating_prior_nodes(tmp_path, fixtur
         settings, tmp_path,
         extract_document=spy_extract(extract_calls),
         index_document=stub_index(index_calls),
-        analyze_document=succeed,
+        survey_document=succeed,
     ))
     assert second["job"]["status"] == "planning"
     assert second["job"]["execution_state"] == "awaiting_review"
@@ -354,7 +371,7 @@ def test_advance_analysis_checkpoint_without_reanalysis(tmp_path, fixtures):
     def unexpected(*args, **kwargs):
         raise AssertionError("analysis must not repeat")
 
-    ctx = _ctx(settings, tmp_path, analyze_document=unexpected)
+    ctx = _ctx(settings, tmp_path, survey_document=unexpected)
     result = run_job(JOB_ID, settings, tmp_path, ctx=ctx, stages=STAGES[:4])
     assert result["job"]["execution_state"] == "awaiting_review"
     assert calls == [DOC_ID]
@@ -381,15 +398,11 @@ def test_analysis_node_reexecution_replaces_one_artifact(tmp_path, fixtures):
 # --- A07: generation stage ---
 
 
-def _stub_generate(monkeypatch):
-    import app.services.episode_validator as episode_validator
-    from app.models.episode import EpisodeScript
-
-    async def fake(roadmap, lesson_context, passages, known, provider, job_id, settings, **kw):
-        return EpisodeScript.model_validate({
-            "episodeId": lesson_context.episode_id,
-            "documentId": roadmap.document_id,
-            "title": roadmap.episodes[0].title,
+def _script_payload(episode_id, document_id, title):
+    return {
+            "episodeId": episode_id,
+            "documentId": document_id,
+            "title": title,
             "learningObjectives": ["Learn"],
             "estimatedMinutes": 5.0,
             "startSceneId": "s1",
@@ -421,7 +434,16 @@ def _stub_generate(monkeypatch):
                                "emotion": "happy", "sourceRefs": [], "webRefs": []}],
                  "nextSceneId": None},
             ],
-        })
+        }
+
+
+def _stub_generate(monkeypatch):
+    import app.services.episode_validator as episode_validator
+    from app.models.episode import EpisodeScript
+
+    async def fake(roadmap, lesson_context, passages, known, provider, job_id, settings, **kw):
+        return EpisodeScript.model_validate(_script_payload(
+            lesson_context.episode_id, roadmap.document_id, roadmap.episodes[0].title))
 
     # validate_and_publish imports generate_episode by name — its regen path
     # must hit the same stub (service-internal seam, not the node contract).
@@ -609,10 +631,10 @@ def test_pre_change_draft_resumes_into_validate(tmp_path, fixtures, monkeypatch)
     services = _services(index_document=stub_index([]),
                          generate_episode=_stub_generate(monkeypatch))
     ctx = StageContext(settings, tmp_path, services=services)
-    run_job(JOB_ID, settings, tmp_path, ctx=ctx, stages=STAGES[:5])
+    run_job(JOB_ID, settings, tmp_path, ctx=ctx, stages=STAGES[:6])
     confirm_draft(tmp_path, DOC_ID, revision=1)
     parked = run_job(JOB_ID, settings, tmp_path, eligible=("partial_complete",),
-                     ctx=ctx, stages=STAGES[:5])
+                     ctx=ctx, stages=STAGES[:6])
     assert parked["job"]["execution_state"] == "awaiting_review"
     assert parked["job"]["stage"] == "generate"
     assert read_episode_state(tmp_path, DOC_ID)["status"] == "draft"
@@ -623,6 +645,157 @@ def test_pre_change_draft_resumes_into_validate(tmp_path, fixtures, monkeypatch)
     assert resumed["job"]["status"] == "ready"
     assert resumed["job"]["execution_state"] == "complete"
     assert read_episode_state(tmp_path, DOC_ID)["status"] == "ready"
+
+
+# --- detail stage ---
+
+
+def _spy_detail(calls):
+    async def spy(document, locked, survey, scope_pages, provider, job_id, **kw):
+        calls.append(sorted(scope_pages))
+        return await _fake_detail(document, locked, survey, scope_pages, provider, job_id, **kw)
+    return spy
+
+
+def test_detail_waits_for_confirmation(tmp_path, fixtures, monkeypatch):
+    """No detail spend before the roadmap is confirmed; one call after."""
+    from app.storage.curriculum import confirm_draft, read_draft
+
+    seed_job(tmp_path, fixtures)
+    settings = make_settings(tmp_path)
+    calls = []
+    ctx = _ctx(settings, tmp_path,
+               index_document=stub_index([]),
+               detail_analysis=_spy_detail(calls),
+               generate_episode=_stub_generate(monkeypatch),
+               provider=_ReviewProvider([{"verdict": "pass", "violations": []}]))
+    first = run_job(JOB_ID, settings, tmp_path, ctx=ctx)
+    assert first["job"]["execution_state"] == "awaiting_review"
+    assert calls == []
+
+    confirm_draft(tmp_path, DOC_ID, revision=1)
+    resumed = run_job(JOB_ID, settings, tmp_path, eligible=("partial_complete",), ctx=ctx)
+    assert resumed["job"]["status"] == "ready"
+    assert calls == [[1, 2]]
+    # detail artifact persisted; lesson context attached for generation
+    assert (tmp_path / "storage" / f"{DOC_ID}.concepts-detail.json").exists()
+    roadmap, _, _ = read_draft(tmp_path, DOC_ID)
+    assert roadmap.lesson_context is not None
+
+    # idempotent re-execution: context already attached — no re-spend
+    nodes = make_nodes(ctx)
+    assert nodes["detail"]({"job_id": JOB_ID, "document_id": DOC_ID}) == {
+        "curriculum_id": roadmap.curriculum_id}
+    assert len(calls) == 1
+
+
+def test_partial_past_plan_resumes_via_detail(tmp_path, fixtures, monkeypatch):
+    """A checkpoint parked past plan when confirmed without a lesson context
+    re-enters at detail instead of skipping it."""
+    from app.storage.curriculum import confirm_draft
+
+    seed_job(tmp_path, fixtures)
+    settings = make_settings(tmp_path)
+    calls = []
+    ctx = _ctx(settings, tmp_path,
+               index_document=stub_index([]),
+               detail_analysis=_spy_detail(calls),
+               generate_episode=_stub_generate(monkeypatch),
+               provider=_ReviewProvider([{"verdict": "pass", "violations": []}]))
+    run_job(JOB_ID, settings, tmp_path, ctx=ctx)
+    confirm_draft(tmp_path, DOC_ID, revision=1)
+    conn = connect_db(tmp_path)
+    with conn:
+        conn.execute(
+            "UPDATE jobs SET stage = 'generate', status = 'generating' WHERE job_id = ?",
+            (JOB_ID,))
+    conn.close()
+
+    resumed = run_job(JOB_ID, settings, tmp_path, eligible=("partial_complete",), ctx=ctx)
+    assert resumed["job"]["status"] == "ready"
+    assert resumed["job"]["execution_state"] == "complete"
+    assert calls == [[1, 2]]
+
+
+def test_pre_change_generated_draft_resumes_via_detail(tmp_path, fixtures, monkeypatch):
+    """An episode draft parked at awaiting_review/generate and confirmed
+    after the detail stage existed still runs detail before validate."""
+    from app.models.episode import EpisodeScript
+    from app.storage.curriculum import confirm_draft
+    from app.storage.episodes import read_episode_state, save_episode_draft
+
+    seed_job(tmp_path, fixtures)
+    settings = make_settings(tmp_path)
+    calls = []
+    ctx = _ctx(settings, tmp_path,
+               index_document=stub_index([]),
+               detail_analysis=_spy_detail(calls),
+               generate_episode=_stub_generate(monkeypatch),
+               provider=_ReviewProvider([{"verdict": "pass", "violations": []}]))
+    run_job(JOB_ID, settings, tmp_path, ctx=ctx)
+    confirmed = confirm_draft(tmp_path, DOC_ID, revision=1)
+    # Pre-change parked state: generated draft + REVIEW at the generate stage.
+    save_episode_draft(tmp_path, EpisodeScript.model_validate(
+        _script_payload(DOC_ID + "-episode", DOC_ID, "Topic")), confirmed.curriculum_id)
+    conn = connect_db(tmp_path)
+    with conn:
+        conn.execute(
+            "UPDATE jobs SET stage = 'generate', status = 'generating', "
+            "execution_state = ? WHERE job_id = ?",
+            (EXECUTION_REVIEW, JOB_ID))
+    conn.close()
+
+    resumed = run_job(JOB_ID, settings, tmp_path, ctx=ctx)
+    assert resumed["job"]["status"] == "ready"
+    assert resumed["job"]["execution_state"] == "complete"
+    assert calls == [[1, 2]]
+    assert read_episode_state(tmp_path, DOC_ID)["status"] == "ready"
+
+
+def test_detail_guard_outcomes(tmp_path, fixtures):
+    """Absent draft parks, foreign draft raises — no service call either way."""
+    seed_job(tmp_path, fixtures)
+    settings = make_settings(tmp_path)
+    calls = []
+    nodes = make_nodes(_ctx(settings, tmp_path, detail_analysis=_spy_detail(calls)))
+    state = {"job_id": JOB_ID, "document_id": DOC_ID}
+    assert nodes["detail"](state) == {}
+    assert calls == []
+
+    from app.storage.curriculum import save_draft
+    from app.tests.test_curriculum_models import inventory, roadmap
+    save_draft(tmp_path,
+               roadmap().model_copy(update={"document_id": DOC_ID}),
+               inventory().model_copy(update={"document_id": DOC_ID}),
+               "other-job")
+    with pytest.raises(ValueError, match="different job"):
+        nodes["detail"](state)
+    assert calls == []
+
+
+def test_inspection_detail_stage(tmp_path, fixtures, monkeypatch):
+    """The detail artifact is readable through the inspection endpoint."""
+    from app.storage.curriculum import confirm_draft
+
+    seed_job(tmp_path, fixtures)
+    settings = make_settings(tmp_path)
+    ctx = _ctx(settings, tmp_path,
+               index_document=stub_index([]),
+               generate_episode=_stub_generate(monkeypatch),
+               provider=_ReviewProvider([{"verdict": "pass", "violations": []}]))
+    run_job(JOB_ID, settings, tmp_path, ctx=ctx)
+    confirm_draft(tmp_path, DOC_ID, revision=1)
+    run_job(JOB_ID, settings, tmp_path, eligible=("partial_complete",), ctx=ctx)
+
+    app = create_app(data_dir=tmp_path)
+    app.state.settings = settings
+    with TestClient(app) as client:
+        resp = client.get(f"/api/documents/{DOC_ID}/inspection/detail")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["document_id"] == DOC_ID
+        assert {c["page_number"] for c in body["coverage"]} == {1, 2}
+        assert client.get(f"/api/documents/{DOC_ID}/inspection/analysis").status_code == 200
 
 
 def test_inspection_validation_stage(tmp_path, fixtures, monkeypatch):

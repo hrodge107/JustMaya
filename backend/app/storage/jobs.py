@@ -49,6 +49,7 @@ STAGE_STATUS = {
     "index": "indexing",
     "analyze": "analyzing",
     "plan": "planning",
+    "detail": "detailing",
     "generate": "generating",
     "validate": "validating",
 }
@@ -60,6 +61,7 @@ _PARTIAL_ADMIT = (
     ("indexing", "index"),
     ("analyzing", "analyze"),
     ("planning", "plan"),
+    ("detailing", "detail"),
     ("generating", "generate"),
     ("validating", "validate"),
 )

@@ -35,7 +35,7 @@ class ArtifactStore:
             if episode_id is None:
                 raise ValueError("script artifacts require episode_id")
             name = f"{document_id}.{episode_id}.script.json"
-        elif kind in ("extracted", "concepts"):
+        elif kind in ("extracted", "concepts", "concepts-detail"):
             name = f"{document_id}.{kind}.json"
         else:
             raise ValueError(f"unknown artifact kind: {kind}")

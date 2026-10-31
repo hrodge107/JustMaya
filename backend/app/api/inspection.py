@@ -17,7 +17,7 @@ router = APIRouter()
 
 @router.get("/api/documents/{document_id}/inspection/{stage}")
 def inspect_stage(document_id: str, stage: str, request: Request):
-    if stage not in ("extraction", "index", "analysis", "episode", "validation"):
+    if stage not in ("extraction", "index", "analysis", "detail", "episode", "validation"):
         return JSONResponse(status_code=404, content=error_body("NOT_FOUND", "Stage not found."))
     base = request.app.state.data_dir
     conn = sqlite3.connect(base / "app.db")
@@ -41,7 +41,8 @@ def inspect_stage(document_id: str, stage: str, request: Request):
             return JSONResponse(status_code=404, content=error_body("NOT_FOUND", "Stage output is not available yet."))
         return state
     store = ArtifactStore(base / "storage")
-    kind, model = ("extracted", ExtractedDocument) if stage == "extraction" else ("concepts", ConceptInventory)
+    kind = {"extraction": "extracted", "analysis": "concepts", "detail": "concepts-detail"}[stage]
+    model = ExtractedDocument if stage == "extraction" else ConceptInventory
     path = store.path(document_id, kind)
     if not path.is_file():
         return JSONResponse(status_code=404, content=error_body("NOT_FOUND", "Stage output is not available yet."))

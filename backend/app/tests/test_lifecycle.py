@@ -90,6 +90,49 @@ def test_stage_vocabulary_covers_every_graph_node():
     )
 
 
+def test_jobs_check_migration_preserves_rows_and_admits_detailing(tmp_path):
+    """A DB created before 'detailing' existed is rebuilt in place — SQLite
+    cannot ALTER a CHECK — keeping every job row."""
+    tmp_path.mkdir(exist_ok=True)
+    old_statuses = ", ".join(
+        f"'{s}'" for s in JOB_STATUSES if s != "detailing"
+    )
+    conn = sqlite3.connect(tmp_path / "app.db")
+    conn.execute(
+        f"""CREATE TABLE jobs (
+            job_id TEXT PRIMARY KEY,
+            document_id TEXT NOT NULL,
+            status TEXT NOT NULL CHECK (status IN ({old_statuses})),
+            stage TEXT, error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+            execution_state TEXT NOT NULL DEFAULT 'queued'
+        )"""
+    )
+    conn.execute(
+        "INSERT INTO jobs (job_id, document_id, status, stage, created_at, "
+        "updated_at, execution_state) VALUES ('j', 'd', 'planning', 'plan', 'now', 'now', ?)",
+        (EXECUTION_PARTIAL,),
+    )
+    conn.commit()
+    conn.close()
+
+    init_db(tmp_path)
+
+    conn = connect_db(tmp_path)
+    job = get_job(conn, "j")
+    sql = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE name = 'jobs'"
+    ).fetchone()[0]
+    conn.close()
+    assert job is not None and job["stage"] == "plan"
+    assert "'detailing'" in sql
+    # detailing is writable post-migration and admitted at the detail node
+    mark_stage(tmp_path, "j", "detail")
+    conn = connect_db(tmp_path)
+    job = get_job(conn, "j")
+    conn.close()
+    assert job["status"] == "detailing" and job["stage"] == "detail"
+
+
 def test_enqueue_creates_queued_job_in_caller_transaction(tmp_path):
     init_db(tmp_path)
     conn = connect_db(tmp_path)
@@ -130,6 +173,7 @@ def test_mark_stage_writes_stage_vocabulary(tmp_path):
         (EXECUTION_PARTIAL, "indexing", "index", True),
         (EXECUTION_PARTIAL, "analyzing", "analyze", True),
         (EXECUTION_PARTIAL, "planning", "plan", True),
+        (EXECUTION_PARTIAL, "detailing", "detail", True),
         (EXECUTION_PARTIAL, "generating", "generate", True),
         (EXECUTION_PARTIAL, "validating", "validate", True),
         # partial only resumes where a checkpoint can honor it

@@ -9,6 +9,22 @@ _JOB_STATUS_CHECK = ", ".join(f"'{status}'" for status in JOB_STATUSES)
 _SESSION_MODE_CHECK = ", ".join(f"'{mode}'" for mode in SESSION_MODES)
 _SESSION_STATUS_CHECK = ", ".join(f"'{status}'" for status in SESSION_STATUSES)
 
+
+def _jobs_table(name: str = "jobs") -> str:
+    """Canonical jobs DDL — the only place the jobs column set lives, so the
+    CHECK migration rebuilds the same shape the schema declares."""
+    return f"""CREATE TABLE IF NOT EXISTS {name} (
+    job_id TEXT PRIMARY KEY,
+    document_id TEXT NOT NULL REFERENCES documents(document_id),
+    status TEXT NOT NULL CHECK (status IN ({_JOB_STATUS_CHECK})),
+    stage TEXT,
+    error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    execution_state TEXT NOT NULL DEFAULT 'queued'
+);"""
+
+
 SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS documents (
     document_id TEXT PRIMARY KEY,
@@ -19,15 +35,7 @@ CREATE TABLE IF NOT EXISTS documents (
     created_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS jobs (
-    job_id TEXT PRIMARY KEY,
-    document_id TEXT NOT NULL REFERENCES documents(document_id),
-    status TEXT NOT NULL CHECK (status IN ({_JOB_STATUS_CHECK})),
-    stage TEXT,
-    error TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
+{_jobs_table()}
 
 CREATE TABLE IF NOT EXISTS roadmaps (
     curriculum_id TEXT PRIMARY KEY,
@@ -99,6 +107,28 @@ EXTRA_COLUMNS = {
 }
 
 
+def _migrate_jobs_status_check(conn: sqlite3.Connection) -> None:
+    """Rebuild `jobs` when its CHECK predates the current status vocabulary —
+    SQLite cannot ALTER a CHECK, so the table is recreated preserving rows."""
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='jobs'"
+    ).fetchone()
+    if row is None or all(f"'{status}'" in row[0] for status in JOB_STATUSES):
+        return
+    columns = [r[1] for r in conn.execute("PRAGMA table_info(jobs)")]
+    cols = ", ".join(columns)
+    conn.executescript(f"""
+        PRAGMA foreign_keys = OFF;
+        BEGIN;
+        {_jobs_table("jobs_v2")}
+        INSERT INTO jobs_v2 ({cols}) SELECT {cols} FROM jobs;
+        DROP TABLE jobs;
+        ALTER TABLE jobs_v2 RENAME TO jobs;
+        COMMIT;
+        PRAGMA foreign_keys = ON;
+    """)
+
+
 def init_db(data_dir: Path | None = None) -> Path:
     data_dir = data_dir or DEFAULT_DATA_DIR
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -113,6 +143,7 @@ def init_db(data_dir: Path | None = None) -> Path:
             for name, col_type in columns.items():
                 if name not in existing:
                     conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {col_type}")
+        _migrate_jobs_status_check(conn)
         conn.commit()
     finally:
         conn.close()

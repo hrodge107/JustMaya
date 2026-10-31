@@ -10,7 +10,8 @@ from app.pipeline.stage import StageContext, StageServices, roadmap_guard
 from app.services.model_provider import GenerationResult, StructuredResult
 from app.services.pdf_extractor import extract_document
 from app.services.token_budget import MeteredProvider
-from app.storage.curriculum import confirm_draft, save_draft
+from app.services.curriculum_review import build_lesson_context
+from app.storage.curriculum import attach_lesson_context, confirm_draft, read_draft, save_draft
 from app.storage.database import init_db
 from app.storage.jobs import EXECUTION_REVIEW
 from app.tests.test_curriculum_models import inventory, roadmap
@@ -76,6 +77,13 @@ def test_roadmap_guard_usable_after_confirm(tmp_path):
     _draft(tmp_path)
     confirm_draft(tmp_path, "d", revision=1)
     check = roadmap_guard(tmp_path, "d", "j")
+    # Confirmed but context-free: usable only after the detail pass attaches it.
+    assert not check.usable and not check.foreign
+    confirmed, source, _ = read_draft(tmp_path, "d")
+    attach_lesson_context(
+        tmp_path, "d", build_lesson_context(confirmed, source, source)
+    )
+    check = roadmap_guard(tmp_path, "d", "j")
     assert check.usable and not check.foreign
 
 
@@ -92,7 +100,8 @@ def test_context_wraps_injected_provider_once(tmp_path):
 def test_services_default_to_real_implementations(tmp_path):
     ctx = StageContext(_settings(tmp_path), tmp_path)
     assert ctx.services.extract_document is extract_document
-    assert StageServices().analyze_document is not None
+    assert StageServices().survey_document is not None
+    assert StageServices().detail_analysis is not None
 
 
 def test_provider_recipe_lives_only_in_stage_context(tmp_path):
