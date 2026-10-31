@@ -231,7 +231,7 @@ async function main() {
       await f.page.keyboard.press('Escape')
       await f.page.getByRole('button', { name: 'Menu', exact: true }).click()
       await f.page.getByRole('button', { name: 'Leave episode', exact: true }).click()
-      await f.page.locator('.learner').waitFor()
+      await f.page.locator('.home').waitFor()
       assert.equal(new URL(f.page.url()).searchParams.has('session'), false)
       await f.go()
       assert.equal(f.state.session.version, 1)
@@ -384,7 +384,7 @@ async function main() {
       await modalCheck(f.page, f.count)
       assert.equal(f.count(), 0)
       assert.equal(await f.page.getByRole('button', { name: 'Water and farming' }).count(), mode === 'checkpoint' ? 1 : 0)
-      if (mode === 'completed') { await f.page.getByRole('button', { name: 'Back to your lesson' }).click(); await f.page.locator('.learner').waitFor() }
+      if (mode === 'completed') { await f.page.getByRole('button', { name: 'Back to your lesson' }).click(); await f.page.locator('.home').waitFor() }
       evidence.push({ check: `${mode} boundaries and contextual exit`, result: 'PASS' })
       await f.context.close()
     }
@@ -400,7 +400,7 @@ async function main() {
     await loading.page.reload()
     await loading.page.getByRole('alert').waitFor()
     await loading.page.getByRole('button', { name: 'Back to your lesson' }).click()
-    await loading.page.locator('.learner').waitFor()
+    await loading.page.locator('.home').waitFor()
     evidence.push({ check: 'loading, not-found, recovery exit', result: 'PASS' })
     await loading.context.close()
 
@@ -411,7 +411,7 @@ async function main() {
     await leaving.page.locator('.vn-dialogue-target').click()
     await leaving.page.getByRole('button', { name: 'Menu', exact: true }).click()
     await leaving.page.getByRole('button', { name: 'Leave episode', exact: true }).click()
-    await leaving.page.locator('.learner').waitFor()
+    await leaving.page.locator('.home').waitFor()
     finish()
     evidence.push({ check: 'leave during pending request', result: 'PASS' })
     await leaving.context.close()
