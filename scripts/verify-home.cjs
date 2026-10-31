@@ -247,6 +247,7 @@ async function run() {
     assert.ok(await page.locator('#menuDlg.vn-menu-dialog').count(), 'menu shares the vn-menu-dialog identity')
     const mh = await page.locator('#menuDlg .vn-menu-heading h2').evaluate(el => getComputedStyle(el).color)
     assert.equal(mh, 'rgb(48, 48, 76)', 'menu heading is ink, not white')
+    assert.equal(await page.locator('#menuDlg .vn-motion').first().evaluate(el => getComputedStyle(el).fontWeight), '850', 'menu rows keep the player vn-motion weight')
     const row = page.locator('.vn-motion[role="switch"]')
     await row.click()
     assert.equal(await page.evaluate(() => document.documentElement.dataset.motion), 'reduce')

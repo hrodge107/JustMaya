@@ -76,7 +76,7 @@ body:has(.home) { margin: 0; overflow: hidden; background: #23233a; color-scheme
 .home .vn-ask-strip { display: flex; align-items: center; gap: 10px; cursor: pointer; }
 /* `.home button { border: 0; min-height: 44px }` out-ties the bare .vn-ask-send
    class — restore the player's pill geometry. */
-.home .vn-ask-send { border: 1.5px solid var(--mint-ink); min-height: 36px; }
+.home .vn-ask-send { border: 1.5px solid var(--mint-ink); min-height: 36px; font-size: .78rem; font-weight: 900; }
 
 /* ---------- top-right upload progress chip ---------- */
 .upload-chip { position: fixed; top: 16px; right: 16px; z-index: 20; width: min(280px, 70vw); padding: 12px 16px 14px; border-radius: 14px; font-size: .82rem; font-weight: 800; background: var(--paper); color: var(--ink); box-shadow: 0 8px 24px #30304c40; }
@@ -99,8 +99,13 @@ body:has(.home) { margin: 0; overflow: hidden; background: #23233a; color-scheme
 #aboutDlg { width: min(480px, calc(100% - 32px)); }
 
 /* The player's :where(.player) button geometry is player-scoped; the shared
-   vn-* chrome restores the same radius under .home. */
+   vn-* chrome restores the same radius under .home. `.home button { font:
+   inherit }` (0,1,1) also out-ties the bare classes' typography — restore
+   the player's weights/sizes so shared controls read identically. */
 .home .vn-button, .home .vn-quiet, .home .vn-motion, .home .vn-menu-trigger { border-radius: 12px; }
+.home .vn-button, .home .vn-motion, .home .vn-menu-trigger { font-weight: 850; }
+.home .vn-quiet, .home .vn-motion-reset { font-weight: 800; }
+.home .vn-motion-reset { font-size: .85rem; }
 
 /* Headings pin their surface ink — the index.css global h1/h2 resolves
    near-white under a dark color-scheme. Same rule the player applies. */
