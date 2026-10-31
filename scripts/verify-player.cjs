@@ -366,7 +366,7 @@ async function main() {
     await touch.page.getByRole('button', { name: 'Close', exact: true }).tap()
     assert.equal(touch.count(), 0)
     await touch.page.locator('.vn-dialogue-target').tap()
-    await touch.page.waitForFunction(() => document.querySelector('.vn-speaker')?.textContent === 'Narrator')
+    await touch.page.waitForFunction(() => document.querySelector('.vn-text')?.textContent.includes('Water made farming possible'))
     assert.equal(touch.count(), 1)
     await touch.page.locator('.vn-dialogue-target').press('Enter')
     assert.equal(touch.count(), 1)

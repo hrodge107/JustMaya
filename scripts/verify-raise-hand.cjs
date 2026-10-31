@@ -99,7 +99,7 @@ async function throughBeats(f, marker = '.vn-ask-input') {
 }
 const waitCue = (page, pool) => page.waitForFunction(lines => {
   const t = document.querySelector('.vn-dialogue .sr-only[aria-live]')?.textContent ?? ''
-  return lines.includes(t.replace('Instructor: ', ''))
+  return lines.includes(t.replace('Mita: ', ''))
 }, pool)
 
 async function coreFlow(browser) {
@@ -116,7 +116,7 @@ async function coreFlow(browser) {
   assert.equal(await raise(f.page).getAttribute('aria-label'), 'Resume the lesson')
   assert.equal(await f.page.locator('.mascot').getAttribute('data-emotion'), 'listening')
   assert.equal(await f.page.evaluate(() => document.activeElement === document.querySelector('.vn-ask-input')), true)
-  await f.page.waitForFunction(() => document.querySelector('.vn-dialogue .sr-only[aria-live]')?.textContent === 'Instructor: What would you like to ask?')
+  await f.page.waitForFunction(() => document.querySelector('.vn-dialogue .sr-only[aria-live]')?.textContent === 'Mita: What would you like to ask?')
   assert.equal(await f.page.locator('.vn-ask-resume').count(), 0, 'Resume Lesson appears only after the first question')
   assert.equal((await saved(f)).mode, 'question')
   assert.equal((await saved(f)).resumeSnapshot.mode, 'checkpoint')
@@ -141,17 +141,17 @@ async function coreFlow(browser) {
   assert.equal(questionPosts(f)[0].body.reply_to_interaction_id, null, 'first question opens a new topic')
   assert.equal(questionPosts(f)[0].body.reflection, null)
   release1(); f.state.gate = null
-  await f.page.waitForFunction(() => document.querySelector('.vn-dialogue .sr-only[aria-live]')?.textContent.startsWith('Instructor: Beat one'))
+  await f.page.waitForFunction(() => document.querySelector('.vn-dialogue .sr-only[aria-live]')?.textContent.startsWith('Mita: Beat one'))
   assert.equal(await input(f.page).count(), 0, 'compose input hidden until the closing beat')
   assert.equal(await f.page.locator('.vn-ask-resume').count(), 0, 'resume strip hidden until the closing beat')
   assert.equal(await f.page.locator('.vn-source-note').count(), 0, 'grounding note hidden until the closing beat')
   await f.page.locator('.vn-dialogue-target').click()
-  await f.page.waitForFunction(() => document.querySelector('.vn-dialogue .sr-only[aria-live]')?.textContent.startsWith('Instructor: Beat two'))
+  await f.page.waitForFunction(() => document.querySelector('.vn-dialogue .sr-only[aria-live]')?.textContent.startsWith('Mita: Beat two'))
   await f.page.locator('.vn-dialogue-target').click()
-  await f.page.waitForFunction(() => document.querySelector('.vn-dialogue .sr-only[aria-live]')?.textContent.startsWith('Instructor: Beat three'))
+  await f.page.waitForFunction(() => document.querySelector('.vn-dialogue .sr-only[aria-live]')?.textContent.startsWith('Mita: Beat three'))
   await f.page.locator('.vn-dialogue-target').click()
   await waitCue(f.page, ASK_MORE)
-  const closing = (await liveText(f.page)).replace('Instructor: ', '')
+  const closing = (await liveText(f.page)).replace('Mita: ', '')
   // The cue is frontend-composed; the persisted interaction never carries it.
   const reply = f.state.questionReplies.get(questionPosts(f)[0].body.request_id)
   assert.ok(!reply.interaction.lines.includes(closing) && !reply.interaction.answer.includes(closing), 'cue text stays out of the persisted interaction')
@@ -184,7 +184,7 @@ async function coreFlow(browser) {
   await f.page.locator('.vn-ask-resume').click()
   await waitResume
   await waitCue(f.page, BACK_TO_LESSON)
-  assert.notEqual((await liveText(f.page)).replace('Instructor: ', ''), stripLabel, 'spoken return beat never repeats the strip label')
+  assert.notEqual((await liveText(f.page)).replace('Mita: ', ''), stripLabel, 'spoken return beat never repeats the strip label')
   await f.page.locator('.vn-dialogue-target').click()
   await f.page.locator('.vn-choices .vn-choice').first().waitFor()
   const restored = await saved(f)
@@ -219,7 +219,7 @@ async function pendingAndCancel(browser) {
   assert.equal(await f.page.evaluate(() => document.querySelector('.vn-scene')?.className.includes('vn-undim')), true, 'stage undims for the thinking window')
   assert.equal(await f.page.locator('.vn-dialogue-target').getAttribute('aria-label'), 'Reveal your message')
   release(); f.state.gate = null
-  await f.page.waitForFunction(() => document.querySelector('.vn-dialogue .sr-only[aria-live]')?.textContent.startsWith('Instructor: Beat one'))
+  await f.page.waitForFunction(() => document.querySelector('.vn-dialogue .sr-only[aria-live]')?.textContent.startsWith('Mita: Beat one'))
   await throughBeats(f)
   assert.equal(await f.page.evaluate(() => document.querySelector('.vn-scene')?.className.includes('vn-undim')), false, 'dimming returns with the fresh compose strip')
 
@@ -344,8 +344,8 @@ async function reloadRestoresClosingBeat(browser) {
   const f = await fixture(browser)
   f.session = { sessionId: manifest.questionSessionId }
   await f.go(f.session)
-  await f.page.waitForFunction(() => document.querySelector('.vn-dialogue .sr-only[aria-live]')?.textContent?.startsWith('Instructor: '))
-  const before = (await liveText(f.page)).replace('Instructor: ', '')
+  await f.page.waitForFunction(() => document.querySelector('.vn-dialogue .sr-only[aria-live]')?.textContent?.startsWith('Mita: '))
+  const before = (await liveText(f.page)).replace('Mita: ', '')
   assert.ok(ASK_MORE.includes(before), 'first-answer closing cue comes from the ask-more pool')
   await input(f.page).waitFor()
   await f.page.locator('.vn-source-note').waitFor()
@@ -354,8 +354,8 @@ async function reloadRestoresClosingBeat(browser) {
   const persisted = await saved(f)
   assert.ok(![persisted.interactions.at(-1).answer, ...persisted.interactions.at(-1).lines].some(l => ALL_CUES.includes(l)), 'persisted lines stay cue-free')
   await f.page.reload()
-  await f.page.waitForFunction(() => document.querySelector('.vn-dialogue .sr-only[aria-live]')?.textContent?.startsWith('Instructor: '))
-  assert.equal(await liveText(f.page), `Instructor: ${before}`, 'closing cue is hash-stable across reload')
+  await f.page.waitForFunction(() => document.querySelector('.vn-dialogue .sr-only[aria-live]')?.textContent?.startsWith('Mita: '))
+  assert.equal(await liveText(f.page), `Mita: ${before}`, 'closing cue is hash-stable across reload')
   evidence.push({ check: 'reload lands on the closing cue beat revealed; cue stable across reload; persisted state cue-free', result: 'PASS' })
   await f.context.close()
 }
@@ -386,7 +386,7 @@ async function helpModesAndFlow(browser) {
   assert.equal(diagPost.help_mode, 'hint')
   assert.equal(diagPost.reply_to_interaction_id, null)
   assert.equal(diagPost.reflection, null)
-  const diagText = (await liveText(f.page)).replace('Instructor: ', '')
+  const diagText = (await liveText(f.page)).replace('Mita: ', '')
   assert.ok(diagText.startsWith('Beat three'), 'final beat is the diagnostic prompt')
   assert.ok(!ALL_CUES.includes(diagText), 'awaiting attempt suppresses the generic closing cue')
   assert.equal(await input(f.page).getAttribute('placeholder'), 'What have you tried so far?')
@@ -467,8 +467,8 @@ async function earlyAnswerOrder(browser) {
   await f.page.waitForResponse(r => r.url().endsWith('/questions'))
   assert.equal(await liveText(f.page), 'You: A question answered faster than its echo types', 'the landed answer does not cut off the echo')
   await f.page.clock.runFor(2000)
-  await f.page.waitForFunction(() => document.querySelector('.vn-dialogue .sr-only[aria-live]')?.textContent.startsWith('Instructor: Beat one'))
-  evidence.push({ check: 'early answer: Instructor beats wait for the "You" echo to finish revealing', result: 'PASS' })
+  await f.page.waitForFunction(() => document.querySelector('.vn-dialogue .sr-only[aria-live]')?.textContent.startsWith('Mita: Beat one'))
+  evidence.push({ check: 'early answer: Mita beats wait for the "You" echo to finish revealing', result: 'PASS' })
   await f.context.close()
 }
 
@@ -487,13 +487,13 @@ async function reloadRestoresAwaiting(browser) {
   }
   f.state.getPatch = s => ({ ...s, interactions: [...(s.interactions ?? []), flowTurn] })
   await f.go(raised)
-  await f.page.waitForFunction(() => document.querySelector('.vn-dialogue .sr-only[aria-live]')?.textContent?.startsWith('Instructor: '))
-  assert.equal(await liveText(f.page), 'Instructor: What do you think that tells you?', 'restore lands on the final pedagogical prompt')
+  await f.page.waitForFunction(() => document.querySelector('.vn-dialogue .sr-only[aria-live]')?.textContent?.startsWith('Mita: '))
+  assert.equal(await liveText(f.page), 'Mita: What do you think that tells you?', 'restore lands on the final pedagogical prompt')
   assert.equal(await input(f.page).getAttribute('placeholder'), 'What did that tell you?')
   await f.page.locator('.vn-ask-new').waitFor()
   await f.page.reload()
-  await f.page.waitForFunction(() => document.querySelector('.vn-dialogue .sr-only[aria-live]')?.textContent?.startsWith('Instructor: '))
-  assert.equal(await liveText(f.page), 'Instructor: What do you think that tells you?', 'awaiting restore is stable across reload')
+  await f.page.waitForFunction(() => document.querySelector('.vn-dialogue .sr-only[aria-live]')?.textContent?.startsWith('Mita: '))
+  assert.equal(await liveText(f.page), 'Mita: What do you think that tells you?', 'awaiting restore is stable across reload')
   evidence.push({ check: 'reload restores awaiting flow: final prompt beat, reflection placeholder, New question, no closing cue', result: 'PASS' })
   await f.context.close()
 
