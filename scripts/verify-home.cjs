@@ -3,6 +3,7 @@
 // Covers: chrome/icons, dialogue advance rules, Talk overlay, upload ->
 // real job drive -> confirm -> ready -> Learn -> session, failure+retry,
 // ?job= resume, Menu/motion/About, mobile layout, reduced motion.
+// Rail display is locked at icon + text (the prototype's 3-state toggle is gone).
 const { chromium } = (() => { try { return require('playwright') } catch { return require('playwright-core') } })()
 const assert = require('node:assert/strict')
 
@@ -116,29 +117,16 @@ async function run() {
   await page.goto(`${base}/`)
   await page.locator('.home').waitFor()
 
-  await track('chrome: rail, mascot, icon toggle', async () => {
+  await track('chrome: rail with icon+text locked, mascot', async () => {
     const buttons = page.locator('.rail button')
     await assert.deepEqual(await buttons.allInnerTexts().then(t => t.map(x => x.trim())), ['Talk', 'Upload', 'Learn', 'Menu'])
     assert.equal(await page.locator('.rail button .bi').count(), 4)
+    assert.equal(await page.locator('.rail button .bi:visible').count(), 4, 'icons always shown')
+    assert.equal(await page.locator('.rail button span:visible').count(), 4, 'labels always shown')
+    assert.equal(await page.locator('#iconToggle').count(), 0, 'no display toggle')
     await page.locator('.mascot-face').waitFor()
     await page.locator('.dlg-name').waitFor()
     assert.match(await dlgText(page), /\S/)
-  })
-
-  await track('icon toggle cycles on -> off -> icon -> on', async () => {
-    const toggle = page.locator('#iconToggle')
-    assert.match(await toggle.getAttribute('aria-label'), /icons and text/)
-    await toggle.click()
-    assert.equal(await page.locator('.home').getAttribute('data-icons'), 'off')
-    assert.match(await toggle.getAttribute('aria-label'), /text only/)
-    assert.equal(await page.locator('.rail button .bi:visible').count(), 0)
-    await toggle.click()
-    assert.equal(await page.locator('.home').getAttribute('data-icons'), 'icon')
-    assert.match(await toggle.getAttribute('aria-label'), /icons only/)
-    assert.equal(await page.locator('.rail button span:visible').count(), 0)
-    await toggle.click()
-    assert.equal(await page.locator('.home').getAttribute('data-icons'), 'on')
-    assert.equal(await page.locator('.rail button .bi:visible').count(), 4)
   })
 
   await track('idle dialogue auto-advances after 10s', async () => {
@@ -302,8 +290,6 @@ async function run() {
     assert.ok(Math.max(...widths) - Math.min(...widths) < 8, `rail buttons share the row: ${widths}`)
     const overflow = await pageMobile.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
     assert.ok(overflow <= 1, `horizontal overflow: ${overflow}px`)
-    const iconsLeft = await pageMobile.locator('#iconToggle').boundingBox()
-    assert.ok(iconsLeft.x < 60 && iconsLeft.y < 60, 'icon toggle stays top-left')
   })
 
   // ---------- reduced motion ----------

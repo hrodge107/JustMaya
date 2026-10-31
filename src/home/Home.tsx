@@ -19,8 +19,6 @@ const STAGE_PCT: Record<string, number> = { extract: 8, index: 20, analyze: 35, 
 type Chip = { visible: boolean; name: string; stage: string; pct: number; error: string; jobId: string }
 type LearnRow = { n: number; title: string; status: string; ready: boolean; episodeId: string | null; isNew: boolean }
 type LearnDoc = { name: string; rows: LearnRow[] }
-type Icons = 'on' | 'off' | 'icon'
-const ICON_LABEL: Record<Icons, string> = { on: 'Rail display: icons and text', off: 'Rail display: text only', icon: 'Rail display: icons only' }
 
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
 const jobParam = () => new URLSearchParams(window.location.search).get('job')
@@ -42,7 +40,6 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
   const snap = useSyncExternalStore(engine.subscribe, engine.getSnap)
   const reduced = useReducedMotion()
   const override = useMotionOverride()
-  const [icons, setIcons] = useState<Icons>('on')
   const [chip, setChip] = useState<Chip>({ visible: false, name: '', stage: '', pct: 0, error: '', jobId: '' })
   const [askText, setAskText] = useState('')
   const [uploadErr, setUploadErr] = useState('')
@@ -270,18 +267,9 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
     else if (!e.shiftKey && (active === last || !dlg.contains(active))) { e.preventDefault(); first.focus() }
   }
 
-  return <main className="home" data-icons={icons}>
+  return <main className="home">
     <h1 className="sr-only">Meet Mita</h1>
     <div className="room" aria-hidden="true"><div className="b-scene" /></div>
-
-    <button type="button" id="iconToggle" aria-label={ICON_LABEL[icons]} title={ICON_LABEL[icons]}
-      onClick={() => setIcons(i => i === 'on' ? 'off' : i === 'off' ? 'icon' : 'on')}>
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <g className="st st-on"><rect x="3" y="4" width="7" height="7" rx="1.5" /><path d="M14 6h7M14 10h7M3 15h18M3 19h18" /></g>
-        <g className="st st-icon"><rect x="6" y="6" width="12" height="12" rx="2" /></g>
-        <g className="st st-off"><path d="M4 7h16M4 12h16M4 17h16" /></g>
-      </svg>
-    </button>
 
     <div className={`stage${snap.dimmed ? ' ask-dim' : ''}`}>
       {snap.askOpen && <div className="ask-overlay">
