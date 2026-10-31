@@ -29,7 +29,7 @@ export const reducedMotion = () => effective()
 export const getMotionOverride = () => override
 export function setMotionOverride(next: MotionOverride) {
   override = next
-  try { next === null ? localStorage.removeItem(STORAGE_KEY) : localStorage.setItem(STORAGE_KEY, next) } catch { /* storage unavailable */ }
+  try { if (next === null) localStorage.removeItem(STORAGE_KEY); else localStorage.setItem(STORAGE_KEY, next) } catch { /* storage unavailable */ }
   notify()
 }
 export function subscribeMotion(listener: () => void) {

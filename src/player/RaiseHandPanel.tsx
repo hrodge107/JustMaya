@@ -71,9 +71,12 @@ export default function RaiseHandPanel({ phase, draft, hasAsked, turnComplete, r
           }}>
           <input ref={inputRef} className="vn-ask-input" value={draft} maxLength={500}
             placeholder={PLACEHOLDER[awaiting]} aria-label="Your message" disabled={busy}
+            enterKeyHint="done"
             onChange={event => onDraft(event.target.value)}
             onClick={event => event.stopPropagation()} />
-          {canSend && <span className="vn-ask-send" aria-hidden="true">Send</span>}
+          {canSend && <button type="button" className="vn-ask-send"
+            aria-label={anchored ? 'Send your reply' : 'Send your question'}
+            onClick={event => { event.stopPropagation(); onSend() }}>Send</button>}
         </div>
       </>}
       {error && <p className="vn-error" role="alert">{error}</p>}

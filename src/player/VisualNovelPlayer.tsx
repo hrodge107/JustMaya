@@ -88,7 +88,7 @@ function buildBacklog(episode: Episode, order: Scene[], session: Session): Backl
     const last = s.sceneId === session.sceneId ? session.dialogueIndex : s.dialogue.length - 1
     for (const [index, l] of s.dialogue.entries()) {
       if (index > last) break
-      push({ key: l.lineId, role: l.speaker === 'narrator' ? 'note' : 'mita', text: l.text, sceneChip: null, anchor: { sceneId: s.sceneId, dialogueIndex: index }, current: false })
+      push({ key: l.lineId, role: 'mita', text: l.text, sceneChip: null, anchor: { sceneId: s.sceneId, dialogueIndex: index }, current: false })
       flush(s.sceneId, index)
     }
   }
@@ -560,7 +560,7 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
   return <main className="player">
     <div className={`vn-frame mode-${mode}`}>
       <header className="player-header">
-        <span className="brand">JustMaya</span><span className="player-title">{episode.title}</span>
+        <span className="brand">JustMaya</span><h1 className="player-title">{episode.title}</h1>
         <div className="vn-progress">
           <span>Scene {sceneNumber} of {order.length}</span>
           <ol aria-hidden="true">{order.map((s, i) => <li key={s.sceneId} className={i + 1 < sceneNumber ? 'done' : i + 1 === sceneNumber ? 'current' : ''} />)}</ol>

@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 
-// One row of the backlog: a mascot turn, a learner echo, or a stage note.
+// One row of the backlog: a mascot turn or a learner echo.
 // `anchor` is the script position a jump would rewind to; null means the
 // entry cannot anchor (pre-anchor sessions) and offers no jump.
 export type BacklogEntry = {
   key: string
-  role: 'mita' | 'you' | 'note'
+  role: 'mita' | 'you'
   text: string
   sceneChip: string | null
   anchor: { sceneId: string; dialogueIndex: number } | null
@@ -46,10 +46,10 @@ function Avatar({ role }: { role: 'mita' | 'you' }) {
 
 function Row({ entry, interactive, busy, onPick }: { entry: BacklogEntry; interactive: boolean; busy: boolean; onPick(entry: BacklogEntry): void }) {
   const body = <>
-    {entry.role !== 'note' && <Avatar role={entry.role} />}
+    <Avatar role={entry.role} />
     <span className="bl-main">
-      <span className="bl-name">{entry.role === 'you' ? 'You' : entry.role === 'mita' ? 'Mita' : ''}</span>
-      <span className={`bl-bubble${entry.role === 'note' ? ' bl-note' : ''}`}>{entry.text}</span>
+      <span className="bl-name">{entry.role === 'you' ? 'You' : 'Mita'}</span>
+      <span className="bl-bubble">{entry.text}</span>
     </span>
     {entry.current && <span className="bl-here">Here</span>}
     {interactive && <span className="bl-jump" aria-hidden="true">Jump</span>}
