@@ -5,10 +5,10 @@
 // narration loop keyed to the real upload job's stage. React subscribes to
 // a snapshot; the engine never owns DOM or network state.
 import { reducedMotion } from '../motionPreference'
-import { FALLBACKS, GREETING, IDLE, INTENTS, READ_STEPS, TALK_END, TALK_INTRO, pick, type HomeEmotion, type Turn } from './script'
+import { FALLBACKS, GREETING, IDLE, INTENTS, PLAY_ASK, PLAY_NO_MITA, PLAY_NO_YOU, PLAY_YES_MITA, PLAY_YES_YOU, READ_STEPS, TALK_END, TALK_INTRO, pick, type HomeEmotion, type Turn } from './script'
 
 export const ADVANCE_MS = 10000
-export type HomeMode = 'greet' | 'idle' | 'talk' | 'read' | 'modal'
+export type HomeMode = 'greet' | 'idle' | 'talk' | 'read' | 'modal' | 'offer'
 
 export type HomeSnap = {
   speaker: 'Mita' | 'You'
@@ -21,6 +21,7 @@ export type HomeSnap = {
   speaking: boolean
   dimmed: boolean
   askOpen: boolean
+  offerOpen: boolean
   mode: HomeMode
 }
 
@@ -28,7 +29,7 @@ const wait = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
 
 export default class HomeDialogue {
   private seq = 0
-  private snap: HomeSnap = { speaker: 'Mita', line: '', text: '', typing: false, cue: false, emotion: 'idle', speaking: false, dimmed: false, askOpen: false, mode: 'greet' }
+  private snap: HomeSnap = { speaker: 'Mita', line: '', text: '', typing: false, cue: false, emotion: 'idle', speaking: false, dimmed: false, askOpen: false, offerOpen: false, mode: 'greet' }
   private listeners = new Set<() => void>()
   private typing = false
   private typer: ReturnType<typeof setInterval> | null = null
@@ -96,7 +97,7 @@ export default class HomeDialogue {
 
   // --- Talk / Raise-Hand-style overlay ---
   async startTalk() {
-    if (this.snap.mode === 'read') return
+    if (this.snap.mode === 'read' || this.snap.mode === 'offer') return
     this.seq++
     const t = this.seq
     this.misses = 0
@@ -156,9 +157,9 @@ export default class HomeDialogue {
     return { t: fallback, fallback: true }
   }
 
-  // --- Modals: pause ambient/talk (never the read narration) ---
+  // --- Modals: pause ambient/talk (never the read narration or a live offer) ---
   beginModal(): number {
-    if (this.snap.mode === 'read') return 0
+    if (this.snap.mode === 'read' || this.snap.mode === 'offer') return 0
     this.seq++
     this.set({ mode: 'modal', askOpen: false, dimmed: false })
     return this.seq
@@ -174,7 +175,7 @@ export default class HomeDialogue {
   beginRead() {
     this.seq++
     this.misses = 0
-    this.set({ mode: 'read', askOpen: false, dimmed: false, emotion: 'reading' })
+    this.set({ mode: 'read', askOpen: false, offerOpen: false, dimmed: false, emotion: 'reading' })
   }
 
   readStep(stepIndex: number) {
@@ -197,7 +198,10 @@ export default class HomeDialogue {
     })()
   }
 
-  async endRead(turns: Turn[]) {
+  // askToPlay keeps the completed episode attached: after the done turns Mita
+  // asks whether to play now and the offer overlay holds for a Yes/No instead
+  // of sinking back into ambient chatter.
+  async endRead(turns: Turn[], askToPlay = false) {
     this.rotStop?.()
     const t = this.seq
     for (const [i, turn] of turns.entries()) {
@@ -205,6 +209,46 @@ export default class HomeDialogue {
       if (t !== this.seq) return
       if (!await this.hold(i < turns.length - 1 ? 1500 + Math.random() * 600 : 2000, t)) return
     }
+    if (askToPlay) {
+      this.set({ mode: 'offer', emotion: 'listening' })
+      await this.say(pick(PLAY_ASK))
+      if (t !== this.seq) return
+      this.set({ offerOpen: true, dimmed: true })
+      return
+    }
+    this.set({ emotion: 'idle', mode: 'idle' })
+    void this.ambient(this.seq)
+  }
+
+  // The offer's Yes branch: a quick You/Mita handoff beat, then ambient — Home
+  // mounts the player as soon as this resolves, so ambient rarely gets heard.
+  async offerYes() {
+    if (this.snap.mode !== 'offer') return
+    const t = this.seq
+    this.set({ offerOpen: false, dimmed: false })
+    await this.say(pick(PLAY_YES_YOU), 'listening', 'You')
+    if (t !== this.seq) return
+    await wait(reducedMotion() ? 100 : 420)
+    if (t !== this.seq) return
+    await this.say(pick(PLAY_YES_MITA))
+    if (t !== this.seq) return
+    this.set({ emotion: 'idle', mode: 'idle' })
+    void this.ambient(t)
+  }
+
+  // The offer's No branch: the learner's rotating filler, then Mita's "it's
+  // fine" plus where the episode waits (the corner card and Learn).
+  async offerNo() {
+    if (this.snap.mode !== 'offer') return
+    const t = this.seq
+    this.set({ offerOpen: false, dimmed: false })
+    await this.say(pick(PLAY_NO_YOU), 'listening', 'You')
+    if (t !== this.seq) return
+    await wait(reducedMotion() ? 120 : 500)
+    if (t !== this.seq) return
+    await this.say(pick(PLAY_NO_MITA))
+    if (t !== this.seq) return
+    if (!await this.hold(ADVANCE_MS, t)) return
     this.set({ emotion: 'idle', mode: 'idle' })
     void this.ambient(this.seq)
   }

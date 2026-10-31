@@ -19,6 +19,14 @@ const STAGE_PCT: Record<string, number> = { extract: 8, index: 20, analyze: 35, 
 type Chip = { visible: boolean; name: string; stage: string; pct: number; error: string; jobId: string }
 type LearnRow = { n: number; title: string; status: string; ready: boolean; episodeId: string | null; isNew: boolean }
 type LearnDoc = { name: string; rows: LearnRow[] }
+type ReadyCard = { episodeId: string | null; title: string; docName: string }
+
+/* The sample button's mock pipeline: the same stage labels/pcts a real job
+   reports, on a fixed timer, so the whole generate->ready->offer flow is
+   demonstrable without backend work. Only session creation touches the API. */
+const MOCK_DOC = 'sample-chapter.pdf'
+const MOCK_STAGES = ['extract', 'index', 'analyze', 'plan', 'detail', 'generate', 'validate']
+  .map(stage => ({ step: STAGE_STEP[stage], label: STAGE_LABEL[stage], pct: STAGE_PCT[stage] }))
 
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
 const jobParam = () => new URLSearchParams(window.location.search).get('job')
@@ -45,7 +53,8 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
   const [docs, setDocs] = useState<LearnDoc[] | null>(null)
   const [learnErr, setLearnErr] = useState('')
   const [playingId, setPlayingId] = useState<string | null>(null)
-  const [readyEpisodeId, setReadyEpisodeId] = useState<string | null>(null)
+  const [readyCard, setReadyCard] = useState<ReadyCard | null>(null)
+  const [readyErr, setReadyErr] = useState('')
   const jobGen = useRef(0)
   const runInFlight = useRef(false)
   const uploading = useRef(false)
@@ -130,20 +139,25 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
   async function finishDrive(job: Job, docName: string, token: number) {
     setChip(c => ({ ...c, stage: 'episode ready', pct: 100 }))
     clearJobParam()
+    let episodeId: string | null = null
+    let title = ''
     let turns
     try {
       const roadmap = await api.roadmap(job.document_id)
       const outline = roadmap.episodes.find(o => o.status === 'selected') ?? roadmap.episodes[0]
       const episode = outline ? await api.episode(outline.episode_id) : null
       if (token !== jobGen.current) return
-      setReadyEpisodeId(episode?.episodeId ?? null)
-      turns = readDoneTurns(docName, episode?.title ?? '')
+      episodeId = episode?.episodeId ?? null
+      title = episode?.title ?? ''
+      turns = readDoneTurns(docName, title)
     } catch {
       turns = readDoneTurns(docName, '')
     }
-    void engine.endRead(turns)
+    if (token !== jobGen.current) return
+    setReadyCard({ episodeId, title, docName })
+    setReadyErr('')
+    void engine.endRead(turns, true)
     setDocs(null)
-    setTimeout(() => { if (token === jobGen.current) setChip(c => ({ ...c, visible: false })) }, 1800)
   }
 
   function failDrive(reason: string, jobId: string) {
@@ -155,6 +169,8 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
 
   async function drive(jobId: string, docName = 'your document', retries = 0) {
     const token = ++jobGen.current
+    setReadyCard(null)
+    setReadyErr('')
     engine.beginRead()
     setChip({ visible: true, name: docName, stage: 'preparing', pct: 0, error: '', jobId })
     let stepShown = -1
@@ -189,14 +205,71 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
     }
   }
 
-  async function uploadSample() {
-    try {
-      const res = await fetch('/sample-chapter.pdf')
-      if (!res.ok) throw new Error('missing')
-      await uploadFile(new File([await res.blob()], 'sample-chapter.pdf', { type: 'application/pdf' }))
-    } catch (err) {
-      if (!uploading.current) setUploadErr(err instanceof Error ? err.message : 'Could not load the sample chapter.')
+  // The sample chapter runs a client-side mock of the whole pipeline — the
+  // narrated stages and the ready card + play offer are identical to a real
+  // run, but no upload or job ever leaves the browser.
+  function useSample() {
+    uploadDlg.current?.close()
+    setUploadErr('')
+    void mockDrive()
+  }
+
+  async function mockDrive() {
+    const token = ++jobGen.current
+    setReadyCard(null)
+    setReadyErr('')
+    engine.beginRead()
+    setChip({ visible: true, name: MOCK_DOC, stage: 'preparing', pct: 0, error: '', jobId: '' })
+    for (const s of MOCK_STAGES) {
+      engine.readStep(s.step)
+      setChip(c => c.visible && !c.error ? { ...c, stage: s.label, pct: Math.max(c.pct, s.pct) } : c)
+      await sleep(1100 + Math.random() * 500)
+      if (token !== jobGen.current) return
     }
+    let card: ReadyCard = { episodeId: null, title: '', docName: MOCK_DOC }
+    try {
+      const episodeId = await resolveEpisodeId(MOCK_DOC)
+      const episode = episodeId ? await api.episode(episodeId) : null
+      if (token !== jobGen.current) return
+      card = { episodeId: episode?.episodeId ?? episodeId, title: episode?.title ?? '', docName: MOCK_DOC }
+    } catch { /* backend offline — the card still persists; play retries the resolve */ }
+    setChip(c => ({ ...c, stage: 'episode ready', pct: 100 }))
+    setReadyCard(card)
+    void engine.endRead(readDoneTurns(MOCK_DOC, card.title), true)
+  }
+
+  // Find the episode a card should play: the document that generated it if
+  // its name is known, otherwise the first document with a selected outline.
+  async function resolveEpisodeId(docName: string): Promise<string | null> {
+    const { documents } = await api.documents()
+    const doc = documents.find(d => d.filename === docName) ?? documents[0]
+    if (!doc) return null
+    const roadmap = await api.roadmap(doc.document_id)
+    const outline = roadmap.episodes.find(o => o.status === 'selected') ?? roadmap.episodes[0]
+    return outline?.episode_id ?? null
+  }
+
+  // The persistent ready card and the offer's Yes both land here: resolve a
+  // missing episode id lazily, then start a real session like Learn's Play.
+  async function playReady() {
+    if (!readyCard || playingId) return
+    setReadyErr('')
+    setPlayingId('ready-card')
+    try {
+      const episodeId = readyCard.episodeId ?? await resolveEpisodeId(readyCard.docName)
+      if (!episodeId) throw new Error('Could not find a playable episode yet.')
+      if (!readyCard.episodeId) setReadyCard(r => r ? { ...r, episodeId } : r)
+      const session = await api.createSession(episodeId)
+      onPlay(session.sessionId)
+    } catch (err) {
+      setReadyErr(err instanceof Error ? err.message : 'Could not start the episode.')
+    } finally { setPlayingId(null) }
+  }
+
+  async function acceptOffer() {
+    const token = jobGen.current
+    await engine.offerYes()
+    if (token === jobGen.current) void playReady()
   }
 
   async function uploadFile(file: File) {
@@ -232,7 +305,7 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
             if (outline.status === 'selected') {
               try { ready = (await api.episode(outline.episode_id)).status === 'ready' } catch { /* treat as not ready */ }
             }
-            return { n: i + 1, title: outline.title, status: outline.status, ready, episodeId: outline.episode_id, isNew: outline.episode_id === readyEpisodeId }
+            return { n: i + 1, title: outline.title, status: outline.status, ready, episodeId: outline.episode_id, isNew: outline.episode_id === readyCard?.episodeId }
           }))
           return { name: doc.filename, rows }
         } catch { return null }
@@ -305,6 +378,12 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
           <button type="button" className="vn-choice" onClick={() => void engine.askNothing()}>Nothing</button>
         </div>
       </div>}
+      {snap.offerOpen && <div className="ask-overlay vn-ask-overlay" role="group" aria-label="Play your finished episode now?">
+        <div className="vn-choices">
+          <button type="button" className="vn-choice" onClick={() => void acceptOffer()}>Yes — play it</button>
+          <button type="button" className="vn-choice" onClick={() => void engine.offerNo()}>Not now</button>
+        </div>
+      </div>}
       <div className="maya-wrap">
         <MascotStage
           emotion={snap.emotion}
@@ -329,10 +408,10 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
       </div>
       <div className="foot">
         <nav className="rail" aria-label="Home actions">
-          <button type="button" data-act="talk" aria-disabled={reading || undefined} onClick={() => void engine.startTalk()}>
+          <button type="button" data-act="talk" aria-disabled={reading || snap.mode === 'offer' || undefined} onClick={() => void engine.startTalk()}>
             <svg className="bi" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg><span>Talk</span>
           </button>
-          <button type="button" data-act="upload" aria-disabled={reading || uploadBusy || undefined} onClick={() => { if (reading || uploadBusy) return; setUploadErr(''); openDialog(uploadDlg) }}>
+          <button type="button" data-act="upload" aria-disabled={reading || uploadBusy || snap.mode === 'offer' || undefined} onClick={() => { if (reading || uploadBusy || snap.mode === 'offer') return; setUploadErr(''); openDialog(uploadDlg) }}>
             <svg className="bi" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M17 8l-5-5-5 5" /><path d="M12 3v12" /></svg><span>Upload</span>
           </button>
           <button type="button" data-act="learn" onClick={() => { openDialog(learnDlg); void loadEpisodes() }}>
@@ -346,18 +425,30 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
       </div>
     </div>
 
-    {chip.visible && <div className="upload-chip" role="status" data-error={chip.error ? '' : undefined}>
-      <span className="up-name">{chip.error ? 'Read stalled' : `Reading ${chip.name}`}</span>
-      <div className="up-track"><i className="up-fill" style={{ width: `${chip.pct}%` }} /></div>
-      <div className="up-foot"><span>{chip.stage}</span><span>{Math.round(chip.pct)}%</span></div>
-      {chip.error !== '' && <>
-        <p className="up-err">{chip.error}</p>
-        <div className="up-actions">
-          <button type="button" className="vn-button" onClick={() => { setChip(c => ({ ...c, error: '' })); setJobParam(chip.jobId); void drive(chip.jobId, chip.name, 1) }}>Retry</button>
-          <button type="button" className="vn-quiet" onClick={() => setChip(c => ({ ...c, visible: false }))}>Dismiss</button>
+    {chip.visible && (readyCard
+      // The finished episode persists as the same chip, now a playable card —
+      // this is the "access it later" surface Mita's No answer points at.
+      ? <div className="upload-chip ready" role="button" tabIndex={0}
+          aria-label={`Episode ready: ${readyCard.title || readyCard.docName}. Activate to play it.`}
+          onClick={() => void playReady()}
+          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); void playReady() } }}>
+          <span className="up-name">{readyCard.title || readyCard.docName}</span>
+          <div className="up-track" aria-hidden="true"><i className="up-fill" style={{ width: '100%' }} /></div>
+          <div className="up-foot"><span>{playingId === 'ready-card' ? 'Starting…' : 'Episode ready — tap to play'}</span><span aria-hidden="true">▸</span></div>
+          {readyErr !== '' && <p className="up-err" role="alert">{readyErr}</p>}
         </div>
-      </>}
-    </div>}
+      : <div className="upload-chip" role="status" data-error={chip.error ? '' : undefined}>
+        <span className="up-name">{chip.error ? 'Read stalled' : `Reading ${chip.name}`}</span>
+        <div className="up-track"><i className="up-fill" style={{ width: `${chip.pct}%` }} /></div>
+        <div className="up-foot"><span>{chip.stage}</span><span>{Math.round(chip.pct)}%</span></div>
+        {chip.error !== '' && <>
+          <p className="up-err">{chip.error}</p>
+          <div className="up-actions">
+            <button type="button" className="vn-button" onClick={() => { setChip(c => ({ ...c, error: '' })); setJobParam(chip.jobId); void drive(chip.jobId, chip.name, 1) }}>Retry</button>
+            <button type="button" className="vn-quiet" onClick={() => setChip(c => ({ ...c, visible: false }))}>Dismiss</button>
+          </div>
+        </>}
+      </div>)}
 
     <dialog ref={uploadDlg} id="uploadDlg" className="vn-menu-dialog" aria-labelledby="upTitle" onClose={onDialogClose}
       onClick={e => { if (e.target === e.currentTarget) e.currentTarget.close() }}>
@@ -376,7 +467,7 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
           onChange={e => { const f = e.target.files?.[0]; if (f) void uploadFile(f) }} />
         <div className="or">or</div>
         <button type="button" id="sampleBtn" className="vn-button" style={{ width: '100%' }} disabled={uploadBusy}
-          onClick={() => void uploadSample()}>Use the sample chapter</button>
+          onClick={useSample}>Use the sample chapter</button>
         {uploadErr !== '' && <p className="form-error" role="alert">{uploadErr}</p>}
         <div className="row-end"><button type="button" className="vn-quiet" onClick={e => e.currentTarget.closest('dialog')?.close()}>Cancel</button></div>
       </div>

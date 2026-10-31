@@ -210,7 +210,18 @@ async function run() {
     assert.ok(calls.some(c => c.path === '/api/jobs/job-1/run' && c.method === 'POST'), 'run posted')
     assert.ok(calls.some(c => c.path.endsWith('/curriculum/confirm') && c.method === 'POST'), 'roadmap auto-confirmed')
     await advanceTo(page, async () => (await dlgText(page)).includes(EP_TITLE), { timeout: 40000, label: 'read-done turn naming the episode' })
-    await page.locator('.upload-chip').waitFor({ state: 'detached' })
+    // The episode persists as the same chip, now a playable card, and Mita
+    // asks once whether to play it — the chip never detaches on success.
+    await page.locator('.upload-chip.ready').waitFor({ timeout: 10000 })
+    await page.locator('.ask-overlay').waitFor({ timeout: 15000 })
+    assert.equal(await page.locator('.ask-overlay .vn-choice').count(), 2, 'offer shows Yes/No choices')
+    assert.equal(await page.getByRole('button', { name: 'Talk', exact: true }).getAttribute('aria-disabled'), 'true', 'Talk disabled during the offer')
+    await page.getByRole('button', { name: 'Not now', exact: true }).click()
+    await advanceTo(page, async () => (await page.locator('.dlg-name').innerText()) === 'You', { label: 'decline echo' })
+    assert.match(await dlgText(page), /no|not/i, 'learner filler echoes the decline')
+    await advanceTo(page, async () => /card|learn/i.test(await dlgText(page)), { label: 'Mita points at card + Learn' })
+    assert.ok(await page.locator('.upload-chip.ready').count(), 'ready card persists after declining')
+    await page.locator('.ask-overlay').waitFor({ state: 'detached' })
 
     await page.getByRole('button', { name: 'Learn', exact: true }).click()
     await page.locator('#learnDlg[open]').waitFor()
@@ -285,6 +296,38 @@ async function run() {
       return el && parseFloat(el.style.width) >= 100
     }, null, { timeout: 60000 })
     assert.ok(runs() > before, 'retry fired another run')
+    // The retried completion lands on the persistent card; clicking it plays.
+    await pageFail.locator('.upload-chip.ready').waitFor({ timeout: 10000 })
+    await pageFail.locator('.upload-chip.ready').click()
+    await pageFail.locator('.vn-frame').waitFor({ timeout: 15000 })
+    assert.equal(new URL(pageFail.url()).searchParams.get('session'), SESSION_ID, 'card click starts a session')
+  })
+
+  // ---------- sample chapter: client-side mock pipeline ----------
+  const ctxMock = await browser.newContext({ viewport: { width: 1280, height: 800 } })
+  const pageMock = await ctxMock.newPage()
+  pageMock.on('pageerror', e => errors.push(`pageerror(mock): ${e.message}`))
+  const callsMock = await stub(pageMock)
+  await pageMock.goto(`${base}/`)
+  await track('sample mock: narrated fake pipeline, offer Yes plays', async () => {
+    await pageMock.getByRole('button', { name: 'Upload', exact: true }).click()
+    await pageMock.locator('#uploadDlg[open]').waitFor()
+    await pageMock.locator('#sampleBtn').click()
+    await pageMock.locator('#uploadDlg[open]').waitFor({ state: 'detached' })
+    await pageMock.locator('.upload-chip').waitFor()
+    await pageMock.locator('.mascot[data-emotion="reading"]').waitFor()
+    await pageMock.waitForFunction(() => {
+      const el = document.querySelector('.up-fill')
+      return el && parseFloat(el.style.width) >= 100
+    }, null, { timeout: 30000 })
+    assert.ok(!callsMock.some(c => c.path === '/api/documents' && c.method === 'POST'), 'mock never uploads')
+    assert.ok(!callsMock.some(c => c.path.startsWith('/api/jobs')), 'mock never touches jobs')
+    await pageMock.locator('.upload-chip.ready').waitFor({ timeout: 10000 })
+    await pageMock.locator('.ask-overlay').waitFor({ timeout: 15000 })
+    await pageMock.getByRole('button', { name: /yes — play it/i }).click()
+    await advanceTo(pageMock, async () => (await pageMock.locator('.dlg-name').innerText()) === 'You', { label: 'accept echo' })
+    await pageMock.locator('.vn-frame').waitFor({ timeout: 15000 })
+    assert.equal(new URL(pageMock.url()).searchParams.get('session'), SESSION_ID, 'Yes starts a session')
   })
 
   // ---------- ?job= resume ----------
