@@ -223,7 +223,6 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
   const echoTurnId = `ask:you:${askSeq}`
   const awaiting = asking && !(answerReady && echoDone)
   const askPhase = !inQuestion ? 'compose' : awaiting ? 'pending' : !lastTurn || onFinalBeat ? 'compose' : 'answered'
-  const hasAsked = awaiting || tutorTurns.length > 0
   const turnId = returnBeat
     ? `return:${returnBeat.seq}`
     : inQuestion
@@ -573,8 +572,7 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
         </div>
         {question && <RecallCheckpoint key={scene.sceneId} question={question} state={checkpoint ?? null} pending={pending}
           submittedOptionId={submittedOptionId} eliminated={eliminated} reloadRequired={needsReload} onAnswer={optionId => void submitAnswer(optionId)} />}
-        {inQuestion && <RaiseHandPanel phase={askPhase} draft={draft} hasAsked={hasAsked}
-          turnComplete={onFinalBeat} resumeLabel={resumeLabel}
+        {inQuestion && <RaiseHandPanel phase={askPhase} draft={draft} resumeLabel={resumeLabel}
           busy={pending} error={askError} helpMode={helpMode} anchored={anchored} awaiting={awaitingKind}
           onDraft={setDraft} onSend={() => void sendQuestion()}
           onResume={() => void resumeLesson()}

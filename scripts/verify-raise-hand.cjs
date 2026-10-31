@@ -120,7 +120,7 @@ async function coreFlow(browser) {
   assert.equal(await f.page.locator('.mascot').getAttribute('data-emotion'), 'listening')
   assert.equal(await f.page.evaluate(() => document.activeElement === document.querySelector('.vn-ask-input')), true)
   await f.page.waitForFunction(() => document.querySelector('.vn-dialogue .sr-only[aria-live]')?.textContent === 'Mita: What would you like to ask?')
-  assert.equal(await f.page.locator('.vn-ask-resume').count(), 0, 'Resume Lesson appears only after the first question')
+  assert.equal(await f.page.locator('.vn-ask-resume').count(), 1, 'Resume Lesson is offered from the start')
   assert.equal((await saved(f)).mode, 'question')
   assert.equal((await saved(f)).resumeSnapshot.mode, 'checkpoint')
 
