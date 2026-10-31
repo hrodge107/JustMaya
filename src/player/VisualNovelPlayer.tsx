@@ -1,3 +1,4 @@
+import { PictureCardView } from './PictureCardView'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { api, ApiError, type AnswerRequest, type AwaitingKind, type Emotion, type Episode, type HelpMode, type Scene, type Session } from '../learnerApi'
 import { useReducedMotion } from '../motionPreference'
@@ -568,6 +569,7 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
       <section className={`vn-scene${question || inQuestion ? ' vn-checkpoint-scene' : ''}${inQuestion && askPhase !== 'compose' ? ' vn-undim' : ''}`} aria-label="Scene">
         <div className="vn-stage">
           {mascot}
+          {mode === 'playing' && scene.pictureCard && <PictureCardView key={scene.sceneId} card={scene.pictureCard} />}
           {mode === 'completed' && <div className="vn-prompt"><p className="vn-prompt-label">Episode complete</p><p className="vn-prompt-text">{episode.title}</p></div>}
         </div>
         {question && <RecallCheckpoint key={scene.sceneId} question={question} state={checkpoint ?? null} pending={pending}

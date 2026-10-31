@@ -184,6 +184,21 @@ async function modalCheck(page, count) {
 async function main() {
   const browser = await chromium.launch({ channel: process.env.PLAYER_VERIFY_BROWSER || 'msedge', headless: true })
   try {
+    const picture = await fixture(browser)
+    picture.state.episode.scenes[0].pictureCard = { title: 'Ziggurat', description: 'A ziggurat was a temple platform.', sourceRefs: [{ chunkId: 'c', documentId: 'd', pageStart: 2, pageEnd: 2 }], image: { imageUrl: 'https://upload.wikimedia.org/test.png', filePageUrl: 'https://commons.wikimedia.org/wiki/File:Test', title: 'Test image', author: 'Example', license: 'CC BY 4.0', licenseUrl: 'https://creativecommons.org/licenses/by/4.0/', changes: 'None' } }
+    await picture.page.route('https://upload.wikimedia.org/**', route => route.fulfill({ status: 200, contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64') }))
+    await picture.go()
+    const cardButton = picture.page.getByRole('button', { name: 'Ziggurat +' })
+    await cardButton.focus(); await picture.page.keyboard.press('Enter')
+    assert.equal(await picture.page.getByText('PDF: Page 2').isVisible(), true)
+    assert.equal(await picture.page.getByText('Example', { exact: false }).count() > 0, true)
+    await picture.page.keyboard.press('Enter')
+    assert.equal(await picture.page.getByText('PDF: Page 2').count(), 0)
+    await picture.page.reload(); await picture.page.locator('.vn-picture').waitFor()
+    assert.equal(await picture.page.getByRole('button', { name: 'Ziggurat +' }).isVisible(), true)
+    await picture.page.screenshot({ path: path.join(output, 'picture-card.png') })
+    evidence.push({ check: 'picture card reload, keyboard disclosure, citation and separate credit', result: 'PASS' })
+    await picture.context.close()
     for (const [width, height] of [[390, 844], [320, 568], [844, 390], [800, 1024], [1280, 800]]) {
       const f = await fixture(browser, { context: { viewport: { width, height } } })
       await f.go()

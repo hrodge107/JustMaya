@@ -26,6 +26,7 @@ from app.models.episode import (
 from app.services.concept_analyzer import _inline_schema
 from app.services.episode_generator import generate_episode
 from app.services.token_budget import MeteredProvider
+from app.services.picture_cards import attach_picture_cards
 from app.storage.episodes import (
     publish_episode,
     record_validation,
@@ -342,6 +343,7 @@ async def validate_and_publish(
                 )
     report = build_report(det, verdict, regenerated=regenerated, settings=settings)
     if report_passing(report):
+        await attach_picture_cards(script, lesson_context, passages)
         publish_episode(data_dir, script, report, roadmap.curriculum_id)
     else:
         record_validation(data_dir, script.episodeId, report)

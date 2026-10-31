@@ -91,12 +91,31 @@ class GeneratedRecallQuestion(RecallQuestion):
     options: list[GeneratedAnswerOption] = Field(min_length=3, max_length=3)
 
 
+class PictureCredit(BaseModel):
+    imageUrl: str
+    filePageUrl: str
+    title: str
+    author: str
+    license: str
+    licenseUrl: str
+    retrievedAt: str
+    changes: str = "None"
+
+
+class PictureCard(BaseModel):
+    title: str
+    description: str
+    sourceRefs: list[EpisodeSourceRef] = Field(min_length=1)
+    image: PictureCredit
+
+
 class EpisodeScene(BaseModel):
     sceneId: str
     kind: SceneKind
     dialogue: list[DialogueLine] = []
     question: RecallQuestion | None = None
     nextSceneId: str | None = None
+    pictureCard: PictureCard | None = None
 
 
 class GeneratedEpisodeScene(EpisodeScene):

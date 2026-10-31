@@ -8,7 +8,8 @@ export type Line = { lineId: string; speaker: 'mascot' | 'narrator'; text: strin
 export type Question = { questionId: string; prompt: string; objectiveId: string; options: { optionId: string; label: string }[] }
 export type Checkpoint = { questionId: string; attemptsUsed: number; isCorrect: boolean | null; checkpointCompleted: boolean; selectedOptionId: string | null; feedback: string | null; correctOptionId?: string }
 export type AnswerRequest = { questionId: string; optionId: string; request_id: string; expected_version: number }
-export type Scene = { sceneId: string; kind: 'dialogue' | 'checkpoint' | 'ending'; dialogue: Line[]; question: Question | null; nextSceneId: string | null }
+export type PictureCard = { title: string; description: string; sourceRefs: SourceRef[]; image: { imageUrl: string; filePageUrl: string; title: string; author: string; license: string; licenseUrl: string; changes: string } }
+export type Scene = { pictureCard?: PictureCard | null; sceneId: string; kind: 'dialogue' | 'checkpoint' | 'ending'; dialogue: Line[]; question: Question | null; nextSceneId: string | null }
 export type Episode = { episodeId: string; title: string; status: string; startSceneId: string; scenes: Scene[]; learningObjectives: string[]; estimatedMinutes: number }
 export type SessionMode = 'playing' | 'checkpoint' | 'question' | 'completed' | 'discussion' | 'error'
 // Tutor turns may carry citations; scripted VN dialogue never exposes them.

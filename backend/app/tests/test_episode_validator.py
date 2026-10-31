@@ -573,3 +573,30 @@ def test_get_episode_returns_draft_verbatim(settings, data_dir):
     with TestClient(create_app(data_dir=data_dir)) as client:
         body = client.get("/api/episodes/ep-1").json()
         assert body["status"] == "draft"
+
+@pytest.mark.anyio
+async def test_publish_preserves_picture_card(settings, data_dir, monkeypatch):
+    from app.models.document import SourcePassage, SourceRef
+    import app.services.picture_cards as cards
+    from app.tests.test_picture_cards import candidate
+    _seed_document(data_dir)
+    ctx = _lesson_context()
+    ctx.concepts[0].title = 'Ziggurat'
+    script = _script()
+    script.scenes[0].dialogue[0] = _line(text='A ziggurat was a temple platform.', sourceRefs=[_ref()])
+    passage = SourcePassage(chunk_id='doc-1-p0001-000', text='A ziggurat was a temple platform.', source=SourceRef(chunk_id='doc-1-p0001-000', document_id='doc-1', page_start=1, page_end=1))
+    class Response:
+        def raise_for_status(self): pass
+        def json(self): return {'query': {'pages': {'1': candidate()}}}
+    class Client:
+        def __init__(self, **kwargs): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        async def get(self, *args, **kwargs): return Response()
+    monkeypatch.setattr(cards.httpx, 'AsyncClient', Client)
+    stub = ReviewStub([{'verdict': 'pass', 'violations': []}])
+    _, report = await validate_and_publish(data_dir, script, _roadmap(ctx), ctx, [passage], CHUNKS, MeteredProvider(stub, settings, data_dir), 'j1', settings)
+    restored = read_episode_by_id(data_dir, 'ep-1')
+    assert report_passing(report)
+    assert restored.scenes[0].pictureCard.description == passage.text
+    assert restored.scenes[0].pictureCard.sourceRefs[0].pageStart == 1
