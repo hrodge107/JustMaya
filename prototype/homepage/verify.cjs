@@ -25,12 +25,16 @@ async function run(browser, variant) {
   page.on('response', r => { if (r.status() >= 400) errors.push(`[${variant}] ${r.status()} ${r.url()}`) })
   await page.goto(`${base}?v=${variant}`, { waitUntil: 'load' })
 
-  // Fixed spec: dialogue box, left rail with the four actions, mascot.
+  // Fixed spec: dialogue box, left rail with the three main actions, mascot.
   await page.waitForSelector('.dlg')
   const rail = await page.$$('.rail button')
-  assert.equal(rail.length, 4, `[${variant}] rail buttons`)
+  assert.equal(rail.length, 3, `[${variant}] rail buttons`)
   const labels = await Promise.all(rail.map(b => b.textContent()))
-  assert.deepEqual(labels.map(s => s.trim()), ['Talk', 'Upload', 'Learn', 'About'], `[${variant}] rail labels`)
+  assert.deepEqual(labels.map(s => s.trim()), ['Talk', 'Upload', 'Learn'], `[${variant}] rail labels`)
+
+  // Menu trigger sits top-right on desktop (1280px wide here).
+  const mtBox = await (await page.$('.menu-trigger')).boundingBox()
+  assert.ok(mtBox.x > 1100 && mtBox.y < 80, `[${variant}] menu trigger top-right on desktop`)
   const mascotSel = variant === 'b' ? '.face-mascot' : '.maya-svg'
   assert.ok(await page.$(`${mascotSel}:visible`), `[${variant}] mascot rendered`)
   await page.waitForFunction(() => document.getElementById('dlgText').textContent.length > 3)
@@ -75,8 +79,21 @@ async function run(browser, variant) {
   await page.screenshot({ path: path.join(out, `v${variant}-learn.png`) })
   await page.click('#learnDlg [data-close]')
 
-  // About modal.
-  await page.click('[data-act="about"]')
+  // Menu bundles Reduce motion (role=switch, device reset) and About.
+  await page.click('#menuTrigger')
+  await page.waitForSelector('#menuDlg[open]')
+  await page.waitForSelector('#motionRow[role="switch"]')
+  const motionBefore = await page.evaluate(() => document.documentElement.dataset.motion)
+  await page.click('#motionRow')
+  const motionAfter = await page.evaluate(() => document.documentElement.dataset.motion)
+  assert.notEqual(motionAfter, motionBefore, `[${variant}] motion switch flips`)
+  await page.waitForSelector('#motionReset:not([hidden])')
+  await page.click('#motionReset')
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.motion), motionBefore, `[${variant}] device reset restores motion`)
+  await page.screenshot({ path: path.join(out, `v${variant}-menu.png`) })
+
+  // About via the menu row: closes the menu, opens the about dialog.
+  await page.click('#menuAbout')
   await page.waitForSelector('#aboutDlg[open]')
   assert.match(await page.textContent('#aboutDlg'), /JustMaya turns a document/i)
   await page.click('#aboutDlg [data-close]')
@@ -120,6 +137,14 @@ async function main() {
   const browser = await chromium.launch({ executablePath: findBrowser() })
   try {
     for (const v of ['a', 'b', 'c']) await run(browser, v)
+    // Menu trigger moves to lower-right on mobile widths.
+    const mp = await browser.newPage({ viewport: { width: 420, height: 800 }, reducedMotion: 'reduce' })
+    mp.on('pageerror', e => errors.push(`[mobile] ${e.message}`))
+    await mp.goto(`${base}?v=a`, { waitUntil: 'load' })
+    const mm = await (await mp.$('.menu-trigger')).boundingBox()
+    assert.ok(mm.x + mm.width > 380 && mm.y > 700, '[mobile] menu trigger lower-right')
+    await mp.close()
+    console.log('mobile menu placement: ok')
   } finally {
     await browser.close()
   }
