@@ -1317,6 +1317,37 @@ async def test_on_topic_without_signal_gets_warm_backstop(tmp_path):
 
 
 @pytest.mark.anyio
+async def test_stock_disclaimer_never_opens_answer(tmp_path):
+    # Even when the model itself opens with a stock meta-disclaimer, the
+    # served answer leads with substance — one woven nudge, no label-first
+    # double disclaimer.
+    stub = StubProvider(data=_payload(
+        lines=[
+            "The retrieved PDF passages do not verify this answer.",
+            "Uruk had many famous rulers — Gilgamesh chief among them. "
+            "That's beyond what our document covers.",
+        ],
+    ))
+    interaction = await _ask(
+        tmp_path, _checkpoint_session(), _private_script(), stub)
+    assert interaction.lines == [
+        "Uruk had many famous rulers — Gilgamesh chief among them. "
+        "That's beyond what our document covers."
+    ]
+    assert interaction.groundingStatus == "unsupported"
+
+
+@pytest.mark.anyio
+async def test_disclaimer_only_answer_falls_back(tmp_path):
+    stub = StubProvider(data=_payload(
+        lines=["The retrieved PDF passages do not verify this answer."],
+    ))
+    interaction = await _ask(
+        tmp_path, _checkpoint_session(), _private_script(), stub)
+    assert interaction.lines == [_FALLBACK_LINE]
+
+
+@pytest.mark.anyio
 async def test_off_topic_serves_canned_decline_deterministically(tmp_path):
     # The model's other fields are ignored entirely on the canned path —
     # even a confident "supported" payload cannot escape it.
