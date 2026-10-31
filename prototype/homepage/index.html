@@ -13,6 +13,8 @@
 
   Fixed spec in every variant:
     - Mascot idles with a ~100-line looping script (app explainers + chatter).
+      Dialogue is player-driven: click it to complete a line, click again to
+      advance; it auto-continues only after 10s of idleness.
     - Left rail beside the dialogue box: Talk / Upload / Learn / About.
     - Talk -> choices [Input | Nothing]; Input answers app questions from a
       keyword router with progressive fallback.
@@ -759,6 +761,7 @@ const variant = new URLSearchParams(location.search).get('v') || 'a';
 document.querySelector('.home').dataset.v = ['a','b','c'].includes(variant) ? variant : 'a';
 document.querySelectorAll('.varbar a').forEach(a => a.classList.toggle('on', a.dataset.var === document.querySelector('.home').dataset.v));
 
+const ADVANCE_MS = 10000;    // auto-advance only after this much idleness
 let seq = 0;                 // bump cancels every running loop
 let typing = false, typer = null, fullText = '', sayResolve = null;
 let mode = 'greet';          // greet | idle | talk | read | modal
@@ -788,6 +791,7 @@ function say(line, emotion) {
     if (reduced) { dlgText.textContent = text; return resolve(t); }
     typing = true;
     sayResolve = () => resolve(t);
+    cue.hidden = true;
     maya.setAttribute('data-speaking', '');
     dlgText.textContent = '';
     let i = 0;
@@ -803,10 +807,8 @@ function say(line, emotion) {
   });
 }
 
-async function pause(ms, t) { await wait(ms); return t === seq; }
-
 /* dialogue click: complete typing, or skip the idle hold */
-let holdRelease = null;
+let holdRelease = null, holdSeq = 0;
 dlg.addEventListener('click', () => {
   if (typing) { finishType(); if (holdRelease) holdRelease(); return; }
   if (holdRelease) holdRelease();
@@ -814,10 +816,12 @@ dlg.addEventListener('click', () => {
 dlg.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); dlg.click(); } });
 
 async function hold(ms, t) {
-  if (reduced) return pause(ms, t);
+  const h = ++holdSeq;
+  cue.hidden = false;        // ▾ marks "waiting for the player"
   return new Promise(res => {
-    const to = setTimeout(() => { holdRelease = null; res(t === seq); }, ms);
-    holdRelease = () => { clearTimeout(to); holdRelease = null; res(t === seq); };
+    const done = () => { if (h === holdSeq) { cue.hidden = true; holdRelease = null; } res(t === seq); };
+    const to = setTimeout(done, ms);
+    holdRelease = () => { clearTimeout(to); done(); };
   });
 }
 
@@ -831,12 +835,13 @@ async function ambient(t) {
     const line = nextIdle();
     await say(line);
     if (t !== seq) return;
-    if (!await hold(2600 + Math.random() * 1400, t)) return;
+    if (!await hold(ADVANCE_MS, t)) return;
   }
 }
 
 /* ---------- choices & composer ---------------------------------------- */
 function showChips(list) {
+  cue.hidden = true;         // the player acts through chips, not the ▾
   dlgChoices.innerHTML = '';
   list.forEach(c => {
     const b = document.createElement('button');
@@ -1038,7 +1043,7 @@ addEventListener('pointermove', e => {
   for (const line of GREETING) {
     await say(line);
     if (t !== seq) return;
-    if (!await hold(1400, t)) return;
+    if (!await hold(ADVANCE_MS, t)) return;
   }
   if (t !== seq) return;
   mode = 'idle'; setState('idle');
