@@ -248,8 +248,8 @@ async def test_cached_tokens_survive_in_usage():
 
 @pytest.mark.anyio
 async def test_live_capped_structured_call():
-    if os.environ.get("JUSTMAYA_LIVE") != "1":
-        pytest.skip("set JUSTMAYA_LIVE=1 to run the live endpoint check")
+    if os.environ.get("MEET_MITA_LIVE") != "1":
+        pytest.skip("set MEET_MITA_LIVE=1 to run the live endpoint check")
     saved = os.environ.pop("META_API_KEY", None)  # real .env key wins over the test placeholder
     try:
         provider = MetaProvider(Settings())

@@ -8,7 +8,7 @@ const path = require('node:path')
 const os = require('node:os')
 
 const base = process.env.PROTO_URL || 'http://localhost:5174/prototype/backlog/index.html'
-const out = path.join(os.tmpdir(), 'justmaya-backlog-proto-2')
+const out = path.join(os.tmpdir(), 'meet-mita-backlog-proto-2')
 fs.mkdirSync(out, { recursive: true })
 const errors = []
 

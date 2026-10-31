@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# JustMaya — agent harness bootstrap (Unix / Git Bash)
+# Meet Mita — agent harness bootstrap (Unix / Git Bash)
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

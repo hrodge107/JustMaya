@@ -51,7 +51,7 @@ from app.storage.jobs import (
 )
 
 EMBED = pytest.mark.skipif(
-    os.environ.get("JUSTMAYA_EMBED") != "1", reason="requires ONNX embedding model"
+    os.environ.get("MEET_MITA_EMBED") != "1", reason="requires ONNX embedding model"
 )
 
 DOC_ID = "doc-1"

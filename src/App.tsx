@@ -195,7 +195,7 @@ export default function App() {
   if (sessionId) return <VisualNovelPlayer key={sessionId} sessionId={sessionId} onExit={leavePlayer} />
 
   return <main className="learner">
-    <header className="learner-header"><span className="brand">JustMaya</span><span>Your learning story</span></header>
+    <header className="learner-header"><span className="brand">Meet Mita</span><span>Your learning story</span></header>
     <section className="intro"><p className="chapter">Your document, your story</p><h1>Turn your notes into a lesson.</h1><p>Choose a PDF and we’ll prepare an episode around its ideas.</p></section>
     <div className="flow">
       <section className="panel upload"><h2>Choose your PDF</h2><p>Your document is the starting point for your learning roadmap.</p><form onSubmit={upload}><label htmlFor="pdf">PDF document</label><input id="pdf" type="file" accept="application/pdf,.pdf" onChange={e => setFile(e.target.files?.[0] || null)} required />{file && <p className="file-name">Selected: {file.name}</p>}<button className="primary" disabled={!file || busy || running}>Prepare my lesson</button></form>

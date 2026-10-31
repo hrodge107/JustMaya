@@ -14,7 +14,7 @@ const path = require('node:path')
 const os = require('node:os')
 
 const base = process.env.PROTO_URL || 'file:///' + path.resolve(__dirname, 'index.html').replace(/\\/g, '/')
-const out = path.join(os.tmpdir(), 'justmaya-home-proto')
+const out = path.join(os.tmpdir(), 'meet-mita-home-proto')
 fs.mkdirSync(out, { recursive: true })
 const errors = []
 
@@ -109,7 +109,7 @@ async function run(browser, variant) {
   // About via the menu row: closes the menu, opens the about dialog.
   await page.click('#menuAbout')
   await page.waitForSelector('#aboutDlg[open]')
-  assert.match(await page.textContent('#aboutDlg'), /JustMaya turns a document/i)
+  assert.match(await page.textContent('#aboutDlg'), /Meet Mita turns a document/i)
   await page.click('#aboutDlg [data-close]')
 
   // Player-driven dialogue: clicking the box advances to the next line.

@@ -32,7 +32,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         app.state.data_dir = base
         yield
 
-    app = FastAPI(title="JustMaya", lifespan=lifespan)
+    app = FastAPI(title="Meet Mita", lifespan=lifespan)
     app.state.settings = settings
     app.include_router(documents_router)
     app.include_router(jobs_router)

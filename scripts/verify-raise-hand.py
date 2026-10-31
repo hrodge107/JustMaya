@@ -67,7 +67,7 @@ def passages(document_id):
 
 
 def main():
-    staged = Path(tempfile.mkdtemp(prefix="justmaya-raise-hand-"))
+    staged = Path(tempfile.mkdtemp(prefix="meet-mita-raise-hand-"))
     source_db = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "backend/data/app.db"
     with sqlite3.connect(source_db) as source, sqlite3.connect(staged / "app.db") as target:
         source.backup(target)

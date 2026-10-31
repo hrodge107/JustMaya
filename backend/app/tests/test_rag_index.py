@@ -15,10 +15,10 @@ from app.services.retriever import retrieve
 from app.services.vector_store import get_collection
 
 # ONNX-dependent tests download the ~80MB MiniLM model on first run
-# (cached afterwards in ~/.cache/chroma); skip unless JUSTMAYA_EMBED=1
+# (cached afterwards in ~/.cache/chroma); skip unless MEET_MITA_EMBED=1
 EMBED = pytest.mark.skipif(
-    os.environ.get("JUSTMAYA_EMBED") != "1",
-    reason="downloads the ONNX embedding model on first run; set JUSTMAYA_EMBED=1",
+    os.environ.get("MEET_MITA_EMBED") != "1",
+    reason="downloads the ONNX embedding model on first run; set MEET_MITA_EMBED=1",
 )
 
 

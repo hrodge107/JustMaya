@@ -7,7 +7,7 @@ const path = require('node:path')
 const os = require('node:os')
 
 const base = process.env.PLAYER_VERIFY_URL || 'http://127.0.0.1:5173'
-const output = process.env.PLAYER_VERIFY_OUTPUT || path.join(os.tmpdir(), 'justmaya-portrait-menu')
+const output = process.env.PLAYER_VERIFY_OUTPUT || path.join(os.tmpdir(), 'meet-mita-portrait-menu')
 fs.mkdirSync(output, { recursive: true })
 const evidence = []
 const errors = []

@@ -44,7 +44,7 @@ def serve(settings, data_dir) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="JustMaya pipeline worker")
+    parser = argparse.ArgumentParser(description="Meet Mita pipeline worker")
     parser.add_argument(
         "--once", action="store_true", help="recover + drain queued jobs, then exit"
     )

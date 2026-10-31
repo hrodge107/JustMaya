@@ -8,7 +8,7 @@ const path = require('node:path')
 const os = require('node:os')
 
 const base = process.env.PLAYER_VERIFY_URL || 'http://127.0.0.1:5173'
-const output = process.env.PLAYER_VERIFY_OUTPUT || path.join(os.tmpdir(), 'justmaya-raise-button')
+const output = process.env.PLAYER_VERIFY_OUTPUT || path.join(os.tmpdir(), 'meet-mita-raise-button')
 fs.mkdirSync(output, { recursive: true })
 const errors = []
 
