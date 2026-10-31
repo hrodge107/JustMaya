@@ -63,6 +63,7 @@ async function fixture(browser, options = {}) {
       if (state.loadError) return route.fulfill({ status: state.loadError, json: { error: { message: 'Fixture session unavailable.' } } })
       return route.fulfill({ json: state.session })
     }
+    if (url.pathname === '/api/documents') return route.fulfill({ json: { documents: [] } })
     assert.equal(url.pathname, '/api/episodes/fixture-episode', 'Unexpected API route')
     return route.fulfill({ json: state.episode })
   })

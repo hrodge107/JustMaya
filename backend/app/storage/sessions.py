@@ -16,6 +16,7 @@ from app.models.session import (
     AnswerRequest,
     LearnerSession,
     QuestionRequest,
+    RewindRequest,
     TutorInteraction,
 )
 from app.services.session_controller import (
@@ -28,6 +29,7 @@ from app.services.tutor_flow import validate_anchor
 from app.services.session_controller import answer as answer_session
 from app.services.session_controller import raise_hand as raise_hand_session
 from app.services.session_controller import resume as resume_session
+from app.services.session_controller import rewind as rewind_session
 
 
 class SessionConflict(Exception):
@@ -151,6 +153,13 @@ def apply_resume(
     return _apply(
         data_dir, session_id, request_id, expected_version,
         mutate=lambda s, e: resume_session(s, e), kind="resume",
+    )
+
+
+def apply_rewind(data_dir: Path, session_id: str, request: RewindRequest) -> LearnerSession:
+    return _apply(
+        data_dir, session_id, request.request_id, request.expected_version,
+        mutate=lambda s, e: rewind_session(s, e, request), kind="rewind",
     )
 
 
@@ -297,6 +306,11 @@ def commit_question(
             raise SessionConflict("Session version is stale.")
         if session.mode != MODE_QUESTION:
             raise InvalidSessionTransition("Session is not in question mode.")
+        # Anchor the interaction to the interrupted position so the
+        # backlog can place and rewind it.
+        if interaction.position is None:
+            interaction = interaction.model_copy(
+                update={"position": session.resumeSnapshot})
         notes = (
             [*session.learningNotes, learning_note]
             if learning_note else session.learningNotes
