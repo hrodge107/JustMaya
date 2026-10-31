@@ -40,23 +40,28 @@ async function run(browser, variant) {
   await page.waitForFunction(() => document.getElementById('dlgText').textContent.length > 3)
   await page.screenshot({ path: path.join(out, `v${variant}-home.png`) })
 
-  // Talk -> [Input|Nothing] -> typed question gets a routed answer.
+  // Talk -> overlay strips [{input} | Nothing] over the dimmed scene.
   await page.click('[data-act="talk"]')
-  await page.waitForSelector('#dlgChoices:not([hidden])')
-  const chips = await page.$$('#dlgChoices button')
-  assert.equal(chips.length, 2, `[${variant}] talk choices`)
-  assert.equal((await chips[0].textContent()).trim(), 'Input')
-  assert.equal((await chips[1].textContent()).trim(), 'Nothing')
-  await chips[0].click()
-  await page.waitForSelector('#composer:not([hidden])')
-  await page.fill('#composerInput', 'what is this app?')
-  await page.click('#composer button[type="submit"]')
+  await page.waitForSelector('#askOverlay:not([hidden])')
+  assert.ok(await page.$('#stage.ask-dim'), `[${variant}] scene dims while choosing`)
+  assert.ok(await page.$('#askStrip'), `[${variant}] input strip`)
+  assert.ok(await page.$('#askNothing'), `[${variant}] Nothing strip`)
+
+  // Send via the strip: question echoes as "You", Mita answers, Talk ends.
+  await page.fill('#askInput', 'what is this app?')
+  await page.click('#askSend')
+  await page.waitForSelector('#askOverlay[hidden]', { state: 'attached' })
+  await page.waitForFunction(() => document.getElementById('dlgName').textContent === 'You')
   await page.waitForFunction(() => /visual|novel|lesson|document|roadmap/i.test(document.getElementById('dlgText').textContent))
-  // After the answer the choices return; "Nothing" exits to idle.
-  await page.waitForSelector('#dlgChoices:not([hidden])')
-  const again = await page.$$('#dlgChoices button')
-  await again[again.length - 1].click() // Nothing / Never mind
-  await page.waitForSelector('#dlgChoices[hidden]', { state: 'attached' })
+  assert.equal(await page.textContent('#dlgName'), 'Mita', `[${variant}] speaker returns to Mita`)
+  assert.ok(await page.$('#askOverlay[hidden]'), `[${variant}] no second compose — Talk is over`)
+
+  // Nothing exits to idle.
+  await page.click('[data-act="talk"]')
+  await page.waitForSelector('#askOverlay:not([hidden])')
+  await page.click('#askNothing')
+  await page.waitForSelector('#askOverlay[hidden]', { state: 'attached' })
+  await page.waitForFunction(() => !document.getElementById('stage').classList.contains('ask-dim'))
 
   // Upload -> modal -> sample -> reading state + progress bar -> Learn entry.
   await page.click('[data-act="upload"]')
