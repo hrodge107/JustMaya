@@ -55,7 +55,7 @@ async def plan_curriculum(inventory: ConceptInventory, provider: MeteredProvider
     )
     result = await provider.generate_structured(
         job_id=job_id, stage="planning", system=SYSTEM, user=payload,
-        schema=_inline_schema(Plan), max_tokens=20000, preflight=True,
+        schema=_inline_schema(Plan), max_tokens=40000, preflight=True,
         cache_key="curriculum-roadmap-v1",
     )
     plan = Plan.model_validate(result)

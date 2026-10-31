@@ -44,7 +44,8 @@ async def test_plans_short_inventory_as_untrusted_metered_input():
 
 @pytest.mark.anyio
 async def test_oversized_input_fails_before_generation():
-    meter = FakeMeter(count=25000)
+    limit = Settings(meta_api_key="test").roadmap_max_input_tokens
+    meter = FakeMeter(count=limit + 1)
     with pytest.raises(ValueError, match="ROADMAP_INPUT_TOO_LARGE"):
         await plan_curriculum(inventory(), meter, "job", Settings(meta_api_key="test"))
     assert not meter.calls

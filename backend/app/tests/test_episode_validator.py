@@ -149,8 +149,8 @@ def test_validation_settings_defaults_and_overrides(monkeypatch):
     assert defaults.validation_max_dialogue_words == 2200
     assert defaults.validation_checkpoint_count == 2
     assert defaults.validation_max_minutes == 15.0
-    assert defaults.validation_max_input_tokens == 24_000
-    assert defaults.validation_max_tokens == 10_000
+    assert defaults.validation_max_input_tokens == 48_000
+    assert defaults.validation_max_tokens == 20_000
 
     monkeypatch.setenv("VALIDATION_MAX_SCENES", "10")
     monkeypatch.setenv("VALIDATION_CHECKPOINT_COUNT", "3")

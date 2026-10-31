@@ -28,6 +28,12 @@ def _resp(body: dict, status: int = 200) -> httpx.Response:
     return httpx.Response(status, json=body)
 
 
+def test_provider_uses_configured_request_timeout():
+    settings = _settings()
+    settings.model_request_timeout_seconds = 123
+    assert MetaProvider(settings)._timeout == 123
+
+
 SCHEMA = {
     "type": "object",
     "required": ["title", "score"],
