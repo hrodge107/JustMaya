@@ -8,7 +8,7 @@
    - Signature: the stand-in face glyph, drawn from CSS shapes whose geometry
      encodes the six emotions. Only transform/opacity animate. */
 
-body:has(.player) { margin: 0; background: #e9e9f1; color: #30304c; color-scheme: light; }
+body:has(.player) { margin: 0; background: #23233a; color: #f7f7fa; color-scheme: dark; }
 #root:has(.player) { width: 100%; max-width: none; border: 0; display: block; text-align: left; }
 
 .player {
@@ -23,19 +23,20 @@ body:has(.player) { margin: 0; background: #e9e9f1; color: #30304c; color-scheme
   --warn-ink: #613412;
   --ease: cubic-bezier(.22, 1, .36, 1);
   box-sizing: border-box;
-  max-width: 1240px;
+  display: flex;
+  flex-direction: column;
   min-height: 100dvh;
-  margin: auto;
-  padding: 0;
   font-family: 'Nunito Variable', 'Nunito', 'Trebuchet MS', 'Segoe UI', sans-serif;
   line-height: 1.5;
   color: var(--ink);
 }
 .player *, .player *::before, .player *::after { box-sizing: border-box; }
 
-.player-header { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 14px; padding: 16px max(18px, env(safe-area-inset-right)) 16px max(18px, env(safe-area-inset-left)); padding-top: max(16px, env(safe-area-inset-top)); background: #23233a; color: var(--paper); border-radius: inherit; border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
-.player-header .brand { font-size: 1rem; font-weight: 900; }
-.player-title { flex: 1 1 180px; min-width: 0; margin: 0; color: inherit; font-family: inherit; font-size: .9rem; font-weight: 700; letter-spacing: normal; overflow-wrap: anywhere; }
+/* Episode identity is a floating scene chip, not a header band — the frame
+   runs edge to edge like the home stage. */
+.player-header { position: absolute; top: max(12px, env(safe-area-inset-top)); left: max(12px, env(safe-area-inset-left)); z-index: 4; display: flex; align-items: baseline; flex-wrap: wrap; gap: 3px 12px; max-width: min(78%, 620px); margin: 0; padding: 8px 14px; border-radius: 14px; background: rgb(35 35 58 / .82); color: var(--paper); box-shadow: inset 0 0 0 2px rgb(119 119 139 / .5); backdrop-filter: blur(4px); }
+.player-header .brand { font-size: .95rem; font-weight: 900; }
+.player-title { flex: 1 1 160px; min-width: 0; margin: 0; color: inherit; font-family: inherit; font-size: .82rem; font-weight: 700; letter-spacing: normal; overflow-wrap: anywhere; }
 
 /* :where keeps this reset at zero specificity so .vn-button/.vn-quiet weights win. */
 :where(.player) button { font: inherit; cursor: pointer; border: 0; min-height: 48px; border-radius: 12px; }
@@ -48,22 +49,25 @@ body:has(.player) { margin: 0; background: #e9e9f1; color: #30304c; color-scheme
 .vn-quiet { padding: 8px 16px; background: transparent; color: var(--ink); font-weight: 800; box-shadow: inset 0 0 0 2px #77778b; }
 .vn-quiet:hover { background: #dedeea; }
 
-/* Content rows reserve space over one continuous scene background. The
-   dialogue viewport stays bounded so long lines scroll inside their panel. */
-.vn-frame { display: grid; grid-template-rows: auto minmax(220px, 1fr) auto auto; min-height: 100dvh; background: radial-gradient(120% 90% at 30% 20%, var(--stage-a), var(--stage-b)); color: var(--paper); }
+/* Two full-bleed rows over one continuous scene background: the scene takes
+   all remaining height, the dock (dialogue + action rail) hugs the bottom.
+   The dialogue viewport stays bounded so long lines scroll inside their panel. */
+.vn-frame { flex: 1 1 0; min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto; background: radial-gradient(120% 90% at 30% 20%, var(--stage-a), var(--stage-b)); color: var(--paper); }
 .vn-scene {
   position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   padding: 16px max(18px, env(safe-area-inset-right)) 16px max(18px, env(safe-area-inset-left));
   color: var(--paper);
 }
-.vn-dialogue { position: relative; display: flex; flex-direction: column; flex: none; block-size: clamp(144px, 28dvh, 224px); min-width: 0; margin: 16px max(12px, env(safe-area-inset-right)) 0 max(12px, env(safe-area-inset-left)); border-radius: 24px; background: rgba(247, 247, 250, .95); color: var(--ink); }
+.vn-dialogue { position: relative; display: flex; flex-direction: column; flex: none; block-size: clamp(144px, 28dvh, 224px); min-width: 0; border-radius: 24px; background: rgba(247, 247, 250, .95); color: var(--ink); }
 
-.vn-progress { display: flex; flex-basis: 100%; align-items: center; gap: 6px 12px; flex-wrap: wrap; min-width: 0; font-size: .8rem; font-weight: 800; }
+.vn-progress { display: flex; flex-basis: 100%; align-items: center; gap: 4px 10px; flex-wrap: wrap; min-width: 0; font-size: .72rem; font-weight: 800; }
 .vn-progress ol { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; padding: 0; list-style: none; }
-.vn-progress li { width: 22px; height: 6px; border-radius: 3px; background: var(--paper); opacity: .22; }
+.vn-progress li { width: 18px; height: 5px; border-radius: 3px; background: var(--paper); opacity: .22; }
 .vn-progress li.done { opacity: .6; }
 .vn-progress li.current { background: var(--mint-bright); opacity: 1; }
 
@@ -80,7 +84,7 @@ body:has(.player) { margin: 0; background: #e9e9f1; color: #30304c; color-scheme
 .vn-error { flex: 1 1 220px; margin: 0; color: var(--warn-ink); font-weight: 750; overflow-wrap: anywhere; }
 .vn-note { margin: 0; max-width: 60ch; color: var(--muted); font-weight: 700; }
 
-.player-message { max-width: 560px; margin: 18vh auto 0; padding: 28px; background: var(--paper); border-radius: 22px; }
+.player-message { max-width: 560px; margin: auto; padding: 28px; background: var(--paper); border-radius: 22px; }
 .player-message h1 { margin: 0 0 8px; font-size: 1.5rem; font-weight: 850; color: var(--ink); letter-spacing: normal; }
 .player-message p { margin: 0 0 18px; overflow-wrap: anywhere; }
 
@@ -127,22 +131,10 @@ body:has(.player) { margin: 0; background: #e9e9f1; color: #30304c; color-scheme
 
 @keyframes mouth-talk { from { transform: scaleY(1); } to { transform: scaleY(.35); } }
 
-/* Intermediate canvases retain the portrait composition with a framed edge. */
 @media (min-width: 640px) {
-  .player { padding: 16px; }
-  .vn-frame { min-height: calc(100dvh - 32px); border-radius: 22px; box-shadow: 0 10px 30px #30304c26; }
-  .player-header { padding: 18px 26px; }
   .vn-scene { padding: 20px 26px; }
-  .vn-dialogue { margin-inline: 20px; }
 }
-/* A wide scene keeps its 16:9 composition, growing only when reading needs it. */
-@media (min-width: 1000px) {
-  .player { padding: 20px 32px 40px; }
-  .vn-frame { min-height: 0; aspect-ratio: 16 / 9; grid-template-rows: auto minmax(180px, 1fr) auto auto; }
-  .vn-progress { flex-basis: auto; }
-  .vn-dialogue { border-radius: 20px; }
-  .vn-frame:not(.mode-playing) .vn-controls { justify-content: flex-start; }
-}
+.vn-frame:not(.mode-playing) .vn-controls { justify-content: flex-start; }
 /* data-motion mirrors the effective setting (device or in-menu override) so
    the override can both force reduction on and lift a device reduction off. */
 :root[data-motion='reduce'] .player *, :root[data-motion='reduce'] .vn-menu-dialog::backdrop { transition: none !important; animation: none !important; }
@@ -161,12 +153,36 @@ body:has(.player) { margin: 0; background: #e9e9f1; color: #30304c; color-scheme
 .vn-dialogue-target .vn-error { flex: none; margin-top: 12px; }
 .vn-dialogue:not(:has(.vn-dialogue-target)) { padding: 20px; }
 
-.vn-menu-rail { display: flex; justify-content: flex-end; align-items: flex-end; min-height: clamp(88px, 14dvh, 128px); padding: 16px max(18px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left)); }
-.vn-menu-trigger { display: flex; align-items: center; gap: 10px; padding: 10px 16px; background: var(--paper); color: var(--ink); font-weight: 850; transition: transform .18s var(--ease); }
-.vn-menu-trigger:active { transform: scale(.97); }
-.vn-menu-icon { display: grid; gap: 4px; width: 20px; }
+/* The dock mirrors the home screen: dialogue box plus a ghost action rail —
+   a left column beside the dialogue on wide stages, an equal-share row under
+   it on narrow ones. */
+.vn-dock { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 0 max(12px, env(safe-area-inset-right)) calc(clamp(10px, 2.6dvh, 24px) + env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left)); }
+.vn-rail { display: flex; gap: 8px; min-width: 0; }
+.vn-rail-label { min-width: 0; overflow-wrap: anywhere; }
+.vn-rail :focus-visible { outline-color: var(--mint-bright); }
+.vn-rail > button { display: flex; align-items: center; justify-content: center; gap: 7px; min-width: 0; min-height: 44px; padding: 8px 16px; border-radius: 12px; background: transparent; color: var(--paper); font-weight: 800; font-size: .92rem; box-shadow: inset 0 0 0 2px #77778b; transition: background .16s var(--ease), transform .16s var(--ease), opacity .18s var(--ease); }
+.vn-rail > button:hover { background: rgb(255 255 255 / .08); }
+.vn-rail > button:active { transform: scale(.97); }
+.vn-menu-icon { display: grid; gap: 4px; width: 20px; flex: none; }
 .vn-menu-icon > span { height: 2px; border-radius: 1px; background: currentColor; }
-.vn-menu-rail :focus-visible { outline-color: var(--mint-bright); }
+.vn-menu-trigger, .vn-backlog-cue { color: var(--paper); }
+.vn-backlog-cue > [aria-hidden] { font-size: 1.1rem; font-weight: 900; line-height: 1; }
+/* Raise hand is the rail's primary action — mint fill like the home Talk. */
+.player .vn-raise { background: var(--mint-ink); color: var(--paper); box-shadow: none; }
+.player .vn-raise:hover { background: #0a8277; }
+.vn-raise svg { width: 22px; height: 22px; flex: none; }
+.vn-raise[aria-disabled] { opacity: .7; cursor: progress; }
+@media (min-width: 720px) {
+  .vn-dock { flex-direction: row; align-items: center; gap: 12px; }
+  .vn-rail { order: -1; flex-direction: column; align-items: stretch; gap: 7px; }
+  .vn-rail > button { justify-content: flex-start; min-width: 148px; }
+  .vn-dialogue { flex: 1 1 0; }
+}
+@media (max-width: 719.9px) {
+  .vn-rail { gap: 5px; }
+  .vn-rail > button { flex: 1 1 0; min-width: 88px; padding: 8px 10px; font-size: .85rem; }
+}
+@media (max-width: 380px) { .vn-rail > button { min-width: 72px; } }
 
 /* The native top layer blocks background interaction; the backdrop separates
    the menu from the still-mounted authoritative player. */
@@ -191,20 +207,15 @@ body:has(.player) { margin: 0; background: #e9e9f1; color: #30304c; color-scheme
 @keyframes menu-dim { from { opacity: 0; } to { opacity: 1; } }
 @media (min-width: 640px) {
   .vn-dialogue-scroll-area { right: 30px; left: 30px; }
-  .vn-menu-rail { padding-inline: 26px; }
-}
-@media (min-width: 1000px), (max-height: 500px) {
-  .vn-menu-rail { min-height: 76px; }
 }
 @media (max-height: 500px) {
-  .vn-frame { grid-template-rows: auto minmax(100px, 1fr) auto auto; }
-  .vn-scene { min-height: 100px; }
+  .vn-frame { grid-template-rows: minmax(100px, 1fr) auto; }
   .vn-dialogue { block-size: clamp(118px, 34dvh, 152px); }
 }
 /* B04: the light response strips are the assessment decision layer. Their
    angular tails carry the approved reference direction; dimming separates
    choices from the scene. ENERGY 2 / RHYTHM 1 / MOTION 2, as in the player. */
-.mode-checkpoint { height: 100dvh; min-height: 540px; grid-template-rows: auto minmax(130px, 1fr) auto auto; }
+.mode-checkpoint { grid-template-rows: minmax(130px, 1fr) auto; }
 .vn-checkpoint-scene { min-height: 0; padding-block: 0; isolation: isolate; }
 .vn-checkpoint-scene .vn-stage { position: absolute; inset: 0; padding: 8px; opacity: .35; transition: opacity .25s var(--ease); }
 .vn-checkpoint-scene::before { content: ''; position: absolute; inset: 0; z-index: 1; background: rgb(15 15 29 / .35); pointer-events: none; transition: opacity .25s var(--ease); }
@@ -229,36 +240,11 @@ body:has(.player) { margin: 0; background: #e9e9f1; color: #30304c; color-scheme
 .vn-choice-status { display: block; font-size: .85rem; color: inherit; }
 :root[data-motion='reduce'] .vn-choice:not(:disabled):hover, :root[data-motion='reduce'] .vn-choice:not(:disabled):active { transform: none; }
 .vn-choices .vn-choice:focus-visible { outline: 3px solid var(--mint-bright); outline-offset: 2px; }
-@media (min-width: 640px) { .mode-checkpoint { height: calc(100dvh - 32px); } }
-@media (min-width: 1000px) { .mode-checkpoint { height: max(620px, calc(100dvh - 60px)); aspect-ratio: auto; } }
-@media (max-height: 500px) { .mode-checkpoint { min-height: 480px; } .mode-checkpoint .vn-menu-rail { min-height: 64px; padding-block: 8px; } }
+@media (max-height: 500px) { .mode-checkpoint { min-height: 480px; } }
 
-@media (min-width: 1000px) {
-  .vn-frame { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(180px, 1fr) auto; padding-bottom: 20px; }
-  .vn-frame > .player-header { grid-area: 1 / 1; min-height: 84px; padding-right: 164px; }
-  .vn-frame > .vn-scene { grid-area: 2 / 1; }
-  .vn-frame > .vn-dialogue { grid-area: 3 / 1; }
-  .vn-frame > .vn-menu-rail { grid-area: 1 / 1; z-index: 3; justify-self: end; align-self: start; min-height: 0; padding: 18px 26px; }
-}
-
-/* B03 Raise Hand: the hand/Play tile floats fully above the dialogue's
-   top-right edge, matching the choice strips' angular-tail signature; the
+/* B03 Raise Hand: the hand/Play action is the rail's mint primary; the
    question strip reuses the choice-strip surface; tutor sources sit along
    the dialogue's bottom edge, clear of the advance cue. */
-.vn-raise {
-  position: absolute; right: 20px; bottom: calc(100% + 10px); z-index: 4;
-  display: grid; place-items: center; width: 48px; height: 48px; min-height: 48px;
-  padding: 0; border: 2px solid #626281; border-radius: 16px 16px 4px 16px;
-  background: var(--paper); color: var(--mint-ink);
-  box-shadow: 0 4px 12px rgb(15 15 29 / .25), 0 0 0 3px rgb(127 229 220 / .35);
-  transition: transform .18s var(--ease), border-color .18s var(--ease), box-shadow .18s var(--ease);
-}
-.vn-raise::after { content: ''; position: absolute; right: 3px; bottom: 3px; width: 11px; height: 11px; background: var(--mint-ink); clip-path: polygon(100% 0, 100% 100%, 0 100%); }
-.vn-raise svg { width: 24px; height: 24px; }
-.vn-raise:hover { transform: translateY(-2px); border-color: var(--mint-ink); box-shadow: 0 6px 16px rgb(15 15 29 / .3), 0 0 0 3px rgb(127 229 220 / .55); }
-.vn-raise:focus-visible { outline-color: var(--mint-bright); }
-.vn-raise[aria-disabled] { opacity: .7; cursor: progress; }
-
 .vn-ask-overlay { pointer-events: none; }
 .vn-ask-overlay .vn-choices > * { pointer-events: auto; }
 .vn-ask-modes { display: flex; justify-content: flex-end; gap: 8px; margin-bottom: 8px; }
@@ -282,22 +268,12 @@ body:has(.player) { margin: 0; background: #e9e9f1; color: #30304c; color-scheme
 .vn-source-badges { display: inline-flex; flex-wrap: wrap; gap: 4px; }
 .vn-source-badge { padding: 2px 8px; border-radius: 6px; background: #def0ec; color: var(--mint-ink); font-weight: 800; white-space: nowrap; }
 
-/* The raise/resume tile lives in a reserved right rail over the scene, so
-   bottom-anchored strips never slide beneath it on narrow stages. */
-.vn-checkpoint-scene .vn-choices { padding-right: 72px; }
-
 @media (max-height: 500px) {
-  .vn-raise { right: 14px; bottom: calc(100% + 8px); }
   .vn-sources { left: 14px; bottom: 8px; }
 }
 
-/* Dialogue backlog: the cue lives inside the dialogue box's upper-right
-   corner, clear of the raise tile floating above it; the scroll area keeps
-   a right margin so long lines never slide beneath the cue. */
-.vn-backlog-cue { position: absolute; top: 6px; right: 10px; z-index: 3; display: grid; place-items: center; width: 44px; height: 44px; min-height: 44px; padding: 0; border-radius: 12px; background: transparent; color: var(--muted); font-size: 1.2rem; font-weight: 900; line-height: 1; }
-.vn-backlog-cue:hover { background: var(--wash); color: var(--mint-ink); }
-.vn-backlog-cue:focus-visible { outline: 3px solid var(--mint-ink); outline-offset: 1px; }
-.vn-dialogue-scroll-area { padding-right: 40px; }
+/* Dialogue backlog: the cue is a member of the episode action rail; the
+   menu keeps a matching row that opens the same modal. */
 .vn-menu-backlog { margin: 10px 0; }
 .vn-menu-backlog span[aria-hidden] { color: var(--mint-ink); font-weight: 900; }
 
