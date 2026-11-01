@@ -51,6 +51,8 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
   const [askText, setAskText] = useState('')
   const [uploadErr, setUploadErr] = useState('')
   const [uploadBusy, setUploadBusy] = useState(false)
+  const [uploadView, setUploadView] = useState<'choose' | 'pdf' | 'photos'>('choose')
+  const [selectedPdf, setSelectedPdf] = useState<File | null>(null)
   const [photos, setPhotos] = useState<File[]>([])
   const [photoWarnings, setPhotoWarnings] = useState<string[]>([])
   const [docs, setDocs] = useState<LearnDoc[] | null>(null)
@@ -69,6 +71,7 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
   // under a still-open dialog.
   const modalTokens = useRef(new Map<HTMLDialogElement, number>())
   const uploadDlg = useRef<HTMLDialogElement>(null)
+  const uploadHeading = useRef<HTMLHeadingElement>(null)
   const learnDlg = useRef<HTMLDialogElement>(null)
   const removeDlg = useRef<HTMLDialogElement>(null)
   const keepBtn = useRef<HTMLButtonElement>(null)
@@ -94,6 +97,7 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
 
   // Keep the question draft in sync with the overlay lifecycle.
   useEffect(() => { if (!snap.askOpen) setAskText('') }, [snap.askOpen])
+  useEffect(() => { if (uploadDlg.current?.open) uploadHeading.current?.focus() }, [uploadView])
 
   function openDialog(ref: RefObject<HTMLDialogElement | null>) {
     const dialog = ref.current
@@ -107,6 +111,13 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
     // Nested dialogs (the shelf warn) propagate their close up here too —
     // only the dialog's own close counts as its dismissal.
     if (e.target !== dialog) return
+    if (dialog === uploadDlg.current) {
+      setUploadView('choose')
+      setSelectedPdf(null)
+      setPhotos([])
+      setUploadErr('')
+      setDragOver(false)
+    }
     engine.endModal(modalTokens.current.get(dialog) ?? 0)
     modalTokens.current.delete(dialog)
   }
@@ -339,6 +350,18 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
     }
   }
 
+  function selectPdf(file: File) {
+    if (uploading.current) return
+    setSelectedPdf(file)
+    setUploadErr('')
+  }
+
+  function changeUploadView(view: 'choose' | 'pdf' | 'photos') {
+    setUploadErr('')
+    setDragOver(false)
+    setUploadView(view)
+  }
+
   function addPhotos(files: File[]) {
     if (uploading.current) return
     const next = [...photos, ...files]
@@ -557,22 +580,41 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
       </div>)}
 
     <dialog ref={uploadDlg} id="uploadDlg" className="vn-menu-dialog" aria-labelledby="upTitle" onClose={onDialogClose}
-      onClick={e => { if (e.target === e.currentTarget) e.currentTarget.close() }}>
+      onCancel={e => { if (uploadBusy) e.preventDefault() }}
+      onClick={e => { if (e.target === e.currentTarget && !uploadBusy) e.currentTarget.close() }}>
       <div className="modal">
-        <h2 id="upTitle">Upload a document</h2>
-        <p className="sub">Upload a PDF or up to 5 photos of readable notes or pages. I'll plan one lesson from them.</p>
+        <h2 ref={uploadHeading} id="upTitle" tabIndex={-1}>{uploadView === 'choose' ? 'Choose a source' : uploadView === 'pdf' ? 'Upload a PDF' : 'Upload photos'}</h2>
+        {uploadView === 'choose' && <>
+          <p className="sub">Choose what you want to learn from.</p>
+          <div className="source-choices">
+            <button type="button" className="vn-motion" onClick={() => changeUploadView('pdf')}><strong>PDF</strong><span>One document or chapter</span></button>
+            <button type="button" className="vn-motion" onClick={() => changeUploadView('photos')}><strong>Photos</strong><span>Up to 5 pages or notes</span></button>
+          </div>
+        </>}
+        {uploadView === 'pdf' && <>
+        <p className="sub">Choose one PDF to create a lesson.</p>
         <label className={`dropzone${dragOver ? ' drag-over' : ''}`} htmlFor="filePick" tabIndex={0} role="button"
           onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); filePick.current?.click() } }}
           onDragOver={e => { e.preventDefault(); setDragOver(true) }}
           onDragLeave={() => setDragOver(false)}
-          onDrop={e => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files[0]; if (f) void uploadFile(f) }}>
+          onDrop={e => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files.length !== 1) { setUploadErr('Choose one PDF at a time.'); return } selectPdf(e.dataTransfer.files[0]) }}>
           <span>{uploadBusy ? 'Uploading…' : 'Drop a PDF here, or click to browse'}</span>
           <small>PDF only</small>
         </label>
         <input ref={filePick} id="filePick" type="file" accept="application/pdf,.pdf" hidden
-          onChange={e => { const f = e.target.files?.[0]; if (f) void uploadFile(f) }} />
+          onChange={e => { const f = e.target.files?.[0]; if (f) selectPdf(f); e.target.value = '' }} />
+        {selectedPdf && <p className="selected-pdf">Selected: {selectedPdf.name}</p>}
+        <button type="button" className="vn-button source-submit" disabled={uploadBusy || !selectedPdf} onClick={() => { if (selectedPdf) void uploadFile(selectedPdf) }}>{uploadBusy ? 'Uploading…' : 'Create lesson from PDF'}</button>
+        <div className="or">or</div>
+        <button type="button" id="sampleBtn" className="vn-button" style={{ width: '100%' }} disabled={uploadBusy} onClick={useSample}>Use the sample chapter</button>
+        </>}
+        {uploadView === 'photos' && <>
+        <p className="sub">Choose up to 5 photos of readable pages or notes.</p>
         <div className="photo-upload">
-          <button type="button" className="vn-quiet" disabled={uploadBusy || photos.length >= 5} onClick={() => photoPick.current?.click()}>Add photos</button>
+          <button type="button" className={`dropzone${dragOver ? ' drag-over' : ''}`} disabled={uploadBusy || photos.length >= 5} onClick={() => photoPick.current?.click()}
+            onDragOver={e => { e.preventDefault(); if (!uploadBusy && photos.length < 5) setDragOver(true) }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={e => { e.preventDefault(); setDragOver(false); addPhotos(Array.from(e.dataTransfer.files)) }}>Drop photos here, or choose photos</button>
           <input ref={photoPick} id="photoPick" type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" multiple hidden
             onChange={e => { addPhotos(Array.from(e.target.files ?? [])); e.target.value = '' }} />
           <p className="sub">JPEG, PNG, or static WebP. 10 MiB each, 20 MiB total. Selection order becomes page order.</p>
@@ -585,11 +627,9 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
             <button type="button" className="vn-button" disabled={uploadBusy} onClick={() => void uploadPhotos()}>{uploadBusy ? 'Uploading…' : 'Create lesson from photos'}</button>
           </>}
         </div>
-        <div className="or">or</div>
-        <button type="button" id="sampleBtn" className="vn-button" style={{ width: '100%' }} disabled={uploadBusy}
-          onClick={useSample}>Use the sample chapter</button>
+        </>}
         {uploadErr !== '' && <p className="form-error" role="alert">{uploadErr}</p>}
-        <div className="row-end"><button type="button" className="vn-quiet" onClick={e => e.currentTarget.closest('dialog')?.close()}>Cancel</button></div>
+        <div className="row-end">{uploadView !== 'choose' && <button type="button" className="vn-quiet" disabled={uploadBusy} onClick={() => changeUploadView('choose')}>Back</button>}<button type="button" className="vn-quiet" disabled={uploadBusy} onClick={e => e.currentTarget.closest('dialog')?.close()}>Cancel</button></div>
       </div>
     </dialog>
 

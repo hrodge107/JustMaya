@@ -192,6 +192,12 @@ body:has(.home) { margin: 0; overflow: hidden; background: #23233a; color-scheme
 
 :root[data-motion='reduce'] .home * { transition: none !important; animation: none !important; }
 .home .photo-upload { margin-top: 16px; }
+.home .source-choices { display: grid; gap: 10px; }
+.home .source-choices .vn-motion { width: 100%; display: flex; flex-direction: column; align-items: flex-start; text-align: left; gap: 2px; }
+.home .source-choices span { font-size: .9rem; font-weight: 600; }
+.home .source-submit, .home .photo-upload .dropzone { width: 100%; }
+.home .photo-upload .dropzone { min-height: 120px; border: 2px dashed #77778b; }
+.home .selected-pdf { overflow-wrap: anywhere; }
 .home .photo-upload .vn-button { width: 100%; }
 .home .photo-list { padding-left: 24px; list-style: decimal; }
 .home .photo-list li { padding-block: 4px; }
