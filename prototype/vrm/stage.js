@@ -49610,6 +49610,7 @@ void main() {
 			]
 		} }
 	};
+	const GAZE_TRACK = .65;
 	function mount(container, opts = {}) {
 		const props = Object.assign({
 			emotion: "idle",
@@ -49727,8 +49728,8 @@ void main() {
 				saccadeX = (Math.random() - .5) * .06;
 				saccadeY = (Math.random() - .5) * .04;
 			}
-			const lookX = props.lookTargetOffset?.x ?? (props.enablePointerTracking ? pointerX : 0);
-			const lookY = props.lookTargetOffset?.y ?? (props.enablePointerTracking ? pointerY : 0);
+			const lookX = props.lookTargetOffset?.x ?? (props.enablePointerTracking ? pointerX * GAZE_TRACK : 0);
+			const lookY = props.lookTargetOffset?.y ?? (props.enablePointerTracking ? pointerY * GAZE_TRACK : 0);
 			const nod = !props.reduced && nodStart >= 0 && elapsed - nodStart < .45 ? Math.sin((elapsed - nodStart) / .45 * Math.PI) * .2 : 0;
 			const head = vrm.humanoid?.getNormalizedBoneNode("head");
 			if (head) {

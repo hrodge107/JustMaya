@@ -29,6 +29,8 @@ const REST_POSE: Partial<Record<VRMHumanBoneName, [number, number, number]>> = {
 }
 // Emotions that hold the eyes closed — minimum blink-expression weight.
 const EYE_CLOSE: Partial<Record<string, number>> = { thinking: 0.95 }
+// Pointer-follow reach: <1 keeps her mostly front-facing (glance, not crane).
+const GAZE_TRACK = 0.65
 
 export default function VRMCanvas(props: Props) {
   const host = useRef<HTMLDivElement>(null)
@@ -102,8 +104,11 @@ export default function VRMCanvas(props: Props) {
         if (name) exp?.setValue(name, weights[key])
       }
       if (elapsed > saccadeAt) { saccadeAt = elapsed + 1 + Math.random() * 2; saccadeX = (Math.random() - .5) * .06; saccadeY = (Math.random() - .5) * .04 }
-      const lookX = p.lookTargetOffset?.x ?? (p.enablePointerTracking ? pointerX : 0)
-      const lookY = p.lookTargetOffset?.y ?? (p.enablePointerTracking ? pointerY : 0)
+      // Pointer tracking is attenuated: she glances toward the cursor but
+      // stays mostly monitor-facing instead of craning to screen corners.
+      // Authored lookTargetOffset poses keep their full authored range.
+      const lookX = p.lookTargetOffset?.x ?? (p.enablePointerTracking ? pointerX * GAZE_TRACK : 0)
+      const lookY = p.lookTargetOffset?.y ?? (p.enablePointerTracking ? pointerY * GAZE_TRACK : 0)
       const nod = nodStart >= 0 && elapsed - nodStart < .45 ? Math.sin((elapsed - nodStart) / .45 * Math.PI) * .2 : 0
       mixer?.update(dt)
       const head = vrm.humanoid.getNormalizedBoneNode('head')

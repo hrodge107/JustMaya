@@ -69,6 +69,9 @@ const POSES = {
   },
 }
 
+// Pointer-follow reach: <1 keeps her mostly front-facing (glance, not crane).
+const GAZE_TRACK = 0.65
+
 export function mount(container, opts = {}) {
   const props = Object.assign(
     {
@@ -187,8 +190,10 @@ export function mount(container, opts = {}) {
       saccadeX = (Math.random() - 0.5) * 0.06
       saccadeY = (Math.random() - 0.5) * 0.04
     }
-    const lookX = props.lookTargetOffset?.x ?? (props.enablePointerTracking ? pointerX : 0)
-    const lookY = props.lookTargetOffset?.y ?? (props.enablePointerTracking ? pointerY : 0)
+    // Pointer tracking is attenuated: she glances toward the cursor but stays
+    // mostly monitor-facing. Authored lookTargetOffset poses keep full range.
+    const lookX = props.lookTargetOffset?.x ?? (props.enablePointerTracking ? pointerX * GAZE_TRACK : 0)
+    const lookY = props.lookTargetOffset?.y ?? (props.enablePointerTracking ? pointerY * GAZE_TRACK : 0)
     const nod = !props.reduced && nodStart >= 0 && elapsed - nodStart < 0.45
       ? Math.sin(((elapsed - nodStart) / 0.45) * Math.PI) * 0.2
       : 0

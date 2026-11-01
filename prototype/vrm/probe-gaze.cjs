@@ -34,6 +34,16 @@ const DIRS = [
   ['up', { x: 0, y: -1 }],
 ]
 
+// Real pointer positions across the 1280x800 window — exercises the actual
+// pointermove path (not the lookTargetOffset prop).
+const MOUSE = [
+  ['m-center', 640, 400],
+  ['m-right', 1200, 400],
+  ['m-left', 80, 400],
+  ['m-dialogue', 640, 720], // inside the dialogue box, bottom of page
+  ['m-top', 640, 80],
+]
+
 async function main() {
   const browser = await chromium.launch({ executablePath: findBrowser(), args: ['--enable-unsafe-swiftshader'] })
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
@@ -41,14 +51,12 @@ async function main() {
   await page.goto(`${base}?v=b`, { waitUntil: 'load' })
   await page.waitForSelector('#mayaVrm:not([hidden]) canvas', { timeout: 30000 })
   await page.waitForTimeout(2000)
-  await page.evaluate(() => window.__vrmCtl.setProps({ enablePointerTracking: false }))
-  for (const [name, off] of DIRS) {
-    const trace = await page.evaluate(async (o) => {
-      window.__vrmCtl.setProps({ lookTargetOffset: o })
-      await new Promise(r => setTimeout(r, 1200))
-      return window.__vrmCtl.look
-    }, off)
-    console.log(name, JSON.stringify({ ...off, trace: Object.fromEntries(Object.entries(trace).map(([k, v]) => [k, +v.toFixed(2)])) }))
+  await page.evaluate(() => window.__vrmCtl.setProps({ enablePointerTracking: true }))
+  for (const [name, mx, my] of MOUSE) {
+    await page.mouse.move(mx, my)
+    await page.waitForTimeout(1200)
+    const trace = await page.evaluate(() => window.__vrmCtl.look)
+    console.log(name, `mouse=${mx},${my}`, JSON.stringify(Object.fromEntries(Object.entries(trace).map(([k, v]) => [k, +v.toFixed(2)]))))
     await page.screenshot({ path: path.join(out, `gaze-${name}.png`) })
   }
   await browser.close()
