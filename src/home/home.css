@@ -130,7 +130,7 @@ body:has(.home) { margin: 0; overflow: hidden; background: #23233a; color-scheme
 .ep-group { display: grid; gap: 8px; }
 .ep-doc { padding: 6px 2px 0; font-size: .78rem; font-weight: 900; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ep-rows { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
-.ep { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 12px; font-weight: 800; background: var(--wash); }
+.ep { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 12px 14px; border-radius: 12px; font-weight: 800; background: var(--wash); }
 .ep.ready { box-shadow: inset 0 0 0 2px var(--mint-ink); }
 .ep .ep-meta { flex: 1; min-width: 0; }
 .ep .ep-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -144,6 +144,21 @@ body:has(.home) { margin: 0; overflow: hidden; background: #23233a; color-scheme
 .ep-more > summary:hover { color: var(--ink); }
 .ep-more .ep-rows { margin-top: 8px; }
 .ep-empty { padding: 14px; font-weight: 700; opacity: .8; }
+
+/* "On this browser" — the IndexedDB PoC shelf. Same ep row language as the
+   server list below it, separated by a hairline and its own section label.
+   The Remove affordance is the shared vn-quiet; its confirm dialog reuses
+   the player's bl-warn (player.css), so no parallel styles live here. */
+.shelf { margin: 0 0 16px; padding-bottom: 14px; border-bottom: 1px solid #77778b33; }
+.shelf-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.shelf-title { margin: 0; padding: 6px 2px 0; font-size: .78rem; font-weight: 900; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.shelf-clear { min-height: 36px; padding: 4px 12px; font-size: .78rem; }
+.shelf .ep-rows { margin-top: 8px; }
+.shelf .ep-status { overflow-wrap: anywhere; }
+.shelf-remove { min-height: 38px; padding: 6px 12px; }
+.shelf-note { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.shelf-note .vn-quiet { flex: none; min-height: 32px; padding: 2px 10px; font-size: .76rem; }
+.shelf-empty { margin: 8px 0 0; }
 .or { display: flex; align-items: center; gap: 12px; margin: 16px 0; font-size: .8rem; font-weight: 800; opacity: .65; }
 .or::before, .or::after { content: ''; flex: 1; height: 1px; background: currentColor; opacity: .4; }
 

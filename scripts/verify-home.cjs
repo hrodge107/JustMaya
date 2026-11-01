@@ -105,6 +105,39 @@ async function advanceTo(page, predicate, { timeout = 30000, label = 'dialogue s
 }
 const track = (name, fn) => fn().then(() => evidence.push({ check: name, result: 'PASS' })).catch(e => { evidence.push({ check: name, result: `FAIL: ${e.message}` }) })
 
+// Browser-shelf (IndexedDB PoC) probes — same 'meet-mita' db + 'docs' store the
+// app writes. Records are projected so Blob fields serialize as sizes.
+const shelfRows = page => page.evaluate(() => new Promise((res, rej) => {
+  const req = indexedDB.open('meet-mita', 1)
+  req.onupgradeneeded = () => req.result.createObjectStore('docs', { keyPath: 'documentId' })
+  req.onsuccess = () => {
+    const g = req.result.transaction('docs', 'readonly').objectStore('docs').getAll()
+    g.onsuccess = () => res(g.result.map(r => ({ documentId: r.documentId, docName: r.docName, episodeId: r.episodeId, episodeTitle: r.episodeTitle, pdfSize: r.pdf instanceof Blob ? r.pdf.size : null })))
+    g.onerror = () => rej(g.error)
+  }
+  req.onerror = () => rej(req.error)
+}))
+const putRawShelf = (page, rec) => page.evaluate(r => new Promise((res, rej) => {
+  const req = indexedDB.open('meet-mita', 1)
+  req.onupgradeneeded = () => req.result.createObjectStore('docs', { keyPath: 'documentId' })
+  req.onsuccess = () => {
+    const tx = req.result.transaction('docs', 'readwrite')
+    tx.objectStore('docs').put(r)
+    tx.oncomplete = () => res()
+    tx.onerror = () => rej(tx.error)
+  }
+  req.onerror = () => rej(req.error)
+}), rec)
+// The detached shelf write lands a tick after the ready UI flips — poll briefly.
+const waitForShelf = async page => {
+  for (let i = 0; i < 50; i++) {
+    const rows = await shelfRows(page)
+    if (rows.length) return rows
+    await page.waitForTimeout(200)
+  }
+  return []
+}
+
 async function run() {
   const browser = await chromium.launch({ channel: process.env.PLAYER_VERIFY_BROWSER || 'msedge', headless: true })
 
@@ -112,7 +145,10 @@ async function run() {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } })
   const page = await ctx.newPage()
   page.on('pageerror', e => errors.push(`pageerror: ${e.message}`))
-  page.on('console', m => { if (m.type() === 'error' && !m.text().includes('Failed to load resource')) errors.push(`console: ${m.text()}`) })
+  // GLTFLoader blob-texture failures are headless-Edge flake on the mascot's
+  // embedded textures — same class of noise as 'Failed to load resource'.
+  const noise = m => m.type() !== 'error' || m.text().includes('Failed to load resource') || m.text().includes('THREE.GLTFLoader')
+  page.on('console', m => { if (!noise(m)) errors.push(`console: ${m.text()}`) })
   const calls = await stub(page)
   await page.goto(`${base}/`)
   await page.locator('.home').waitFor()
@@ -225,20 +261,20 @@ async function run() {
 
     await page.getByRole('button', { name: 'Learn', exact: true }).click()
     await page.locator('#learnDlg[open]').waitFor()
-    await page.locator('.ep.ready').waitFor()
+    await page.locator('.ep-list .ep.ready').waitFor()
     const learnW = await page.locator('#learnDlg').evaluate(el => parseFloat(getComputedStyle(el).width))
     assert.ok(learnW >= 620, `learn modal widened to fit episode rows (${learnW}px)`)
     // Per document only episode 1 shows; later outlines collapse behind a
     // disclosure the learner must click — they are not playable anyway.
-    assert.equal(await page.locator('.ep:visible').count(), 1, 'only episode 1 is visible per document')
+    assert.equal(await page.locator('.ep-list .ep:visible').count(), 1, 'only episode 1 is visible per document')
     const summary = page.locator('.ep-more > summary')
     assert.match(await summary.innerText(), /2 more planned outlines/)
     await summary.click()
-    const rows = await page.locator('.ep:visible').allInnerTexts()
+    const rows = await page.locator('.ep-list .ep:visible').allInnerTexts()
     assert.ok(rows[0].includes(EP_TITLE) && /Ready/.test(rows[0]), `ready row: ${rows[0]}`)
     assert.ok(rows.slice(1).every(r => /Planned outline/.test(r)), 'later episodes are planned outlines only')
-    assert.equal(await page.locator('.ep .vn-button').count(), 1, 'only the ready episode is playable')
-    await page.locator('.ep .vn-button', { hasText: 'Play' }).click()
+    assert.equal(await page.locator('.ep-list .ep .vn-button').count(), 1, 'only the ready episode is playable')
+    await page.locator('.ep-list .ep .vn-button', { hasText: 'Play' }).click()
     await page.locator('.vn-frame').waitFor({ timeout: 15000 })
     assert.equal(new URL(page.url()).searchParams.get('session'), SESSION_ID)
     await page.locator('.vn-dialogue-target').waitFor()
@@ -250,6 +286,93 @@ async function run() {
     await page.getByRole('button', { name: 'Leave episode', exact: true }).click()
     await page.locator('.home').waitFor()
     assert.equal(new URL(page.url()).searchParams.has('session'), false)
+  })
+
+  // ---------- browser shelf (IndexedDB PoC): reload, play, remove, clear ----------
+  await track('shelf: ready flow cached PDF + episode; reopen/play/remove/clear', async () => {
+    const rec = (await waitForShelf(page)).find(r => r.documentId === DOC_ID)
+    assert.ok(rec, 'shelf record exists after the ready flow')
+    assert.ok((rec.pdfSize ?? 0) > 0, 'PDF bytes cached')
+    assert.equal(rec.episodeId, EP_ID)
+    assert.equal(rec.episodeTitle, EP_TITLE)
+    assert.equal(rec.docName, 'fixture-chapter.pdf')
+
+    // Reopen after reload: the record lists in the Learn dialog.
+    await page.reload()
+    await page.locator('.home').waitFor()
+    await page.getByRole('button', { name: 'Learn', exact: true }).click()
+    await page.locator('#learnDlg[open]').waitFor()
+    const row = page.locator('.shelf .ep')
+    await row.waitFor()
+    const rowText = await row.innerText()
+    assert.match(rowText, new RegExp(EP_TITLE), 'episode title in the row')
+    assert.match(rowText, /fixture-chapter\.pdf/, 'filename in the row')
+    assert.match(rowText, /saved/, 'saved timestamp in the row')
+
+    // Cached Play goes through the same server session path.
+    await row.locator('.vn-button').click()
+    await page.locator('.vn-frame').waitFor({ timeout: 15000 })
+    assert.equal(new URL(page.url()).searchParams.get('session'), SESSION_ID)
+    await page.getByRole('button', { name: 'Menu', exact: true }).click()
+    await page.getByRole('button', { name: 'Leave episode', exact: true }).click()
+    await page.locator('.home').waitFor()
+
+    // Remove: a named confirmation gates deletion; Keep and Escape keep it.
+    await page.getByRole('button', { name: 'Learn', exact: true }).click()
+    await page.locator('#learnDlg[open]').waitFor()
+    await page.locator('.shelf .ep .shelf-remove').click()
+    await page.locator('.bl-warn[open]').waitFor()
+    assert.match(await page.locator('.bl-warn').innerText(), /fixture-chapter\.pdf/, 'confirmation names the document')
+    assert.equal(await page.locator('.bl-warn .vn-quiet').evaluate(el => document.activeElement === el), true, 'safe action focused')
+    await page.getByRole('button', { name: 'Keep it', exact: true }).click()
+    await page.locator('.bl-warn[open]').waitFor({ state: 'hidden' })
+    assert.equal(await page.locator('.shelf .ep').count(), 1, 'Keep leaves the record')
+    await page.locator('.shelf .ep .shelf-remove').click()
+    await page.locator('.bl-warn[open]').waitFor()
+    await page.keyboard.press('Escape')
+    await page.locator('.bl-warn[open]').waitFor({ state: 'hidden' })
+    assert.equal(await page.locator('.shelf .ep').count(), 1, 'Escape leaves the record')
+    await page.locator('.shelf .ep .shelf-remove').click()
+    await page.locator('.bl-warn[open]').waitFor()
+    await page.getByRole('button', { name: 'Delete', exact: true }).click()
+    await page.locator('.shelf-empty').waitFor()
+    assert.equal((await shelfRows(page)).length, 0, 'record deleted from IndexedDB')
+
+    // Confirmed deletion persists across reload.
+    await page.reload()
+    await page.locator('.home').waitFor()
+    await page.getByRole('button', { name: 'Learn', exact: true }).click()
+    await page.locator('#learnDlg[open]').waitFor()
+    assert.equal(await page.locator('.shelf .ep').count(), 0, 'deletion persists across reload')
+
+    // A cached entry whose episode vanished server-side still shows the
+    // existing learn error and stays removable.
+    await putRawShelf(page, { documentId: 'doc-ghost', docName: 'ghost.pdf', episodeId: 'ep-gone', episodeTitle: 'Ghost lesson', episode, pdf: null, savedAt: Date.now() })
+    await page.reload()
+    await page.locator('.home').waitFor()
+    await page.getByRole('button', { name: 'Learn', exact: true }).click()
+    await page.locator('#learnDlg[open]').waitFor()
+    await page.locator('.shelf .ep').waitFor()
+    await page.locator('.shelf .ep .vn-button').click()
+    await page.locator('#learnDlg .form-error:not(.shelf-note)').waitFor()
+    assert.equal(await page.locator('.shelf .ep').count(), 1, 'entry stays after a server 404')
+    await page.locator('.shelf .ep .shelf-remove').click()
+    await page.locator('.bl-warn[open]').waitFor()
+    await page.getByRole('button', { name: 'Delete', exact: true }).click()
+    await page.locator('.shelf-empty').waitFor()
+
+    // Clear-all empties the store without a confirmation prompt.
+    await putRawShelf(page, { documentId: 'doc-seed', docName: 'seed.pdf', episodeId: EP_ID, episodeTitle: EP_TITLE, episode, pdf: null, savedAt: Date.now() })
+    await page.reload()
+    await page.locator('.home').waitFor()
+    await page.getByRole('button', { name: 'Learn', exact: true }).click()
+    await page.locator('#learnDlg[open]').waitFor()
+    await page.locator('.shelf .ep').waitFor()
+    await page.getByRole('button', { name: 'Clear browser copies', exact: true }).click()
+    await page.locator('.shelf-empty').waitFor()
+    assert.equal((await shelfRows(page)).length, 0, 'clear-all empties IndexedDB')
+    await page.locator('#learnDlg .row-end .vn-quiet').click()
+    await page.locator('#learnDlg[open]').waitFor({ state: 'hidden' })
   })
 
   await track('Menu: motion switch, reset, About', async () => {
@@ -328,6 +451,12 @@ async function run() {
     await advanceTo(pageMock, async () => (await pageMock.locator('.dlg-name').innerText()) === 'You', { label: 'accept echo' })
     await pageMock.locator('.vn-frame').waitFor({ timeout: 15000 })
     assert.equal(new URL(pageMock.url()).searchParams.get('session'), SESSION_ID, 'Yes starts a session')
+    // The sample caches a PDF-less shelf record — nothing was ever uploaded.
+    const rec = (await waitForShelf(pageMock)).find(r => r.documentId === DOC_ID)
+    assert.ok(rec, 'sample wrote a shelf record')
+    assert.equal(rec.docName, 'sample-chapter.pdf')
+    assert.equal(rec.pdfSize, null, 'sample caches no PDF bytes')
+    assert.equal(rec.episodeId, EP_ID)
   })
 
   // ---------- ?job= resume ----------
@@ -343,7 +472,92 @@ async function run() {
       const el = document.querySelector('.up-fill')
       return el && parseFloat(el.style.width) >= 100
     }, null, { timeout: 60000 })
+    // The resumed ready flow also writes a shelf record — PDF-less, since no
+    // File object survives a reload.
+    const rec = (await waitForShelf(pageResume)).find(r => r.documentId === DOC_ID)
+    assert.ok(rec, 'resumed ready flow wrote a shelf record')
+    assert.equal(rec.docName, 'your document')
+    assert.equal(rec.pdfSize, null, 'resume caches no PDF bytes')
+    assert.equal(rec.episodeId, EP_ID)
   })
+
+  // ---------- degraded storage: IndexedDB deleted before the app boots ----------
+  const ctxDegraded = await browser.newContext({ viewport: { width: 1280, height: 800 } })
+  await ctxDegraded.addInitScript(() => {
+    try { Object.defineProperty(window, 'indexedDB', { configurable: true, get: () => undefined }) } catch { /* older engines keep the global */ }
+  })
+  const pageDegraded = await ctxDegraded.newPage()
+  pageDegraded.on('pageerror', e => errors.push(`pageerror(degraded): ${e.message}`))
+  await stub(pageDegraded)
+  await pageDegraded.goto(`${base}/`)
+  await track('shelf: IndexedDB unavailable degrades to a notice, ready flow intact', async () => {
+    await pageDegraded.getByRole('button', { name: 'Upload', exact: true }).click()
+    await pageDegraded.locator('#uploadDlg[open]').waitFor()
+    await pageDegraded.setInputFiles('#filePick', { name: 'fixture-chapter.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4 fixture') })
+    await pageDegraded.locator('.upload-chip').waitFor()
+    await pageDegraded.waitForFunction(() => {
+      const el = document.querySelector('.up-fill')
+      return el && parseFloat(el.style.width) >= 100
+    }, null, { timeout: 60000 })
+    // The ready card + play offer survive storage failure untouched.
+    await pageDegraded.locator('.upload-chip.ready').waitFor({ timeout: 10000 })
+    await pageDegraded.locator('.ask-overlay').waitFor({ timeout: 15000 })
+    await pageDegraded.getByRole('button', { name: 'Not now', exact: true }).click()
+    await pageDegraded.locator('.ask-overlay').waitFor({ state: 'detached' })
+    await pageDegraded.getByRole('button', { name: 'Learn', exact: true }).click()
+    await pageDegraded.locator('#learnDlg[open]').waitFor()
+    const note = pageDegraded.locator('.shelf-note')
+    await note.waitFor()
+    assert.match(await note.innerText(), /couldn't keep|unavailable/i)
+    await note.locator('.vn-quiet').click()
+    assert.equal(await pageDegraded.locator('.shelf-note').count(), 0, 'note dismisses')
+    assert.equal(await pageDegraded.evaluate(() => typeof indexedDB), 'undefined', 'IndexedDB really is gone')
+  })
+
+  // ---------- shelf independence: section renders when the document API is down ----------
+  const ctxNoApi = await browser.newContext({ viewport: { width: 1280, height: 800 } })
+  const pageNoApi = await ctxNoApi.newPage()
+  pageNoApi.on('pageerror', e => errors.push(`pageerror(noapi): ${e.message}`))
+  await stub(pageNoApi)
+  await pageNoApi.route('**/api/documents', route => {
+    if (route.request().method() === 'GET') return route.fulfill({ status: 500, json: { error: { code: 'DOWN', message: 'documents down' } } })
+    return route.continue()
+  })
+  await pageNoApi.goto(`${base}/`)
+  await track('shelf: section still renders when the backend list fails', async () => {
+    await putRawShelf(pageNoApi, { documentId: 'doc-local', docName: 'local.pdf', episodeId: EP_ID, episodeTitle: EP_TITLE, episode, pdf: null, savedAt: Date.now() })
+    await pageNoApi.reload()
+    await pageNoApi.locator('.home').waitFor()
+    await pageNoApi.getByRole('button', { name: 'Learn', exact: true }).click()
+    await pageNoApi.locator('#learnDlg[open]').waitFor()
+    await pageNoApi.locator('.shelf .ep').waitFor()
+    assert.match(await pageNoApi.locator('.shelf .ep').innerText(), /local\.pdf/, 'cached row renders without the backend')
+    await pageNoApi.locator('#learnDlg .form-error:not(.shelf-note)').waitFor()
+  })
+
+  // ---------- shelf reflow: narrow + medium dialog widths ----------
+  for (const width of [390, 800]) {
+    const ctxW = await browser.newContext({ viewport: { width, height: 800 } })
+    const pageW = await ctxW.newPage()
+    pageW.on('pageerror', e => errors.push(`pageerror(${width}): ${e.message}`))
+    await stub(pageW)
+    await pageW.goto(`${base}/`)
+    await track(`shelf: rows reflow inside the dialog at ${width}px`, async () => {
+      await putRawShelf(pageW, { documentId: 'doc-w', docName: 'a-very-long-document-name-for-reflow-testing.pdf', episodeId: EP_ID, episodeTitle: EP_TITLE, episode, pdf: null, savedAt: Date.now() })
+      await pageW.reload()
+      await pageW.locator('.home').waitFor()
+      await pageW.getByRole('button', { name: 'Learn', exact: true }).click()
+      await pageW.locator('#learnDlg[open]').waitFor()
+      await pageW.locator('.shelf .ep').waitFor()
+      // Measure .modal, not the dialog element: at 390px the dialog gains a
+      // vertical scrollbar, which shows up as scrollWidth - clientWidth ≈ 14
+      // without any horizontal overflow.
+      const overflow = await pageW.locator('#learnDlg .modal').evaluate(el => el.scrollWidth - el.clientWidth)
+      assert.ok(overflow <= 1, `dialog content overflows at ${width}px: ${overflow}`)
+      const rowOverflow = await pageW.locator('.shelf .ep').evaluate(el => el.scrollWidth - el.clientWidth)
+      assert.ok(rowOverflow <= 1, `shelf row overflows at ${width}px: ${rowOverflow}`)
+    })
+  }
 
   // ---------- mobile layout ----------
   const ctxMobile = await browser.newContext({ viewport: { width: 420, height: 800 } })
@@ -394,10 +608,12 @@ async function run() {
     await pageDark.getByRole('button', { name: 'Learn', exact: true }).click()
     await pageDark.locator('#learnDlg[open]').waitFor()
     assert.equal(await h2color('#learnDlg h2'), ink, 'learn heading')
-    await pageDark.locator('#learnDlg .vn-quiet').click()
+    await pageDark.locator('#learnDlg .row-end .vn-quiet').click()
     await pageDark.getByRole('button', { name: 'Menu', exact: true }).click()
     await pageDark.locator('#menuDlg[open]').waitFor()
     assert.equal(await h2color('#menuDlg .vn-menu-heading h2'), ink, 'menu heading')
+    const openDialogs = await pageDark.locator('dialog[open]').evaluateAll(els => els.map(e => e.id || e.className))
+    assert.deepEqual(openDialogs, ['menuDlg'], `dialogs open before About: ${JSON.stringify(openDialogs)}`)
     await pageDark.locator('.vn-motion', { hasText: 'About' }).click()
     await pageDark.locator('#aboutDlg[open]').waitFor()
     assert.equal(await h2color('#aboutDlg h2'), ink, 'about heading')

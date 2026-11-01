@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type RefObject } from 'react'
 import { api, ApiError, type Job } from '../learnerApi'
+import { putShelf, listShelf, removeShelf, clearShelf, type ShelfRecord } from './browserShelf'
 import MascotStage from '../player/MascotStage'
 import MotionToggle from '../player/MotionToggle'
 import HomeDialogue from './dialogueEngine'
@@ -52,6 +53,9 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
   const [uploadBusy, setUploadBusy] = useState(false)
   const [docs, setDocs] = useState<LearnDoc[] | null>(null)
   const [learnErr, setLearnErr] = useState('')
+  const [shelf, setShelf] = useState<ShelfRecord[] | null>(null)
+  const [shelfNote, setShelfNote] = useState('')
+  const [confirming, setConfirming] = useState<ShelfRecord | null>(null)
   const [playingId, setPlayingId] = useState<string | null>(null)
   const [readyCard, setReadyCard] = useState<ReadyCard | null>(null)
   const [readyErr, setReadyErr] = useState('')
@@ -64,6 +68,9 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
   const modalTokens = useRef(new Map<HTMLDialogElement, number>())
   const uploadDlg = useRef<HTMLDialogElement>(null)
   const learnDlg = useRef<HTMLDialogElement>(null)
+  const removeDlg = useRef<HTMLDialogElement>(null)
+  const keepBtn = useRef<HTMLButtonElement>(null)
+  const pendingPdf = useRef<File | null>(null)
   const menuDlg = useRef<HTMLDialogElement>(null)
   const aboutDlg = useRef<HTMLDialogElement>(null)
   const filePick = useRef<HTMLInputElement>(null)
@@ -94,8 +101,25 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
 
   function onDialogClose(e: React.SyntheticEvent<HTMLDialogElement>) {
     const dialog = e.currentTarget
+    // Nested dialogs (the shelf warn) propagate their close up here too —
+    // only the dialog's own close counts as its dismissal.
+    if (e.target !== dialog) return
     engine.endModal(modalTokens.current.get(dialog) ?? 0)
     modalTokens.current.delete(dialog)
+  }
+
+  // ---- Browser shelf (PoC): cache the ready episode + PDF in IndexedDB ----
+  // Detached from the ready flow: a write failure only raises the section
+  // note, never the card or offer. Storage stays invisible until it matters.
+  function cacheReady(record: ShelfRecord) {
+    void putShelf(record)
+      .then(() => { setShelfNote(''); void loadShelf() })
+      .catch(() => setShelfNote("Couldn't keep a copy in this browser. The episode still lives on the server."))
+  }
+
+  async function loadShelf() {
+    try { setShelf(await listShelf()) }
+    catch { setShelfNote("This browser's saved copies are unavailable right now.") }
   }
 
   // ---- Upload pipeline: upload -> run/poll -> auto-confirm -> ready -------
@@ -150,6 +174,15 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
       episodeId = episode?.episodeId ?? null
       title = episode?.title ?? ''
       turns = readDoneTurns(docName, title)
+      // The uploaded File only rides along when its name still matches the
+      // document being finished — a ?job= resume or a stale upload from a
+      // different document caches without PDF bytes.
+      if (episode) cacheReady({
+        documentId: job.document_id, docName,
+        episodeId: episode.episodeId, episodeTitle: episode.title, episode,
+        pdf: pendingPdf.current?.name === docName ? pendingPdf.current : null,
+        savedAt: Date.now(),
+      })
     } catch {
       turns = readDoneTurns(docName, '')
     }
@@ -228,10 +261,18 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
     }
     let card: ReadyCard = { episodeId: null, title: '', docName: MOCK_DOC }
     try {
-      const episodeId = await resolveEpisodeId(MOCK_DOC)
-      const episode = episodeId ? await api.episode(episodeId) : null
+      const { documents } = await api.documents()
+      const doc = documents.find(d => d.filename === MOCK_DOC) ?? documents[0]
+      const roadmap = doc ? await api.roadmap(doc.document_id) : null
+      const outline = roadmap?.episodes.find(o => o.status === 'selected') ?? roadmap?.episodes[0]
+      const episode = outline ? await api.episode(outline.episode_id) : null
       if (token !== jobGen.current) return
-      card = { episodeId: episode?.episodeId ?? episodeId, title: episode?.title ?? '', docName: MOCK_DOC }
+      card = { episodeId: episode?.episodeId ?? outline?.episode_id ?? null, title: episode?.title ?? '', docName: MOCK_DOC }
+      if (doc && episode) cacheReady({
+        documentId: doc.document_id, docName: MOCK_DOC,
+        episodeId: episode.episodeId, episodeTitle: episode.title, episode,
+        pdf: null, savedAt: Date.now(),
+      })
     } catch { /* backend offline; the card still persists, play retries the resolve */ }
     setChip(c => ({ ...c, stage: 'episode ready', pct: 100 }))
     setReadyCard(card)
@@ -279,6 +320,7 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
     setUploadErr('')
     try {
       const { job_id } = await api.upload(file)
+      pendingPdf.current = file
       uploadDlg.current?.close()
       setJobParam(job_id)
       void drive(job_id, file.name)
@@ -295,6 +337,7 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
   async function loadEpisodes() {
     setDocs(null)
     setLearnErr('')
+    void loadShelf()
     try {
       const { documents } = await api.documents()
       const loaded = await Promise.all(documents.slice(0, 8).map(async doc => {
@@ -327,6 +370,29 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
     } catch (err) {
       setLearnErr(err instanceof Error ? err.message : 'Could not start the episode.')
     } finally { setPlayingId(null) }
+  }
+
+  // The warn dialog inherits the Learn dialog's ambient suspension — it never
+  // registers a modal token, so closing it can't resume ambient under a still-
+  // open Learn dialog. Focus lands on the safe action like the backlog warn.
+  useEffect(() => {
+    const dlg = removeDlg.current
+    if (!dlg) return
+    if (confirming && !dlg.open) { dlg.showModal(); keepBtn.current?.focus({ preventScroll: true }) }
+    else if (!confirming && dlg.open) dlg.close()
+  }, [confirming])
+
+  async function confirmRemove() {
+    const rec = confirming
+    removeDlg.current?.close()
+    if (!rec) return
+    try { await removeShelf(rec.documentId); setShelf(s => s?.filter(r => r.documentId !== rec.documentId) ?? s) }
+    catch { setShelfNote("Couldn't delete that copy. Try again.") }
+  }
+
+  async function clearAll() {
+    try { await clearShelf(); setShelf(s => (s ? [] : s)) }
+    catch { setShelfNote("Couldn't clear the saved copies. Try again.") }
   }
 
   // ---- Talk / rail wiring --------------------------------------------------
@@ -478,6 +544,24 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
       <div className="modal">
         <h2 id="learnTitle">Episodes</h2>
         <p className="sub">Generated lessons from your documents. Episode 1 plays; the rest stay as outlines until it proves itself.</p>
+        {(shelf !== null || shelfNote !== '') && <section className="shelf" aria-label="Saved in this browser">
+          <div className="shelf-head">
+            <p className="shelf-title">On this browser</p>
+            {shelf !== null && shelf.length > 0 && <button type="button" className="vn-quiet shelf-clear" onClick={() => void clearAll()}>Clear browser copies</button>}
+          </div>
+          {shelfNote !== '' && <p className="form-error shelf-note" role="alert"><span>{shelfNote}</span><button type="button" className="vn-quiet" onClick={() => setShelfNote('')}>Dismiss</button></p>}
+          {shelf !== null && shelf.length === 0 && <p className="ep-empty shelf-empty">Nothing saved in this browser yet. Finish an episode and it waits here.</p>}
+          {shelf !== null && shelf.length > 0 && <ol className="ep-rows">
+            {shelf.map(rec => <li className="ep ready" key={rec.documentId}>
+              <span className="ep-meta">
+                <span className="ep-title">{rec.episodeTitle || rec.docName}</span>
+                <span className="ep-status">{rec.docName} · saved {new Date(rec.savedAt).toLocaleDateString()}</span>
+              </span>
+              <button type="button" className="vn-button" disabled={playingId !== null} onClick={() => void play(rec.episodeId)}>{playingId === rec.episodeId ? 'Starting…' : 'Play'}</button>
+              <button type="button" className="vn-quiet shelf-remove" onClick={() => setConfirming(rec)}>Remove</button>
+            </li>)}
+          </ol>}
+        </section>}
         {docs === null && !learnErr && <p className="ep-empty">Loading your episodes…</p>}
         {learnErr !== '' && <p className="form-error" role="alert">{learnErr}</p>}
         {docs !== null && docs.length === 0 && !learnErr && <p className="ep-empty">No episodes yet — upload a document and I'll plan your first one.</p>}
@@ -495,6 +579,14 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
           })}
         </ol>}
         <div className="row-end"><button type="button" className="vn-quiet" onClick={e => e.currentTarget.closest('dialog')?.close()}>Close</button></div>
+        <dialog ref={removeDlg} className="bl-warn" aria-labelledby="shelfWarnTitle" onKeyDown={onMenuKeyDown} onClose={() => setConfirming(null)}>
+          <h3 id="shelfWarnTitle">Delete this saved copy?</h3>
+          <p className="bl-warn-copy">Removes the PDF and episode saved for {confirming?.docName ?? 'this document'} from this browser. The server keeps its own copies.</p>
+          <div className="bl-warn-actions">
+            <button ref={keepBtn} type="button" className="vn-quiet" onClick={() => removeDlg.current?.close()}>Keep it</button>
+            <button type="button" className="vn-button" onClick={() => void confirmRemove()}>Delete</button>
+          </div>
+        </dialog>
       </div>
     </dialog>
 
