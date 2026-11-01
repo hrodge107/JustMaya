@@ -114,6 +114,19 @@ async function moveTo(page, dir) {
   await page.mouse.move(cx + dir.x * rx, cy + dir.y * ry, { steps: 3 })
 }
 
+async function touchSequence(page, events, targetSelector) {
+  const rect = await page.locator('.vrm-viewport').boundingBox()
+  const x = rect.x + rect.width * .9, y = rect.y + rect.height * .4
+  await page.evaluate(({ events, targetSelector, x, y }) => {
+    const target = targetSelector ? document.querySelector(targetSelector) : document.elementFromPoint(x, y)
+    if (!target) throw new Error('touch test target is missing')
+    for (const [type, dx = 0, dy = 0] of events) target.dispatchEvent(new PointerEvent(type, {
+      bubbles: true, cancelable: true, pointerType: 'touch', pointerId: 1, isPrimary: true,
+      clientX: x + dx, clientY: y + dy,
+    }))
+  }, { events, targetSelector, x, y })
+}
+
 // Task 4.1/4.3/5.1: first-visible pose, delayed/failed idle, hidden-tab
 // physics resume, and unmount/remount cleanup — all through the real model.
 async function lifecycleChecks(browser) {
@@ -280,6 +293,43 @@ async function directionMatrix(browser, idle) {
   const backAt = await backHandle.jsonValue()
   check(`${tag}: tap glances toward the touch`, () => assert.ok((glanceAt - releaseAt) / 1000 <= 1.5, `glance arrived ${((glanceAt - releaseAt) / 1000).toFixed(2)}s after release`))
   check(`${tag}: tap returns forward within 2s`, () => assert.ok((backAt - releaseAt) / 1000 <= 2, `returned after ${((backAt - releaseAt) / 1000).toFixed(2)} wall-clock seconds`))
+
+  if (!idle) {
+    const touchRect = await page.locator('.vrm-viewport').boundingBox()
+    await page.touchscreen.tap(touchRect.x + touchRect.width * .9, touchRect.y + touchRect.height * .4)
+    await page.touchscreen.tap(touchRect.x + touchRect.width * .1, touchRect.y + touchRect.height * .4)
+    const replacementReleaseAt = await page.evaluate(() => performance.now())
+    const replacementGlance = await page.waitForFunction(baseline => {
+      const d = window.__mitaVrm
+      return d && d.faceNdc[0] - d.headNdc[0] < baseline.fx - .004 ? performance.now() : false
+    }, forward, { timeout: 1500, polling: 100 })
+    const replacementGlanceAt = await replacementGlance.jsonValue()
+    const replacementBack = await page.waitForFunction(baseline => {
+      const d = window.__mitaVrm
+      return d && Math.hypot(d.faceNdc[0] - d.headNdc[0] - baseline.fx, d.faceNdc[1] - d.headNdc[1] - baseline.fy) <= .03 ? performance.now() : false
+    }, forward, { timeout: 40000, polling: 100 })
+    const replacementBackAt = await replacementBack.jsonValue()
+    check(`${tag}: second tap replaces the pending target`, () => assert.ok((replacementGlanceAt - replacementReleaseAt) / 1000 <= 1.5, `left glance arrived ${((replacementGlanceAt - replacementReleaseAt) / 1000).toFixed(2)}s after second release`))
+    check(`${tag}: replacement tap returns forward within 2s`, () => assert.ok((replacementBackAt - replacementReleaseAt) / 1000 <= 2, `returned after ${((replacementBackAt - replacementReleaseAt) / 1000).toFixed(2)}s`))
+
+    const noTouchGaze = async (label, events, targetSelector) => {
+      const before = await gaze(page, 0)
+      await touchSequence(page, events, targetSelector)
+      await page.waitForFunction(f => window.__mitaVrm?.frames >= f + 2, before.frames, { timeout: 15000, polling: 100 })
+      const after = await gaze(page, 0)
+      check(`${tag}: ${label} leaves gaze forward`, () => assert.ok(Math.abs(after.lookX) < .001 && Math.abs(after.fx - forward.fx) <= .03,
+        `lookX=${after.lookX} fx=${after.fx.toFixed(4)} vs forward=${forward.fx.toFixed(4)}`))
+    }
+    await noTouchGaze('scroll-like touch movement', [['pointerdown'], ['pointermove', 24], ['pointerup', 24]])
+    await noTouchGaze('canceled touch', [['pointerdown'], ['pointercancel']])
+    await page.evaluate(() => {
+      const dialog = document.createElement('div')
+      dialog.id = 'touch-test-dialog'; dialog.setAttribute('role', 'dialog')
+      document.body.append(dialog)
+    })
+    await noTouchGaze('open modal touch', [['pointerdown'], ['pointerup']], '#touch-test-dialog')
+    await page.evaluate(() => document.querySelector('#touch-test-dialog')?.remove())
+  }
 
   // Camera lock: drag/wheel over the avatar must not move the subject in
   // frame (task 3.2 — production framing is not user-adjustable).
