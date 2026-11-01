@@ -278,7 +278,21 @@ export function mount(container, opts = {}) {
       VRMUtils.rotateVRM0(vrm)
       scene.add(vrm.scene)
       // Morph-driven meshes must not be culled against their bind-pose bounds.
-      vrm.scene.traverse((obj) => { obj.frustumCulled = false })
+      // VRoid exports world-space outlines — at this chest-up camera distance
+      // they read too thick, so switch to a small screen-space factor instead.
+      vrm.scene.traverse((obj) => {
+        obj.frustumCulled = false
+        if (obj.isMesh || obj.isSkinnedMesh) {
+          const mats = Array.isArray(obj.material) ? obj.material : [obj.material]
+          for (const m of mats) {
+            if (m?.isMToonMaterial && m.outlineWidthFactor > 0 && m.outlineWidthMode !== 'none') {
+              m.outlineWidthMode = 'screenCoordinates'
+              m.outlineWidthFactor = 0.004
+              m.needsUpdate = true
+            }
+          }
+        }
+      })
       // Resting arm stance — see REST for the rationale (without an idle clip a
       // VRM0 model renders in bind pose: the T-pose). Bones resolve once here
       // and are damped toward pose targets each frame.

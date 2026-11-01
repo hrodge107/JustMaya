@@ -49807,6 +49807,14 @@ void main() {
 				scene.add(vrm.scene);
 				vrm.scene.traverse((obj) => {
 					obj.frustumCulled = false;
+					if (obj.isMesh || obj.isSkinnedMesh) {
+						const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+						for (const m of mats) if (m?.isMToonMaterial && m.outlineWidthFactor > 0 && m.outlineWidthMode !== "none") {
+							m.outlineWidthMode = "screenCoordinates";
+							m.outlineWidthFactor = .004;
+							m.needsUpdate = true;
+						}
+					}
 				});
 				const humanoid = vrm.humanoid;
 				if (humanoid) for (const name of Object.keys(REST)) {
