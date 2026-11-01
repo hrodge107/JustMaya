@@ -64,6 +64,8 @@ async function gaze(page, settleMs = 1200, { stable = false } = {}) {
       gazeYaw: d.gazeYaw, gazePitch: d.gazePitch,
       armZ: d.armZ, idleOn: d.idleOn, ready: d.ready, gestureW: d.gestureW,
       frames: d.frames, elapsed: d.elapsed,
+      softwareRenderer: d.softwareRenderer, pixelRatio: d.pixelRatio,
+      bufferWidth: d.bufferWidth, bufferHeight: d.bufferHeight,
     }
   })
 }
@@ -223,6 +225,10 @@ async function directionMatrix(browser, idle) {
   // Neutral settle then direction sweep.
   const neutral = await gaze(page, 0, { stable: true })
   await shot('center')
+  check(`${tag}: renderer pixel policy`, () => process.env.VRM_SOFTWARE_GL === '0'
+    ? assert.ok(!neutral.softwareRenderer && neutral.pixelRatio <= 2, `software=${neutral.softwareRenderer} ratio=${neutral.pixelRatio}`)
+    : assert.ok(neutral.softwareRenderer && neutral.bufferWidth * neutral.bufferHeight <= 960 * 540 + 2000,
+      `software=${neutral.softwareRenderer} buffer=${neutral.bufferWidth}x${neutral.bufferHeight} ratio=${neutral.pixelRatio}`))
   const seen = {}
   for (const name of ['left', 'right', 'up', 'down']) {
     await moveTo(page, DIRS[name])
@@ -245,18 +251,35 @@ async function directionMatrix(browser, idle) {
   const clearHandle = await page.waitForFunction(() => { const d = window.__mitaVrm; return d && Math.abs(d.faceNdc[0] - d.headNdc[0]) <= .03 ? d.elapsed : false }, null, { timeout: 30000 })
   const clearedElapsed = await clearHandle.jsonValue()
   check(`${tag}: pointer exit/blur returns gaze forward within 1s`, () => assert.ok(clearedElapsed - exitAt <= 1.05, `returned after ${(clearedElapsed - exitAt).toFixed(2)} rendered seconds (parked fx=${parked.fx.toFixed(4)})`))
+  const forward = await gaze(page, 0, { stable: true })
 
-  // A completed tap glances briefly then returns forward within two
-  // rendered seconds of release (spec deadline, measured directly).
+  // A completed tap glances briefly then returns within two wall-clock
+  // seconds of release, even when frames take longer than the 50ms sim step.
+  await page.evaluate(() => {
+    window.__touchEvents = []
+    for (const name of ['pointerdown', 'pointerup', 'pointercancel']) window.addEventListener(name, event => {
+      if (event.pointerType === 'touch') window.__touchEvents.push({ name, x: event.clientX, y: event.clientY, target: event.target?.tagName })
+    }, true)
+  })
   const rect = await page.locator('.vrm-viewport').boundingBox()
   await page.touchscreen.tap(rect.x + rect.width * 0.9, rect.y + rect.height * 0.4)
-  const releaseElapsed = (await gaze(page, 0)).elapsed
-  const glanceHandle = await page.waitForFunction(() => { const d = window.__mitaVrm; return d && d.faceNdc[0] - d.headNdc[0] > .004 ? d.elapsed : false }, null, { timeout: 15000 })
-  const glanceElapsed = await glanceHandle.jsonValue()
-  const backHandle = await page.waitForFunction(() => { const d = window.__mitaVrm; return d && Math.abs(d.faceNdc[0] - d.headNdc[0]) <= .03 ? d.elapsed : false }, null, { timeout: 40000 })
-  const backElapsed = await backHandle.jsonValue()
-  check(`${tag}: tap glances toward the touch`, () => assert.ok(glanceElapsed - releaseElapsed <= 1.5, `glance arrived ${(glanceElapsed - releaseElapsed).toFixed(2)}s after release`))
-  check(`${tag}: tap returns forward within 2s`, () => assert.ok(backElapsed - releaseElapsed <= 2.1, `returned after ${(backElapsed - releaseElapsed).toFixed(2)} rendered seconds`))
+  const releaseAt = await page.evaluate(() => performance.now())
+  const glanceHandle = await page.waitForFunction(baseline => {
+    const d = window.__mitaVrm
+    return d && d.faceNdc[0] - d.headNdc[0] > baseline.fx + .004 ? performance.now() : false
+  }, forward, { timeout: 15000, polling: 100 }).catch(async error => {
+    const snapshot = await gaze(page, 0)
+    const events = await page.evaluate(() => window.__touchEvents)
+    throw new Error(`${error.message}; touch diagnostic=${JSON.stringify(snapshot)} events=${JSON.stringify(events)}`)
+  })
+  const glanceAt = await glanceHandle.jsonValue()
+  const backHandle = await page.waitForFunction(baseline => {
+    const d = window.__mitaVrm
+    return d && Math.hypot(d.faceNdc[0] - d.headNdc[0] - baseline.fx, d.faceNdc[1] - d.headNdc[1] - baseline.fy) <= .03 ? performance.now() : false
+  }, forward, { timeout: 40000, polling: 100 })
+  const backAt = await backHandle.jsonValue()
+  check(`${tag}: tap glances toward the touch`, () => assert.ok((glanceAt - releaseAt) / 1000 <= 1.5, `glance arrived ${((glanceAt - releaseAt) / 1000).toFixed(2)}s after release`))
+  check(`${tag}: tap returns forward within 2s`, () => assert.ok((backAt - releaseAt) / 1000 <= 2, `returned after ${((backAt - releaseAt) / 1000).toFixed(2)} wall-clock seconds`))
 
   // Camera lock: drag/wheel over the avatar must not move the subject in
   // frame (task 3.2 — production framing is not user-adjustable).
@@ -296,8 +319,8 @@ async function homeSurface(browser) {
   await context.close()
 }
 
-// Production surface: checkpoint/thinking must not park the gaze upper-right,
-// and the tutor compose strip keeps only its intentional downward glance.
+// Production surface: checkpoint/tutor modes remain forward without input,
+// and pointer tracking stays available through the lesson states.
 async function productionSurface(browser) {
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, reducedMotion: 'no-preference', hasTouch: true })
   await seedNoise(context)
@@ -349,36 +372,42 @@ async function productionSurface(browser) {
   // would let the gaze checks pass without ever reaching the state.
   await page.locator('.vn-dialogue').click()
   await page.locator('.vn-checkpoint-scene, [class*=checkpoint]').first().waitFor({ timeout: 30000 })
+  await page.mouse.move(640, 450)
   const thinking = await gaze(page, 1600)
   await page.screenshot({ path: path.join(out, 'surface-checkpoint.png') })
   check('surface: playing state faces viewer', () => assert.ok(Math.abs(playing.fx) <= 0.03, `playing fx=${playing.fx.toFixed(4)}`))
   check('surface: thinking/checkpoint does not park upper-right', () => assert.ok(Math.abs(thinking.fx) <= 0.03 && Math.abs(thinking.fy) <= 0.05, `thinking fx=${thinking.fx.toFixed(4)} fy=${thinking.fy.toFixed(4)} look=(${thinking.lookX},${thinking.lookY}) eye=(${thinking.eyeYaw.toFixed(1)},${thinking.eyePitch.toFixed(1)})`))
 
-  // Tutor state: raising a hand opens the compose strip — she keeps only the
-  // intentional downward glance, does not track the pointer (mode≠playing).
+  // Tutor compose removes its fixed down-look. Center the mouse before
+  // checking neutral gaze, then ensure tracking still works in this state.
   const raise = page.locator('.vn-raise')
   assert.ok(await raise.count(), 'raise-hand control must exist on the checkpoint surface')
   await raise.click()
   await page.locator('.vn-ask-strip, [class*=ask]').first().waitFor({ timeout: 30000 })
-  const tutor = await gaze(page, 0, { stable: true })
-  await page.screenshot({ path: path.join(out, 'surface-tutor.png') })
-  check('surface: tutor compose glances down, not sideways', () => assert.ok(tutor.fy < -0.02 && Math.abs(tutor.fx) <= 0.03, `tutor fx=${tutor.fx.toFixed(4)} fy=${tutor.fy.toFixed(4)} look=(${tutor.lookX},${tutor.lookY})`))
   const stage = await page.locator('.vrm-viewport').boundingBox()
   assert.ok(stage, 'vrm viewport must exist on the tutor surface')
-  await page.mouse.move(stage.x + stage.width / 2 + 300, stage.y + stage.height / 2, { steps: 3 })
-  const untracked = await gaze(page, 0, { stable: true })
-  check('surface: tutor state ignores pointer tracking', () => assert.ok(Math.abs(untracked.fx) <= 0.03, `untracked fx=${untracked.fx.toFixed(4)}`))
+  const centerX = stage.x + stage.width / 2, centerY = stage.y + stage.height / 2
+  await page.mouse.move(centerX, centerY)
+  const tutor = await gaze(page, 0, { stable: true })
+  await page.screenshot({ path: path.join(out, 'surface-tutor.png') })
+  check('surface: tutor compose faces forward without input', () => assert.ok(Math.abs(tutor.fx) <= 0.03 && Math.abs(tutor.fy) <= 0.05, `tutor fx=${tutor.fx.toFixed(4)} fy=${tutor.fy.toFixed(4)} look=(${tutor.lookX},${tutor.lookY})`))
+  await page.mouse.move(stage.x + stage.width * .9, centerY, { steps: 3 })
+  const tracked = await gaze(page, 0, { stable: true })
+  check('surface: tutor compose follows the mouse', () => assert.ok(tracked.fx > tutor.fx + .004, `tracked fx=${tracked.fx.toFixed(4)} vs neutral ${tutor.fx.toFixed(4)}`))
   await context.close()
 }
 
 async function main() {
-  const browser = await chromium.launch({ headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] })
+  const args = process.env.VRM_SOFTWARE_GL === '0' ? [] : ['--use-angle=swiftshader', '--enable-unsafe-swiftshader']
+  const browser = await chromium.launch({ channel: process.env.VRM_VERIFY_BROWSER || 'msedge', headless: true, args })
   try {
     await directionMatrix(browser, false)
-    await directionMatrix(browser, true)
-    await homeSurface(browser)
-    await productionSurface(browser)
-    await lifecycleChecks(browser)
+    if (!process.env.VRM_ONLY_TOUCH) {
+      await directionMatrix(browser, true)
+      await homeSurface(browser)
+      await productionSurface(browser)
+      await lifecycleChecks(browser)
+    }
   } finally { await browser.close() }
   for (const line of results) console.log(line)
   if (errors.length) console.log('page errors:', errors)

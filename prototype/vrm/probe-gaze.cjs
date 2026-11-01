@@ -25,15 +25,6 @@ function findBrowser() {
   return undefined
 }
 
-// x>0 = cursor right, y>0 = cursor at bottom of screen
-const DIRS = [
-  ['center', { x: 0, y: 0 }],
-  ['right', { x: 1, y: 0 }],
-  ['left', { x: -1, y: 0 }],
-  ['down', { x: 0, y: 1 }],
-  ['up', { x: 0, y: -1 }],
-]
-
 // Real pointer positions across the 1280x800 window — exercises the actual
 // pointermove path (not the lookTargetOffset prop).
 const MOUSE = [

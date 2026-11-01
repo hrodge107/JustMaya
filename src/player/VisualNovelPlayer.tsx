@@ -653,11 +653,7 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
   const canRaise = mode === 'playing' && !!line || mode === 'checkpoint'
   const backlogEntries = buildBacklog(episode, order, session)
   const canJump = mode === 'playing' || mode === 'checkpoint'
-  // Gaze stays camera-forward in thinking/checkpoint/reveal states — the only
-  // authored offset left is the downward glance at the question strip while
-  // composing or awaiting an answer (intentional bounded pose, not parking).
-  const lookTarget = inQuestion && !(awaiting && revealed) ? { x: 0, y: 0.85 } : null
-  const mascot = <MascotStage emotion={emotion} isSpeaking={isSpeaking} nodTrigger={nodTrigger} customAnimationTrigger={null} lookTargetOffset={lookTarget} enablePointerTracking={mode === 'playing'} />
+  const mascot = <MascotStage emotion={emotion} isSpeaking={isSpeaking} nodTrigger={nodTrigger} customAnimationTrigger={null} lookTargetOffset={null} enablePointerTracking />
 
   return <main className="player">
     <div className={`vn-frame mode-${mode}`}>

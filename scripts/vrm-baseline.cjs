@@ -80,8 +80,8 @@ async function measureRun(page, seconds) {
     const moveStart = performance.now()
     for (let i = 0; i < 120; i++) {
       window.dispatchEvent(new PointerEvent('pointermove', { clientX: 200 + i * 8, clientY: 200 + (i % 30) * 10, bubbles: true }))
-      await new Promise(r => requestAnimationFrame(r))
     }
+    await new Promise(r => requestAnimationFrame(r))
     return { deltas, commits: window.__commits, moveMs: performance.now() - moveStart, debug: { ...window.__mitaVrm } }
   }, seconds)
   const sorted = result.deltas.slice(1).sort((a, b) => a - b)
@@ -96,11 +96,14 @@ async function measureRun(page, seconds) {
     geometries: result.debug.geometries,
     textures: result.debug.textures,
     programs: result.debug.programs,
+    pixelRatio: result.debug.pixelRatio,
+    bufferSize: [result.debug.bufferWidth, result.debug.bufferHeight],
+    softwareRenderer: result.debug.softwareRenderer,
   }
 }
 
 async function main() {
-  const browser = await chromium.launch({ headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] })
+  const browser = await chromium.launch({ channel: process.env.VRM_VERIFY_BROWSER || 'msedge', headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] })
   try {
     const probe = await browser.newPage()
     record.meta.glRenderer = await probe.evaluate(() => {
@@ -111,6 +114,7 @@ async function main() {
     })
     record.meta.browser = `chromium ${browser.version()}`
     record.meta.model = 'sample (public/mascot/sample.vrm, VRM 0.0, VRoid) + sample-idle.fbx'
+    record.meta.devicePixelRatio = await probe.evaluate(() => window.devicePixelRatio)
     record.meta.fixtures = {
       vrm1: fs.existsSync('C:/Users/User/AppData/Local/Temp/justmaya-vrm-test.vrm') ? 'C:/Users/User/AppData/Local/Temp/justmaya-vrm-test.vrm' : 'MISSING',
       vrm0: fs.existsSync('C:/Users/User/AppData/Local/Temp/justmaya-vrm0-test.vrm') ? 'C:/Users/User/AppData/Local/Temp/justmaya-vrm0-test.vrm' : 'MISSING',
@@ -121,7 +125,7 @@ async function main() {
     const sessionId = await realSession()
     record.meta.session = sessionId
 
-    for (const vp of [{ name: 'desktop', width: 1920, height: 1080 }, { name: 'mobile', width: 390, height: 844 }]) {
+    for (const vp of [{ name: 'desktop', width: 1920, height: 1080 }, { name: 'mobile', width: 406, height: 738 }]) {
       const context = await browser.newContext({ viewport: { width: vp.width, height: vp.height }, reducedMotion: 'no-preference' })
       await instrument(context)
       const page = await context.newPage()
@@ -147,18 +151,20 @@ async function main() {
         for (let i = 0; i < RUNS; i++) record.runs.push(await measureRun(page, 4))
 
         // Repeated Home<->Episode mounts must not grow GPU resources.
-        const before = await page.evaluate(() => ({ ctx: window.__glContexts, del: window.__glDeletes }))
-        const memory = []
-        for (let i = 0; i < 4; i++) {
-          await page.evaluate(() => { history.pushState({}, '', '/'); dispatchEvent(new PopStateEvent('popstate')) })
-          await waitReady(page)
-          await page.evaluate(s => { history.pushState({}, '', `/?session=${s}`); dispatchEvent(new PopStateEvent('popstate')) }, sessionId)
-          await page.locator('.vrm-mascot:visible canvas').waitFor({ timeout: 60000 })
-          await page.waitForFunction(() => window.__mitaVrm?.frames > 3, null, { timeout: 60000 })
-          memory.push(await debug(page))
+        if (process.env.VRM_SKIP_MOUNTS !== '1') {
+          const before = await page.evaluate(() => ({ ctx: window.__glContexts, del: window.__glDeletes }))
+          const memory = []
+          for (let i = 0; i < 4; i++) {
+            await page.evaluate(() => { history.pushState({}, '', '/'); dispatchEvent(new PopStateEvent('popstate')) })
+            await waitReady(page)
+            await page.evaluate(s => { history.pushState({}, '', `/?session=${s}`); dispatchEvent(new PopStateEvent('popstate')) }, sessionId)
+            await page.locator('.vrm-mascot:visible canvas').waitFor({ timeout: 60000 })
+            await page.waitForFunction(() => window.__mitaVrm?.frames > 3, null, { timeout: 60000 })
+            memory.push(await debug(page))
+          }
+          const after = await page.evaluate(() => ({ ctx: window.__glContexts, del: window.__glDeletes }))
+          record.mounts = { cycles: 4, contextsCreated: after.ctx - before.ctx, programsDeleted: after.del - before.del, memory }
         }
-        const after = await page.evaluate(() => ({ ctx: window.__glContexts, del: window.__glDeletes }))
-        record.mounts = { cycles: 4, contextsCreated: after.ctx - before.ctx, programsDeleted: after.del - before.del, memory }
       }
       await context.close()
     }

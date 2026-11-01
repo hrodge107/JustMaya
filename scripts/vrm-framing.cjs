@@ -25,11 +25,12 @@ function check(name, fn) {
 }
 
 const VIEWPORTS = [
-  // The supplied reference frames are 1024x576 (desktop) and 406x738
-  // (mobile) — those exact sizes anchor the landmark checks.
-  { name: 'ref-desktop', width: 1024, height: 576 },
+  // Match desktop-framing.png (8% crown) and mobile-framing.png (22% crown).
+  //
+  // Keep the reference viewports exact: these are composition inputs, not
+  // scaled approximations of another aspect ratio.
+  { name: 'ref-desktop', width: 1920, height: 1080 },
   { name: 'ref-mobile', width: 406, height: 738 },
-  { name: 'desktop', width: 1920, height: 1080 },
   { name: 'mobile', width: 390, height: 844 },
   { name: 'tablet', width: 768, height: 1024 },
   { name: 'tablet-landscape', width: 1024, height: 768 },
@@ -78,15 +79,42 @@ async function faceLandmarks(page, tag) {
   const m = await page.evaluate(() => {
     const d = window.__mitaVrm
     const dlg = document.querySelector('.vn-dialogue, .vn-ask-strip, .home-dialogue, [class*=dialogue]')
+    const canvas = document.querySelector('.vrm-viewport')?.getBoundingClientRect()
     const r = dlg?.getBoundingClientRect()
-    return { head: [...d.headNdc], face: [...d.faceNdc], dlgTopNdc: r && r.top < innerHeight ? 1 - (r.top / innerHeight) * 2 : null }
+    const project = p => ({ x: canvas.left + (p[0] + 1) * canvas.width / 2, y: canvas.top + (1 - p[1]) * canvas.height / 2 })
+    return { head: project(d.headNdc), crown: project(d.crownNdc), dialogTop: r?.top ?? null,
+      pixelRatio: d.pixelRatio, bufferWidth: d.bufferWidth, bufferHeight: d.bufferHeight, softwareRenderer: d.softwareRenderer }
   })
-  check(`${tag}: subject centered, head in upper half`, () => {
-    assert.ok(Math.abs(m.head[0]) < .35, `headNdc.x=${m.head[0].toFixed(3)}`)
-    assert.ok(m.head[1] > .1, `headNdc.y=${m.head[1].toFixed(3)}`)
+  const { width, height, dpr } = await page.evaluate(() => ({ width: innerWidth, height: innerHeight, dpr: devicePixelRatio }))
+  const crownY = m.crown.y / height
+  const headX = m.head.x / width
+  const headY = m.head.y / height
+  const targetHairY = tag.startsWith('ref-desktop') ? .08 : tag.startsWith('ref-mobile') ? .22 : null
+  // The top-center bounds probe projects ~4.3% above the visible hair in
+  // these references because the actual crown sits farther from the camera.
+  const targetCrownY = targetHairY === null ? null : targetHairY - .043
+  check(`${tag}: model crown maps to reference placement (${crownY.toFixed(3)})`, () => {
+    if (targetCrownY !== null) assert.ok(Math.abs(crownY - targetCrownY) <= .015, `crown proxy y=${crownY.toFixed(3)}, target=${targetCrownY}`)
+    assert.ok(Math.abs(m.crown.x / width - .5) < .08, `crown x=${m.crown.x.toFixed(1)}`)
   })
-  if (m.dlgTopNdc !== null) {
-    check(`${tag}: face clears the dialogue strip`, () => assert.ok(m.head[1] > m.dlgTopNdc, `head y=${m.head[1].toFixed(2)} vs dialogue top ${m.dlgTopNdc.toFixed(2)}`))
+  if (targetCrownY !== null) {
+    const targetHeadY = targetCrownY === .08 ? .38 : .41
+    check(`${tag}: face center matches reference placement (${headX.toFixed(3)}, ${headY.toFixed(3)})`, () => {
+      assert.ok(Math.abs(headX - .5) < .12, `head x=${headX.toFixed(3)}`)
+      assert.ok(Math.abs(headY - targetHeadY) <= .08, `head y=${headY.toFixed(3)}, target=${targetHeadY}`)
+      assert.ok(headY - crownY > .14, `crown-to-face span=${(headY - crownY).toFixed(3)}`)
+    })
+  }
+  check(`${tag}: face remains centered and in frame`, () => {
+    assert.ok(Math.abs(headX - .5) < .12 && headY > .12 && headY < .62, `head=(${headX.toFixed(3)}, ${headY.toFixed(3)})`)
+  })
+  check(`${tag}: renderer follows its pixel policy`, () => {
+    if (m.softwareRenderer) assert.ok(m.bufferWidth * m.bufferHeight <= 960 * 540 + 2000,
+      `software buffer=${m.bufferWidth}x${m.bufferHeight} ratio=${m.pixelRatio.toFixed(3)}`)
+    else assert.ok(m.pixelRatio <= Math.min(dpr, 2) + .001, `hardware ratio=${m.pixelRatio.toFixed(3)}, device ratio=${dpr}`)
+  })
+  if (m.dialogTop !== null) {
+    check(`${tag}: face clears the dialogue strip`, () => assert.ok(m.head.y < m.dialogTop, `head y=${m.head.y.toFixed(1)} vs dialogue top ${m.dialogTop.toFixed(1)}`))
   }
 }
 
@@ -160,6 +188,7 @@ async function checkpointStates(browser) {
   await page.screenshot({ path: path.join(out, 'checkpoint-long-dialogue.png') })
   await noOverflow(page, 'mobile/long-dialogue')
   await page.locator('.vn-dialogue').click()
+  await page.locator('.vn-dialogue').click()
   await page.locator('.vn-choice').first().waitFor({ timeout: 15000 })
   await page.screenshot({ path: path.join(out, 'checkpoint-choices.png') })
   await noOverflow(page, 'mobile/checkpoint')
@@ -173,7 +202,7 @@ async function checkpointStates(browser) {
 }
 
 async function main() {
-  const browser = await chromium.launch({ headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] })
+  const browser = await chromium.launch({ channel: process.env.VRM_VERIFY_BROWSER || 'msedge', headless: true, args: process.env.VRM_SOFTWARE_GL === '0' ? [] : ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] })
   try {
     await matrix(browser)
     await textZoom(browser)

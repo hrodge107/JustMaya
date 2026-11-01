@@ -42,6 +42,8 @@ const EYE_CLOSE: Partial<Record<string, number>> = { thinking: 0.95 }
 const EXPR_KEYS = ['happy', 'relaxed', 'sad', 'surprised', 'aa', 'blink'] as const
 // Pointer-follow reach: <1 keeps her mostly front-facing (glance, not crane).
 const GAZE_TRACK = 0.65
+// ponytail: cap software-rendered full-screen avatars; hardware keeps native detail.
+const MAX_AVATAR_PIXELS = 960 * 540
 
 // Verification seam: per-frame state snapshot for browser probes (directional
 // gaze, first-pose, lifecycle and perf checks in scripts/verify-vrm.cjs). Read
@@ -66,6 +68,8 @@ type VrmDebug = {
   faceNdc: [number, number]
   /** Head bone origin projected to NDC. */
   headNdc: [number, number]
+  /** Top-center of the model bounds projected to NDC for framing checks. */
+  crownNdc: [number, number]
   /** World-space gaze targets applied to the head (radians, yaw then pitch). */
   gazeYaw: number
   gazePitch: number
@@ -77,6 +81,10 @@ type VrmDebug = {
    * units of active rendering, matching the spec's "one second of active
    * rendering" language under slow software GL. */
   elapsed: number
+  pixelRatio: number
+  bufferWidth: number
+  bufferHeight: number
+  softwareRenderer: boolean
   /** Left upper-arm local Z — ~1.25 resting, ~0 is a bind-pose T-pose. */
   armZ: number
   /** Conversational gesture blend weight, 0..1 (ease in, release). */
@@ -102,9 +110,11 @@ export default function VRMCanvas(props: Props) {
   useEffect(() => {
     const container = host.current
     if (!container) return
+    const initialProps = current.current
     let disposed = false
     let frame = 0
     let renderer: THREE.WebGLRenderer | undefined
+    let softwareRenderer = false
     let vrm: VRM | undefined
     let mixer: THREE.AnimationMixer | undefined
     let observer: ResizeObserver | undefined
@@ -113,7 +123,7 @@ export default function VRMCanvas(props: Props) {
     let pointerX = 0, pointerY = 0
     // Touch tap lifecycle: the pending press position/time and whether it
     // has moved into a scroll. Only a completed tap establishes a glance.
-    let tapX = 0, tapY = 0, tapUntil = 0
+    let tapX = 0, tapY = 0, tapUntil = 0, tapPending = false
     let tapDownX = 0, tapDownY = 0, tapDownAt = 0, tapMoved = false
     let blinkAt = 2 + Math.random() * 3
     let saccadeAt = 0, saccadeX = 0, saccadeY = 0
@@ -137,9 +147,10 @@ export default function VRMCanvas(props: Props) {
       geometries: 0, textures: 0, programs: 0,
       pointerX: 0, pointerY: 0, lookX: 0, lookY: 0,
       headYaw: 0, headPitch: 0, eyeYaw: 0, eyePitch: 0,
-      faceNdc: [0, 0], headNdc: [0, 0],
+      faceNdc: [0, 0], headNdc: [0, 0], crownNdc: [0, 0],
       gazeYaw: 0, gazePitch: 0,
       camX: 0, camY: 0, camZ: 0, elapsed: 0,
+      pixelRatio: 0, bufferWidth: 0, bufferHeight: 0, softwareRenderer: false,
       armZ: 0, gestureW: 0, idleOn: false,
     }
     window.__mitaVrm = debug
@@ -147,6 +158,7 @@ export default function VRMCanvas(props: Props) {
     const probeNdc = new THREE.Vector3()
     const probeQuat = new THREE.Quaternion()
     const probeForward = new THREE.Vector3()
+    const crownPosition = new THREE.Vector3()
     const weights = { happy: 0, relaxed: 0, sad: 0, surprised: 0, aa: 0, blink: 0 }
     const target = { happy: 0, relaxed: 0, sad: 0, surprised: 0, aa: 0, blink: 0 }
     let resolved: Record<MascotExpressionKey, string> | undefined // logical key -> registered expression on this model
@@ -162,7 +174,10 @@ export default function VRMCanvas(props: Props) {
       if (!frameHeight) return
       // Short screens (landscape phones) get a wider crop so the crown and
       // face keep breathing room instead of filling the frame edge-to-edge.
-      const span = frameHeight * .62 * THREE.MathUtils.clamp(520 / container.clientHeight, 1, 1.6)
+      const width = Math.max(container.clientWidth, 1), height = Math.max(container.clientHeight, 1)
+      // ponytail: interpolate the two supplied portrait/landscape crops; add another point only with a new reference.
+      const aspectScale = height < 520 ? 1 : THREE.MathUtils.clamp(1.28 - (width / height - .55) * .33, .88, 1.35)
+      const span = frameHeight * .62 * THREE.MathUtils.clamp(520 / height, 1, 1.6) * aspectScale
       camera.position.set(0, frameAimY, span / 2 / Math.tan(THREE.MathUtils.degToRad(camera.fov * .5)))
       camera.lookAt(0, frameAimY, 0)
     }
@@ -178,7 +193,11 @@ export default function VRMCanvas(props: Props) {
       if (!renderer) return
       clearInput()
       const width = Math.max(container.clientWidth, 1), height = Math.max(container.clientHeight, 1)
+      const softwarePixelRatio = Math.sqrt(MAX_AVATAR_PIXELS / (width * height))
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, softwareRenderer ? softwarePixelRatio : 2))
       renderer.setSize(width, height, false); camera.aspect = width / height; camera.updateProjectionMatrix()
+      debug.pixelRatio = renderer.getPixelRatio()
+      debug.bufferWidth = renderer.domElement.width; debug.bufferHeight = renderer.domElement.height
       applyFraming()
     }
     const track = (event: PointerEvent) => {
@@ -189,8 +208,8 @@ export default function VRMCanvas(props: Props) {
         return
       }
       const rect = container.getBoundingClientRect()
-      pointerX = THREE.MathUtils.clamp((event.clientX - rect.left - rect.width / 2) / (window.innerWidth / 2), -1, 1)
-      pointerY = THREE.MathUtils.clamp((event.clientY - rect.top - rect.height / 2) / (window.innerHeight / 2), -1, 1)
+      pointerX = THREE.MathUtils.clamp((event.clientX - rect.left - rect.width / 2) / (rect.width / 2), -1, 1)
+      pointerY = THREE.MathUtils.clamp((event.clientY - rect.top - rect.height / 2) / (rect.height / 2), -1, 1)
     }
     // Touch taps glance toward the tapped point for a beat, then release.
     // A glance starts only on a COMPLETED tap — a quick release without
@@ -198,6 +217,8 @@ export default function VRMCanvas(props: Props) {
     // no gaze target behind. Control and modal touches stay isolated.
     const tapStart = (event: PointerEvent) => {
       if (event.pointerType !== 'touch') return
+      pointerX = 0; pointerY = 0
+      tapPending = false; tapUntil = 0
       if ((event.target as Element | null)?.closest?.('button,[role="button"],a,input,select,textarea,label,dialog,[role="dialog"]')) { tapDownAt = 0; return }
       tapDownX = event.clientX; tapDownY = event.clientY; tapDownAt = performance.now(); tapMoved = false
     }
@@ -206,19 +227,23 @@ export default function VRMCanvas(props: Props) {
       const quick = performance.now() - tapDownAt <= 500; tapDownAt = 0
       if (!quick || tapMoved) return
       const rect = container.getBoundingClientRect()
-      tapX = THREE.MathUtils.clamp((tapDownX - rect.left - rect.width / 2) / (window.innerWidth / 2), -1, 1)
-      tapY = THREE.MathUtils.clamp((tapDownY - rect.top - rect.height / 2) / (window.innerHeight / 2), -1, 1)
-      tapUntil = elapsed + .6
+      tapX = THREE.MathUtils.clamp((tapDownX - rect.left - rect.width / 2) / (rect.width / 2), -1, 1)
+      tapY = THREE.MathUtils.clamp((tapDownY - rect.top - rect.height / 2) / (rect.height / 2), -1, 1)
+      // Queue until the next rendered frame so slow software GL cannot miss
+      // the whole glance between tap release and the next animation tick.
+      tapPending = true
     }
-    const tapCancel = (event: PointerEvent) => { if (event.pointerType === 'touch') { tapDownAt = 0; tapUntil = 0 } }
-    const clearInput = () => { pointerX = 0; pointerY = 0; tapUntil = 0; tapDownAt = 0 }
+    const tapCancel = (event: PointerEvent) => { if (event.pointerType === 'touch') { pointerX = 0; pointerY = 0; tapDownAt = 0; tapUntil = 0; tapPending = false } }
+    const clearInput = () => { pointerX = 0; pointerY = 0; tapUntil = 0; tapPending = false; tapDownAt = 0 }
     // Pointer leaving the document entirely — relatedTarget is null.
     const away = (event: PointerEvent) => { if (event.pointerType !== 'touch' && !event.relatedTarget) clearInput() }
     const lost = (event: Event) => { event.preventDefault(); if (!disposed) current.current.onError() }
     const tick = (now: number) => {
       frame = 0
       if (disposed || document.hidden || !renderer || !vrm) return
-      const dt = last ? Math.min((now - last) / 1000, .05) : 0
+      const wallDt = last ? Math.max((now - last) / 1000, 0) : 0
+      const dt = Math.min(wallDt, .05)
+      // Gaze follows elapsed time; physics, gestures, and animation keep the 50ms clamp.
       last = now; elapsed += dt
       const p = current.current
       if (p.nodTrigger > previousNod) nodStart = elapsed
@@ -243,7 +268,8 @@ export default function VRMCanvas(props: Props) {
       // Pointer tracking is attenuated: she glances toward the cursor but
       // stays mostly monitor-facing instead of craning to screen corners.
       // Authored lookTargetOffset poses keep their full authored range.
-      const glance = elapsed < tapUntil
+      if (tapPending) { tapPending = false; tapUntil = now + 600 }
+      const glance = now < tapUntil
       const lookX = p.lookTargetOffset?.x ?? (p.enablePointerTracking ? (glance ? tapX : pointerX) * GAZE_TRACK : 0)
       const lookY = p.lookTargetOffset?.y ?? (p.enablePointerTracking ? (glance ? tapY : pointerY) * GAZE_TRACK : 0)
       const nod = nodStart >= 0 && elapsed - nodStart < .45 ? Math.sin((elapsed - nodStart) / .45 * Math.PI) * .2 : 0
@@ -265,7 +291,7 @@ export default function VRMCanvas(props: Props) {
         targetWorldQuat.copy(headRestWorld).multiply(gazeQuat.setFromEuler(gazeEuler))
         headParent.getWorldQuaternion(parentWorldQuat)
         desiredLocalQuat.copy(parentWorldQuat).invert().multiply(targetWorldQuat)
-        head.quaternion.slerp(desiredLocalQuat, 1 - Math.exp(-5 * dt))
+        head.quaternion.slerp(desiredLocalQuat, 1 - Math.exp(-5 * wallDt))
         debug.gazeYaw = yaw; debug.gazePitch = pitch
       }
       // Conversational hand gesture: a brief right-hand rise while she talks
@@ -295,8 +321,8 @@ export default function VRMCanvas(props: Props) {
       // owns the chest track when it plays (no duplicate channels).
       if (chestBone && !idleClip) chestBone.rotation.x = THREE.MathUtils.damp(chestBone.rotation.x, .012 + Math.sin(elapsed * 1.5) * .012, 4, dt)
       if (vrm.lookAt) {
-        vrm.lookAt.yaw = THREE.MathUtils.damp(vrm.lookAt.yaw, lookX * 10 + saccadeX * 35, 6, dt)
-        vrm.lookAt.pitch = THREE.MathUtils.damp(vrm.lookAt.pitch, lookY * 8 + saccadeY * 35, 6, dt)
+        vrm.lookAt.yaw = THREE.MathUtils.damp(vrm.lookAt.yaw, lookX * 10 + saccadeX * 35, 6, wallDt)
+        vrm.lookAt.pitch = THREE.MathUtils.damp(vrm.lookAt.pitch, lookY * 8 + saccadeY * 35, 6, wallDt)
       }
       vrm.update(dt)
       renderer.render(scene, camera)
@@ -313,6 +339,8 @@ export default function VRMCanvas(props: Props) {
         probeNdc.copy(probePos).addScaledVector(probeForward, .2).project(camera)
         debug.faceNdc[0] = probeNdc.x; debug.faceNdc[1] = probeNdc.y
       }
+      probeNdc.copy(crownPosition).project(camera)
+      debug.crownNdc[0] = probeNdc.x; debug.crownNdc[1] = probeNdc.y
       debug.eyeYaw = vrm.lookAt?.yaw ?? 0
       debug.eyePitch = vrm.lookAt?.pitch ?? 0
       debug.camX = camera.position.x; debug.camY = camera.position.y; debug.camZ = camera.position.z
@@ -332,7 +360,10 @@ export default function VRMCanvas(props: Props) {
     const start = async () => {
       try {
         renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true })
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+        const gl = renderer.getContext()
+        const debugInfo = gl.getExtension('WEBGL_debug_renderer_info')
+        softwareRenderer = !!debugInfo && /swiftshader|llvmpipe|software/i.test(gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL))
+        debug.softwareRenderer = softwareRenderer
         renderer.domElement.addEventListener('webglcontextlost', lost)
         container.appendChild(renderer.domElement)
         observer = new ResizeObserver(resize); observer.observe(container); resize()
@@ -344,11 +375,11 @@ export default function VRMCanvas(props: Props) {
         window.addEventListener('blur', clearInput)
         window.addEventListener('scroll', clearInput, { passive: true, capture: true })
         document.addEventListener('visibilitychange', visibility)
-        const buffer = await fetchVRM(props.modelUrl)
+        const buffer = await fetchVRM(initialProps.modelUrl)
         if (disposed) return
         const loader = new GLTFLoader()
         loader.register(parser => new VRMLoaderPlugin(parser))
-        const gltf = await loader.parseAsync(buffer, new URL('.', new URL(props.modelUrl, location.href)).href)
+        const gltf = await loader.parseAsync(buffer, new URL('.', new URL(initialProps.modelUrl, location.href)).href)
         const loaded = gltf.userData.vrm as VRM | undefined
         if (!loaded) { VRMUtils.deepDispose(gltf.scene); throw new Error('Model is not a VRM') }
         if (disposed) { VRMUtils.deepDispose(loaded.scene); return }
@@ -363,6 +394,7 @@ export default function VRMCanvas(props: Props) {
         // re-locks it on every resize.
         const bounds = new THREE.Box3().setFromObject(vrm.scene)
         frameHeight = bounds.max.y - bounds.min.y
+        crownPosition.set((bounds.min.x + bounds.max.x) / 2, bounds.max.y, (bounds.min.z + bounds.max.z) / 2)
         frameAimY = bounds.max.y - frameHeight * .26
         applyFraming()
         headBone = vrm.humanoid.getNormalizedBoneNode('head')
@@ -373,13 +405,13 @@ export default function VRMCanvas(props: Props) {
         // is a T-pose and must never flash while the optional idle loads.
         for (const [name, rest] of REST_POSE_ENTRIES) {
           poseBones[name] = vrm.humanoid.getNormalizedBoneNode(name)
-          if (props.restPose !== false) poseBones[name]?.rotation.set(...rest)
+          if (initialProps.restPose !== false) poseBones[name]?.rotation.set(...rest)
         }
         poseBones.rightHand = vrm.humanoid.getNormalizedBoneNode('rightHand')
         // Morph-driven meshes must not be culled against their bind-pose bounds.
         // outlineFactor (per model spec) converts authored world-space MToon
         // outlines to a constant screen-space width.
-        const outlineFactor = props.outlineFactor
+        const outlineFactor = initialProps.outlineFactor
         vrm.scene.traverse(obj => {
           obj.frustumCulled = false
           if (outlineFactor && (obj as THREE.Mesh).isMesh) {
@@ -393,7 +425,7 @@ export default function VRMCanvas(props: Props) {
         })
         // Resolve logical emotion keys to names this model actually registers
         // (spec candidates first, then the cross-exporter defaults).
-        const candidates = expressionCandidates(props)
+        const candidates = expressionCandidates(initialProps)
         resolved = {} as Record<MascotExpressionKey, string>
         for (const key of Object.keys(candidates) as MascotExpressionKey[]) {
           resolved[key] = candidates[key].find(n => loaded.expressionManager?.expressionMap[n]) ?? candidates[key][0]
@@ -406,10 +438,10 @@ export default function VRMCanvas(props: Props) {
         // Optional idle clip: retargeted tracks drive hips/spine/legs only —
         // head, neck, shoulders, arms and hands are filtered out so the gaze
         // servo, rest stance and gestures keep their channels uncontested.
-        if (props.idleUrl) {
+        if (initialProps.idleUrl) {
           const model = vrm
           try {
-            const clip = await retargetAnimationFromUrl(props.idleUrl, model, { logWarnings: false })
+            const clip = await retargetAnimationFromUrl(initialProps.idleUrl, model, { logWarnings: false })
             if (disposed) return
             if (clip) {
               const drop = ['head', 'neck', 'leftShoulder', 'rightShoulder', 'leftUpperArm', 'rightUpperArm', 'leftLowerArm', 'rightLowerArm', 'leftHand', 'rightHand']

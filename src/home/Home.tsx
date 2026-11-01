@@ -391,7 +391,7 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
           nodTrigger={0}
           customAnimationTrigger={null}
           lookTargetOffset={null}
-          enablePointerTracking={!reading}
+          enablePointerTracking
         />
       </div>
     </div>
