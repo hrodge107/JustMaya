@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>Mita × SEKAI Live2D — player prototype (staged)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./player.bundle.css" />
+    <style>
+        body { margin: 0; background: #23233a; }
+        /* SEKAI-style framing: the mascot figure fills the stage height and
+           the canvas keeps its aspect, so the character stands head-to-toe
+           against the dialogue box instead of floating mid-stage. */
+        .vn-stage > .mascot-live2d {
+            align-self: stretch;
+            display: flex;
+            justify-content: center;
+            min-height: 0;
+        }
+        .mascot-live2d canvas {
+            display: block;
+            height: 100%;
+            width: auto;
+        }
+        /* Dialogue overlays the scene bottom like the SEKAI layout — the
+           character's feet tuck behind the paper box rather than stopping
+           above it. */
+        .player .vn-dialogue {
+            margin-top: -72px;
+            position: relative;
+            z-index: 5;
+        }
+        .mascot-live2d[data-error]::after {
+            content: attr(data-error);
+            color: #ffb3b3;
+            font: 12px ui-monospace, monospace;
+            white-space: pre-wrap;
+        }
+    </style>
+    <script src="./vendor/live2dcubismcore.min.js"></script>
+    <script src="./vendor/live2d.min.js"></script>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="module" src="./player.bundle.js"></script>
+</body>
+</html>

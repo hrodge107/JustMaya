@@ -60,3 +60,11 @@ prototype/vrm/anims/
 # Swappable mascot binaries — drop assets in public/mascot/ locally or at deploy
 public/mascot/*.vrm
 public/mascot/*.fbx
+
+# Staged Live2D player (prototype/homepage/player.html): copied SEKAI game
+# assets, vendor scripts, esbuild output, and emitted fonts — regen via
+# sekai-mascot-proto/build.mjs, assets from the local SEKAI-Stories checkout
+prototype/homepage/live2d/
+prototype/homepage/vendor/
+prototype/homepage/player.bundle.*
+prototype/homepage/*.woff2
