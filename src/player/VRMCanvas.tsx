@@ -27,6 +27,8 @@ const REST_POSE: Partial<Record<VRMHumanBoneName, [number, number, number]>> = {
   leftLowerArm: [0, -0.22, 0.1],
   rightLowerArm: [0, 0.22, -0.1],
 }
+// Emotions that hold the eyes closed — minimum blink-expression weight.
+const EYE_CLOSE: Partial<Record<string, number>> = { thinking: 0.95 }
 
 export default function VRMCanvas(props: Props) {
   const host = useRef<HTMLDivElement>(null)
@@ -90,7 +92,7 @@ export default function VRMCanvas(props: Props) {
         sad: mood === 'confused' ? .35 : 0,
         surprised: mood === 'thinking' ? .2 : 0,
         aa: p.isSpeaking ? .12 + .22 * (1 + Math.sin(elapsed * 11)) / 2 : 0,
-        blink: elapsed >= blinkAt && elapsed < blinkAt + .16 ? Math.sin(Math.PI * (elapsed - blinkAt) / .16) : 0,
+        blink: Math.max(EYE_CLOSE[mood] ?? 0, elapsed >= blinkAt && elapsed < blinkAt + .16 ? Math.sin(Math.PI * (elapsed - blinkAt) / .16) : 0),
       }
       if (elapsed > blinkAt + .16) blinkAt = elapsed + 2.5 + Math.random() * 3
       const exp = vrm.expressionManager
@@ -106,12 +108,12 @@ export default function VRMCanvas(props: Props) {
       mixer?.update(dt)
       const head = vrm.humanoid.getNormalizedBoneNode('head')
       if (head) {
-        head.rotation.y = THREE.MathUtils.damp(head.rotation.y, -lookX * .3 + saccadeX, 5, dt)
+        head.rotation.y = THREE.MathUtils.damp(head.rotation.y, lookX * .3 + saccadeX, 5, dt)
         head.rotation.x = THREE.MathUtils.damp(head.rotation.x, lookY * .2 + saccadeY + nod + (mood === 'reading' ? .15 : 0), 5, dt)
       }
       if (vrm.lookAt) {
         vrm.lookAt.yaw = THREE.MathUtils.damp(vrm.lookAt.yaw, lookX * 10 + saccadeX * 35, 6, dt)
-        vrm.lookAt.pitch = THREE.MathUtils.damp(vrm.lookAt.pitch, -lookY * 8 + saccadeY * 35, 6, dt)
+        vrm.lookAt.pitch = THREE.MathUtils.damp(vrm.lookAt.pitch, lookY * 8 + saccadeY * 35, 6, dt)
       }
       vrm.update(dt)
       renderer.render(scene, camera)

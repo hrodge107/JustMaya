@@ -49534,6 +49534,7 @@ void main() {
 	const POSES = {
 		thinking: {
 			pitch: .28,
+			eyes: .95,
 			bones: {
 				rightUpperArm: [
 					.6,
@@ -49686,7 +49687,7 @@ void main() {
 				sad: mood === "confused" ? .35 : 0,
 				surprised: mood === "thinking" ? .2 : 0,
 				aa: props.isSpeaking ? .12 + .22 * (1 + Math.sin(elapsed * 11)) / 2 : 0,
-				blink: !props.reduced && elapsed >= blinkAt && elapsed < blinkAt + .16 ? Math.sin(Math.PI * (elapsed - blinkAt) / .16) : 0
+				blink: Math.max(POSES[mood]?.eyes ?? 0, !props.reduced && elapsed >= blinkAt && elapsed < blinkAt + .16 ? Math.sin(Math.PI * (elapsed - blinkAt) / .16) : 0)
 			};
 			if (elapsed > blinkAt + .16) blinkAt = elapsed + 2.5 + Math.random() * 3;
 			for (const key of Object.keys(weights)) {
@@ -49705,7 +49706,7 @@ void main() {
 			const nod = !props.reduced && nodStart >= 0 && elapsed - nodStart < .45 ? Math.sin((elapsed - nodStart) / .45 * Math.PI) * .2 : 0;
 			const head = vrm.humanoid?.getNormalizedBoneNode("head");
 			if (head) {
-				head.rotation.y = damp(head.rotation.y, -lookX * .3 + saccadeX, speed, dt);
+				head.rotation.y = damp(head.rotation.y, lookX * .3 + saccadeX, speed, dt);
 				head.rotation.x = damp(head.rotation.x, lookY * .2 + saccadeY + nod + (POSES[mood]?.pitch ?? 0), speed, dt);
 			}
 			const pose = POSES[mood]?.bones || {};
@@ -49719,7 +49720,7 @@ void main() {
 			}
 			if (vrm.lookAt) {
 				vrm.lookAt.yaw = damp(vrm.lookAt.yaw, lookX * 10 + saccadeX * 35, 6, dt);
-				vrm.lookAt.pitch = damp(vrm.lookAt.pitch, -lookY * 8 + saccadeY * 35, 6, dt);
+				vrm.lookAt.pitch = damp(vrm.lookAt.pitch, lookY * 8 + saccadeY * 35, 6, dt);
 			}
 			mixer?.update(dt);
 			vrm.update(dt);

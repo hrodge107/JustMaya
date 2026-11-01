@@ -41,6 +41,7 @@ const REST = {
 const POSES = {
   thinking: {
     pitch: 0.28, // look down — chin meets the raised right hand
+    eyes: 0.95, // eyes closed in thought (drives the blink expression)
     bones: {
       rightUpperArm: [0.6, 0.5, -0.95],
       rightLowerArm: [0, 1.75, 0],
@@ -145,9 +146,12 @@ export function mount(container, opts = {}) {
       sad: mood === 'confused' ? 0.35 : 0,
       surprised: mood === 'thinking' ? 0.2 : 0,
       aa: props.isSpeaking ? 0.12 + (0.22 * (1 + Math.sin(elapsed * 11))) / 2 : 0,
-      blink: !props.reduced && elapsed >= blinkAt && elapsed < blinkAt + 0.16
-        ? Math.sin((Math.PI * (elapsed - blinkAt)) / 0.16)
-        : 0,
+      blink: Math.max(
+        POSES[mood]?.eyes ?? 0,
+        !props.reduced && elapsed >= blinkAt && elapsed < blinkAt + 0.16
+          ? Math.sin((Math.PI * (elapsed - blinkAt)) / 0.16)
+          : 0,
+      ),
     }
     if (elapsed > blinkAt + 0.16) blinkAt = elapsed + 2.5 + Math.random() * 3
     for (const key of Object.keys(weights)) {
@@ -170,7 +174,7 @@ export function mount(container, opts = {}) {
       : 0
     const head = vrm.humanoid?.getNormalizedBoneNode('head')
     if (head) {
-      head.rotation.y = damp(head.rotation.y, -lookX * 0.3 + saccadeX, speed, dt)
+      head.rotation.y = damp(head.rotation.y, lookX * 0.3 + saccadeX, speed, dt)
       head.rotation.x = damp(
         head.rotation.x,
         lookY * 0.2 + saccadeY + nod + (POSES[mood]?.pitch ?? 0),
@@ -191,7 +195,7 @@ export function mount(container, opts = {}) {
     }
     if (vrm.lookAt) {
       vrm.lookAt.yaw = damp(vrm.lookAt.yaw, lookX * 10 + saccadeX * 35, 6, dt)
-      vrm.lookAt.pitch = damp(vrm.lookAt.pitch, -lookY * 8 + saccadeY * 35, 6, dt)
+      vrm.lookAt.pitch = damp(vrm.lookAt.pitch, lookY * 8 + saccadeY * 35, 6, dt)
     }
     mixer?.update(dt) // idle clip writes hips/spine/legs; arms+head stay procedural
     vrm.update(dt)
