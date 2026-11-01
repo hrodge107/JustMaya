@@ -2,11 +2,31 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { VRMLoaderPlugin, VRMUtils, type VRM } from '@pixiv/three-vrm'
-import { retargetAnimationFromUrl } from 'vrm-mixamo-retarget'
+import { retargetAnimationFromUrl, type VRMHumanBoneName } from 'vrm-mixamo-retarget'
 import type { MascotStageProps } from './MascotStage'
+import { expressionCandidates, type MascotExpressionKey, type MascotModel } from './mascotModels'
 import { fetchVRM } from './vrmCache'
 
-type Props = MascotStageProps & { modelUrl: string; idleUrl?: string; fallback: ReactNode; onError: () => void }
+type Props = MascotStageProps & {
+  modelUrl: string
+  idleUrl?: string
+  /** Per-model tuning — see MascotModel in mascotModels.ts */
+  expressions?: MascotModel['expressions']
+  outlineFactor?: number
+  restPose?: boolean
+  fallback: ReactNode
+  onError: () => void
+}
+
+// Arms-down rest stance for models without an idle clip — without it a VRM0
+// model renders its bind pose (the T-pose). Z signs are for a post-rotateVRM0
+// normalized rig (adapted from ai-smash's VRMCanvas).
+const REST_POSE: Partial<Record<VRMHumanBoneName, [number, number, number]>> = {
+  leftUpperArm: [0.12, 0.05, 1.25],
+  rightUpperArm: [0.12, -0.05, -1.25],
+  leftLowerArm: [0, -0.22, 0.1],
+  rightLowerArm: [0, 0.22, -0.1],
+}
 
 export default function VRMCanvas(props: Props) {
   const host = useRef<HTMLDivElement>(null)
@@ -31,6 +51,7 @@ export default function VRMCanvas(props: Props) {
     let saccadeAt = 0, saccadeX = 0, saccadeY = 0
     let elapsed = 0, last = 0
     const weights = { happy: 0, relaxed: 0, sad: 0, surprised: 0, aa: 0, blink: 0 }
+    let resolved: Record<MascotExpressionKey, string> | undefined // logical key -> registered expression on this model
     const scene = new THREE.Scene()
     const camera = new THREE.PerspectiveCamera(30, 1, .01, 100)
     camera.position.set(0, 1.3, 3.2)
@@ -75,7 +96,8 @@ export default function VRMCanvas(props: Props) {
       const exp = vrm.expressionManager
       for (const key of Object.keys(weights) as (keyof typeof weights)[]) {
         weights[key] = THREE.MathUtils.damp(weights[key], target[key], key === 'blink' ? 35 : 8, dt)
-        exp?.setValue(key, weights[key])
+        const name = resolved?.[key]
+        if (name) exp?.setValue(name, weights[key])
       }
       if (elapsed > saccadeAt) { saccadeAt = elapsed + 1 + Math.random() * 2; saccadeX = (Math.random() - .5) * .06; saccadeY = (Math.random() - .5) * .04 }
       const lookX = p.lookTargetOffset?.x ?? (p.enablePointerTracking ? pointerX : 0)
@@ -119,10 +141,33 @@ export default function VRMCanvas(props: Props) {
         vrm = loaded
         VRMUtils.rotateVRM0(vrm)
         scene.add(vrm.scene)
+        // Morph-driven meshes must not be culled against their bind-pose bounds.
+        // outlineFactor (per model spec) converts authored world-space MToon
+        // outlines to a constant screen-space width.
+        const outlineFactor = props.outlineFactor
+        vrm.scene.traverse(obj => {
+          obj.frustumCulled = false
+          if (outlineFactor && (obj as THREE.Mesh).isMesh) {
+            const mats = Array.isArray((obj as THREE.Mesh).material) ? (obj as THREE.Mesh).material : [(obj as THREE.Mesh).material]
+            for (const m of mats as { isMToonMaterial?: boolean; outlineWidthFactor?: number; outlineWidthMode?: string; needsUpdate?: boolean }[]) {
+              if (m?.isMToonMaterial && m.outlineWidthFactor && m.outlineWidthMode !== 'none') {
+                m.outlineWidthMode = 'screenCoordinates'; m.outlineWidthFactor = outlineFactor; m.needsUpdate = true
+              }
+            }
+          }
+        })
+        // Resolve logical emotion keys to names this model actually registers
+        // (spec candidates first, then the cross-exporter defaults).
+        const candidates = expressionCandidates(props)
+        resolved = {} as Record<MascotExpressionKey, string>
+        for (const key of Object.keys(candidates) as MascotExpressionKey[]) {
+          resolved[key] = candidates[key].find(n => loaded.expressionManager?.expressionMap[n]) ?? candidates[key][0]
+        }
         if (vrm.lookAt) vrm.lookAt.autoUpdate = false
         mixer = new THREE.AnimationMixer(vrm.scene)
         setReady(true)
         if (!document.hidden) frame = requestAnimationFrame(tick)
+        let idleStarted = false
         if (props.idleUrl) {
           try {
             const clip = await retargetAnimationFromUrl(props.idleUrl, vrm, { logWarnings: false })
@@ -135,9 +180,16 @@ export default function VRMCanvas(props: Props) {
                 const x = track.values[0], z = track.values[2]
                 for (let i = 0; i < track.values.length; i += 3) { track.values[i] = (track.values[i] - x) * .25; track.values[i + 2] = (track.values[i + 2] - z) * .25 }
               }
-              if (clip.tracks.length) { mixer.clipAction(clip).play(); setIdlePlaying(true) }
+              if (clip.tracks.length) { mixer.clipAction(clip).play(); idleStarted = true; setIdlePlaying(true) }
             }
           } catch { /* optional idle animation */ }
+        }
+        // No clip (or clip failed to load) — apply the rest stance so the model
+        // doesn't render in bind pose. An active clip drives these bones itself.
+        if (!idleStarted && props.restPose !== false) {
+          for (const [name, [x, y, z]] of Object.entries(REST_POSE)) {
+            vrm.humanoid.getNormalizedBoneNode(name as VRMHumanBoneName)?.rotation.set(x, y, z)
+          }
         }
       } catch { if (!disposed) current.current.onError() }
     }

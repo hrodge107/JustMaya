@@ -2,6 +2,7 @@ import { Component, lazy, Suspense, useState, type ReactNode } from 'react'
 import { useReducedMotion } from '../motionPreference'
 import MascotPlaceholder from './MascotPlaceholder'
 import type { MascotStageProps } from './MascotPlaceholder'
+import { resolveMascotModel } from './mascotModels'
 
 class RenderBoundary extends Component<{ fallback: ReactNode; children: ReactNode }, { failed: boolean }> {
   state = { failed: false }
@@ -11,15 +12,14 @@ class RenderBoundary extends Component<{ fallback: ReactNode; children: ReactNod
 
 export type { MascotStageProps } from './MascotPlaceholder'
 const VRMCanvas = lazy(() => import('./VRMCanvas'))
-const modelUrl = import.meta.env.VITE_MASCOT_VRM_URL?.trim()
-const idleUrl = import.meta.env.VITE_MASCOT_IDLE_URL?.trim()
+const model = resolveMascotModel()
 
 export default function MascotStage(props: MascotStageProps) {
   const reduce = useReducedMotion()
   const [failed, setFailed] = useState(false)
   const fallback = <MascotPlaceholder {...props} />
-  if (!modelUrl || reduce || failed) return fallback
+  if (!model || reduce || failed) return fallback
   return <RenderBoundary fallback={fallback}><Suspense fallback={fallback}>
-    <VRMCanvas {...props} modelUrl={modelUrl} idleUrl={idleUrl} fallback={fallback} onError={() => setFailed(true)} />
+    <VRMCanvas {...props} modelUrl={model.url} idleUrl={model.idleUrl} expressions={model.expressions} outlineFactor={model.outlineFactor} restPose={model.restPose} fallback={fallback} onError={() => setFailed(true)} />
   </Suspense></RenderBoundary>
 }

@@ -56,3 +56,7 @@ prototype/*.vrm
 prototype/vrm/model.js
 prototype/vrm/anim-*.js
 prototype/vrm/anims/
+
+# Swappable mascot binaries — drop assets in public/mascot/ locally or at deploy
+public/mascot/*.vrm
+public/mascot/*.fbx
