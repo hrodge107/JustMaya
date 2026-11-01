@@ -197,7 +197,7 @@ async function run() {
     await page.setInputFiles('#filePick', { name: 'fixture-chapter.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4 fixture') })
     await page.locator('#uploadDlg[open]').waitFor({ state: 'detached' })
     await page.locator('.upload-chip').waitFor()
-    await page.locator('.mascot[data-emotion="reading"]').waitFor()
+    await page.locator('.mascot[data-emotion="reading"]:visible').waitFor()
     assert.match(await page.locator('.upload-chip .up-name').innerText(), /fixture-chapter\.pdf/)
     assert.equal(await page.getByRole('button', { name: 'Talk', exact: true }).getAttribute('aria-disabled'), 'true')
     await page.locator('.up-fill').waitFor()
@@ -315,7 +315,7 @@ async function run() {
     await pageMock.locator('#sampleBtn').click()
     await pageMock.locator('#uploadDlg[open]').waitFor({ state: 'detached' })
     await pageMock.locator('.upload-chip').waitFor()
-    await pageMock.locator('.mascot[data-emotion="reading"]').waitFor()
+    await pageMock.locator('.mascot[data-emotion="reading"]:visible').waitFor()
     await pageMock.waitForFunction(() => {
       const el = document.querySelector('.up-fill')
       return el && parseFloat(el.style.width) >= 100
@@ -338,7 +338,7 @@ async function run() {
   await pageResume.goto(`${base}/?job=job-2`)
   await track('reload with ?job= resumes the read narration', async () => {
     await pageResume.locator('.upload-chip').waitFor()
-    await pageResume.locator('.mascot[data-emotion="reading"]').waitFor()
+    await pageResume.locator('.mascot[data-emotion="reading"]:visible').waitFor()
     await pageResume.waitForFunction(() => {
       const el = document.querySelector('.up-fill')
       return el && parseFloat(el.style.width) >= 100

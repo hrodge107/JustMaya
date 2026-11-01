@@ -380,6 +380,11 @@ button.bl-hit:hover .bl-jump, button.bl-hit:focus-visible .bl-jump { opacity: 1;
   .vn-picture-gallery { max-height: 58dvh; }
 }
 
-.vrm-viewport { width: clamp(180px, 24vw, 320px); height: clamp(240px, 34vw, 420px); }
+/* The VRM stage is a transparent full-viewport layer: the avatar composes
+   over the scene and tucks behind the dialogue/chrome (DOM order), matching
+   the reference upper-body framing. It takes no space and never intercepts
+   input — taps fall through to the controls underneath. */
+.vrm-mascot { position: fixed; inset: 0; margin: 0; pointer-events: none; }
+.vrm-viewport { position: absolute; inset: 0; }
 .vrm-viewport canvas { display: block; width: 100%; height: 100%; }
 .vrm-mascot[hidden] { display: none; }
