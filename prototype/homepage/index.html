@@ -505,6 +505,7 @@ dialog[open] { animation: dlg-in .18s var(--ease); }
 .lab h2 { margin: 0; font-size: 1.05rem; font-weight: 900; color: var(--ink); }
 .lab .lab-sub { margin: 2px 0 0; font-size: .74rem; font-weight: 700; opacity: .7; overflow-wrap: anywhere; }
 .lab .lab-err { margin: 8px 0 0; font-size: .78rem; font-weight: 800; color: #b3202e; }
+.lab .lab-hint { margin: 7px 0 0; font-size: .72rem; font-weight: 600; opacity: .55; }
 .lab-sec { display: block; margin: 14px 0 7px; font-size: .72rem; font-weight: 900; letter-spacing: .05em; text-transform: uppercase; opacity: .65; }
 .lab-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .lab button { min-height: 36px; }
@@ -788,6 +789,7 @@ dialog[open] { animation: dlg-in .18s var(--ease); }
       <button type="button" id="labClear">Clear pins</button>
       <input type="file" id="labFile" accept=".vrm" hidden>
     </div>
+    <p class="lab-hint">Scroll on the model to zoom · drag to reposition</p>
     <details id="labExprBox">
       <summary class="lab-sec">Expressions</summary>
       <div class="lab-expr" id="labExpr"></div>

@@ -98,8 +98,12 @@ export function mount(container, opts = {}) {
 
   const scene = new THREE.Scene()
   const camera = new THREE.PerspectiveCamera(30, 1, 0.01, 100)
-  camera.position.set(0, 1.32, 2.35) // chest-up: the face is what carries states
-  camera.lookAt(0, 1.28, 0)
+  let camDist = 2.35, panX = 0, panY = 0 // wheel zoom + drag pan (lab viewport)
+  const applyView = () => {
+    camera.position.set(panX, 1.32 + panY, camDist)
+    camera.lookAt(panX, 1.28 + panY, 0)
+  }
+  applyView() // chest-up base framing: the face is what carries states
   scene.add(new THREE.HemisphereLight(0xffffff, 0x8596a9, 0.7))
   const addLight = (color, intensity, x, y, z) => {
     const light = new THREE.DirectionalLight(color, intensity)
@@ -127,6 +131,22 @@ export function mount(container, opts = {}) {
     event.preventDefault()
     if (!disposed) ctl.error(new Error('WebGL context lost'))
   }
+  // Viewport interaction: wheel zooms, drag repositions the subject in frame.
+  const wheel = (event) => {
+    event.preventDefault()
+    camDist = clamp(camDist + event.deltaY * 0.0022, 0.7, 6)
+    applyView()
+  }
+  let dragging = false, dragX = 0, dragY = 0
+  const dragDown = (event) => { dragging = true; dragX = event.clientX; dragY = event.clientY }
+  const dragMove = (event) => {
+    if (!dragging) return
+    panX = clamp(panX - (event.clientX - dragX) * 0.0016, -1.2, 1.2)
+    panY = clamp(panY + (event.clientY - dragY) * 0.0016, -0.8, 0.9)
+    dragX = event.clientX; dragY = event.clientY
+    applyView()
+  }
+  const dragUp = () => { dragging = false }
 
   const setWeight = (key, w) => {
     const name = resolved[key]
@@ -242,6 +262,9 @@ export function mount(container, opts = {}) {
     disposed = true
     cancelAnimationFrame(frame)
     window.removeEventListener('pointermove', pointer)
+    window.removeEventListener('pointermove', dragMove)
+    window.removeEventListener('pointerup', dragUp)
+    window.removeEventListener('pointercancel', dragUp)
     document.removeEventListener('visibilitychange', visibility)
     observer?.disconnect()
     mixer?.stopAllAction()
@@ -264,6 +287,11 @@ export function mount(container, opts = {}) {
       resize()
       window.addEventListener('pointermove', pointer, { passive: true })
       document.addEventListener('visibilitychange', visibility)
+      renderer.domElement.addEventListener('wheel', wheel, { passive: false })
+      renderer.domElement.addEventListener('pointerdown', dragDown)
+      window.addEventListener('pointermove', dragMove, { passive: true })
+      window.addEventListener('pointerup', dragUp)
+      window.addEventListener('pointercancel', dragUp)
       const buffer = await opts.getBuffer()
       if (disposed) return
       const loader = new GLTFLoader()
