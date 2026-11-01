@@ -797,6 +797,7 @@ dialog[open] { animation: dlg-in .18s var(--ease); }
 </div>
 
 <script src="../vrm/model.js"></script>
+<script src="../vrm/anim-idle.js"></script>
 <script src="../vrm/stage.js"></script>
 
 <script>
@@ -1438,6 +1439,12 @@ async function modelBuffer(file) {
   if (window.MITA_VRM_B64) return b64buf(window.MITA_VRM_B64);
   throw new Error('no model source (run pack-model.cjs)');
 }
+async function animBuffer() {
+  if (location.protocol !== 'file:') {
+    try { const r = await fetch('../vrm/anims/mixamo_idle.fbx'); if (r.ok) return await r.arrayBuffer(); } catch { /* fall through */ }
+  }
+  return window.MITA_ANIM_IDLE_B64 ? b64buf(window.MITA_ANIM_IDLE_B64) : null;
+}
 
 function syncLab() {
   labEmo.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.e === maya.dataset.state));
@@ -1492,11 +1499,13 @@ async function bootVRM(file) {
     const buffer = await modelBuffer(file);
     vrm = MitaVRM.mount(vrmHost, {
       getBuffer: () => buffer,
+      getAnimBuffer: animBuffer,
       props: vrmProps(),
       onReady(info) {
         maya.classList.add('vrm-on');
         vrmHost.hidden = false;
-        labSub.textContent = modelName + ' · VRM ' + info.spec + ' · ' + info.expressions.length + ' expressions';
+        labSub.textContent = modelName + ' · VRM ' + info.spec + ' · ' + info.expressions.length + ' expressions'
+          + (vrm?.idlePlaying ? ' · Mixamo idle' : '');
         labErr.hidden = true;
         buildExprSliders(info.expressions);
         vrm?.setProps(vrmProps());

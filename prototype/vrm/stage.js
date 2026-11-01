@@ -502,6 +502,22 @@ var MitaVRM = (function(exports) {
 	*/
 	const SIGNED_RED_GREEN_RGTC2_Format = 36286;
 	/**
+	* Animations are played with a chosen number of repetitions, each time jumping from
+	* the end of the clip directly to its beginning.
+	*
+	* @type {number}
+	* @constant
+	*/
+	const LoopRepeat = 2201;
+	/**
+	* Animations are played with a chosen number of repetitions, alternately playing forward
+	* and backward.
+	*
+	* @type {number}
+	* @constant
+	*/
+	const LoopPingPong = 2202;
+	/**
 	* Discrete interpolation mode for keyframe tracks.
 	*
 	* @type {number}
@@ -560,6 +576,14 @@ var MitaVRM = (function(exports) {
 	* @constant
 	*/
 	const NormalAnimationBlendMode = 2500;
+	/**
+	* Additive animation blend mode. Can be used to layer motions on top of
+	* each other to build complex performances from smaller re-usable assets.
+	*
+	* @type {number}
+	* @constant
+	*/
+	const AdditiveAnimationBlendMode = 2501;
 	/**
 	* The depth value is inverted (1.0 - z) for visualization purposes.
 	*
@@ -17863,6 +17887,791 @@ var MitaVRM = (function(exports) {
 		}
 	};
 	/**
+	* An abstract base class for creating an analytic curve object that contains methods
+	* for interpolation.
+	*
+	* @abstract
+	*/
+	var Curve = class {
+		/**
+		* Constructs a new curve.
+		*/
+		constructor() {
+			/**
+			* The type property is used for detecting the object type
+			* in context of serialization/deserialization.
+			*
+			* @type {string}
+			* @readonly
+			*/
+			this.type = "Curve";
+			/**
+			* This value determines the amount of divisions when calculating the
+			* cumulative segment lengths of a curve via {@link Curve#getLengths}. To ensure
+			* precision when using methods like {@link Curve#getSpacedPoints}, it is
+			* recommended to increase the value of this property if the curve is very large.
+			*
+			* @type {number}
+			* @default 200
+			*/
+			this.arcLengthDivisions = 200;
+			/**
+			* Must be set to `true` if the curve parameters have changed.
+			*
+			* @type {boolean}
+			* @default false
+			*/
+			this.needsUpdate = false;
+			/**
+			* An internal cache that holds precomputed curve length values.
+			*
+			* @private
+			* @type {?Array<number>}
+			* @default null
+			*/
+			this.cacheArcLengths = null;
+		}
+		/**
+		* This method returns a vector in 2D or 3D space (depending on the curve definition)
+		* for the given interpolation factor.
+		*
+		* @abstract
+		* @param {number} t - A interpolation factor representing a position on the curve. Must be in the range `[0,1]`.
+		* @param {(Vector2|Vector3)} [optionalTarget] - The optional target vector the result is written to.
+		* @return {(Vector2|Vector3)} The position on the curve. It can be a 2D or 3D vector depending on the curve definition.
+		*/
+		getPoint() {
+			warn("Curve: .getPoint() not implemented.");
+		}
+		/**
+		* This method returns a vector in 2D or 3D space (depending on the curve definition)
+		* for the given interpolation factor. Unlike {@link Curve#getPoint}, this method honors the length
+		* of the curve which equidistant samples.
+		*
+		* @param {number} u - A interpolation factor representing a position on the curve. Must be in the range `[0,1]`.
+		* @param {(Vector2|Vector3)} [optionalTarget] - The optional target vector the result is written to.
+		* @return {(Vector2|Vector3)} The position on the curve. It can be a 2D or 3D vector depending on the curve definition.
+		*/
+		getPointAt(u, optionalTarget) {
+			const t = this.getUtoTmapping(u);
+			return this.getPoint(t, optionalTarget);
+		}
+		/**
+		* This method samples the curve via {@link Curve#getPoint} and returns an array of points representing
+		* the curve shape.
+		*
+		* @param {number} [divisions=5] - The number of divisions.
+		* @return {Array<(Vector2|Vector3)>} An array holding the sampled curve values. The number of points is `divisions + 1`.
+		*/
+		getPoints(divisions = 5) {
+			const points = [];
+			for (let d = 0; d <= divisions; d++) points.push(this.getPoint(d / divisions));
+			return points;
+		}
+		/**
+		* This method samples the curve via {@link Curve#getPointAt} and returns an array of points representing
+		* the curve shape. Unlike {@link Curve#getPoints}, this method returns equi-spaced points across the entire
+		* curve.
+		*
+		* @param {number} [divisions=5] - The number of divisions.
+		* @return {Array<(Vector2|Vector3)>} An array holding the sampled curve values. The number of points is `divisions + 1`.
+		*/
+		getSpacedPoints(divisions = 5) {
+			const points = [];
+			for (let d = 0; d <= divisions; d++) points.push(this.getPointAt(d / divisions));
+			return points;
+		}
+		/**
+		* Returns the total arc length of the curve.
+		*
+		* @return {number} The length of the curve.
+		*/
+		getLength() {
+			const lengths = this.getLengths();
+			return lengths[lengths.length - 1];
+		}
+		/**
+		* Returns an array of cumulative segment lengths of the curve.
+		*
+		* @param {number} [divisions=this.arcLengthDivisions] - The number of divisions.
+		* @return {Array<number>} An array holding the cumulative segment lengths.
+		*/
+		getLengths(divisions = this.arcLengthDivisions) {
+			if (this.cacheArcLengths && this.cacheArcLengths.length === divisions + 1 && !this.needsUpdate) return this.cacheArcLengths;
+			this.needsUpdate = false;
+			const cache = [];
+			let current, last = this.getPoint(0);
+			let sum = 0;
+			cache.push(0);
+			for (let p = 1; p <= divisions; p++) {
+				current = this.getPoint(p / divisions);
+				sum += current.distanceTo(last);
+				cache.push(sum);
+				last = current;
+			}
+			this.cacheArcLengths = cache;
+			return cache;
+		}
+		/**
+		* Update the cumulative segment distance cache. The method must be called
+		* every time curve parameters are changed. If an updated curve is part of a
+		* composed curve like {@link CurvePath}, this method must be called on the
+		* composed curve, too.
+		*/
+		updateArcLengths() {
+			this.needsUpdate = true;
+			this.getLengths();
+		}
+		/**
+		* Given an interpolation factor in the range `[0,1]`, this method returns an updated
+		* interpolation factor in the same range that can be ued to sample equidistant points
+		* from a curve.
+		*
+		* @param {number} u - The interpolation factor.
+		* @param {?number} distance - An optional distance on the curve.
+		* @return {number} The updated interpolation factor.
+		*/
+		getUtoTmapping(u, distance = null) {
+			const arcLengths = this.getLengths();
+			let i = 0;
+			const il = arcLengths.length;
+			let targetArcLength;
+			if (distance) targetArcLength = distance;
+			else targetArcLength = u * arcLengths[il - 1];
+			let low = 0, high = il - 1, comparison;
+			while (low <= high) {
+				i = Math.floor(low + (high - low) / 2);
+				comparison = arcLengths[i] - targetArcLength;
+				if (comparison < 0) low = i + 1;
+				else if (comparison > 0) high = i - 1;
+				else {
+					high = i;
+					break;
+				}
+			}
+			i = high;
+			if (arcLengths[i] === targetArcLength) return i / (il - 1);
+			const lengthBefore = arcLengths[i];
+			const segmentLength = arcLengths[i + 1] - lengthBefore;
+			const segmentFraction = (targetArcLength - lengthBefore) / segmentLength;
+			return (i + segmentFraction) / (il - 1);
+		}
+		/**
+		* Returns a unit vector tangent for the given interpolation factor.
+		* If the derived curve does not implement its tangent derivation,
+		* two points a small delta apart will be used to find its gradient
+		* which seems to give a reasonable approximation.
+		*
+		* @param {number} t - The interpolation factor.
+		* @param {(Vector2|Vector3)} [optionalTarget] - The optional target vector the result is written to.
+		* @return {(Vector2|Vector3)} The tangent vector.
+		*/
+		getTangent(t, optionalTarget) {
+			const delta = 1e-4;
+			let t1 = t - delta;
+			let t2 = t + delta;
+			if (t1 < 0) t1 = 0;
+			if (t2 > 1) t2 = 1;
+			const pt1 = this.getPoint(t1);
+			const pt2 = this.getPoint(t2);
+			const tangent = optionalTarget || (pt1.isVector2 ? new Vector2() : new Vector3());
+			tangent.copy(pt2).sub(pt1).normalize();
+			return tangent;
+		}
+		/**
+		* Same as {@link Curve#getTangent} but with equidistant samples.
+		*
+		* @param {number} u - The interpolation factor.
+		* @param {(Vector2|Vector3)} [optionalTarget] - The optional target vector the result is written to.
+		* @return {(Vector2|Vector3)} The tangent vector.
+		* @see {@link Curve#getPointAt}
+		*/
+		getTangentAt(u, optionalTarget) {
+			const t = this.getUtoTmapping(u);
+			return this.getTangent(t, optionalTarget);
+		}
+		/**
+		* Generates the Frenet Frames. Requires a curve definition in 3D space. Used
+		* in geometries like {@link TubeGeometry} or {@link ExtrudeGeometry}.
+		*
+		* @param {number} segments - The number of segments.
+		* @param {boolean} [closed=false] - Whether the curve is closed or not.
+		* @return {{tangents: Array<Vector3>, normals: Array<Vector3>, binormals: Array<Vector3>}} The Frenet Frames.
+		*/
+		computeFrenetFrames(segments, closed = false) {
+			const normal = new Vector3();
+			const tangents = [];
+			const normals = [];
+			const binormals = [];
+			const vec = new Vector3();
+			const mat = new Matrix4();
+			for (let i = 0; i <= segments; i++) {
+				const u = i / segments;
+				tangents[i] = this.getTangentAt(u, new Vector3());
+			}
+			normals[0] = new Vector3();
+			binormals[0] = new Vector3();
+			let min = Number.MAX_VALUE;
+			const tx = Math.abs(tangents[0].x);
+			const ty = Math.abs(tangents[0].y);
+			const tz = Math.abs(tangents[0].z);
+			if (tx <= min) {
+				min = tx;
+				normal.set(1, 0, 0);
+			}
+			if (ty <= min) {
+				min = ty;
+				normal.set(0, 1, 0);
+			}
+			if (tz <= min) normal.set(0, 0, 1);
+			vec.crossVectors(tangents[0], normal).normalize();
+			normals[0].crossVectors(tangents[0], vec);
+			binormals[0].crossVectors(tangents[0], normals[0]);
+			for (let i = 1; i <= segments; i++) {
+				normals[i] = normals[i - 1].clone();
+				binormals[i] = binormals[i - 1].clone();
+				vec.crossVectors(tangents[i - 1], tangents[i]);
+				if (vec.length() > Number.EPSILON) {
+					vec.normalize();
+					const theta = Math.acos(clamp$1(tangents[i - 1].dot(tangents[i]), -1, 1));
+					normals[i].applyMatrix4(mat.makeRotationAxis(vec, theta));
+				}
+				binormals[i].crossVectors(tangents[i], normals[i]);
+			}
+			if (closed === true) {
+				let theta = Math.acos(clamp$1(normals[0].dot(normals[segments]), -1, 1));
+				theta /= segments;
+				if (tangents[0].dot(vec.crossVectors(normals[0], normals[segments])) > 0) theta = -theta;
+				for (let i = 1; i <= segments; i++) {
+					normals[i].applyMatrix4(mat.makeRotationAxis(tangents[i], theta * i));
+					binormals[i].crossVectors(tangents[i], normals[i]);
+				}
+			}
+			return {
+				tangents,
+				normals,
+				binormals
+			};
+		}
+		/**
+		* Returns a new curve with copied values from this instance.
+		*
+		* @return {Curve} A clone of this instance.
+		*/
+		clone() {
+			return new this.constructor().copy(this);
+		}
+		/**
+		* Copies the values of the given curve to this instance.
+		*
+		* @param {Curve} source - The curve to copy.
+		* @return {Curve} A reference to this curve.
+		*/
+		copy(source) {
+			this.arcLengthDivisions = source.arcLengthDivisions;
+			return this;
+		}
+		/**
+		* Serializes the curve into JSON.
+		*
+		* @return {Object} A JSON object representing the serialized curve.
+		* @see {@link ObjectLoader#parse}
+		*/
+		toJSON() {
+			const data = { metadata: {
+				version: 4.7,
+				type: "Curve",
+				generator: "Curve.toJSON"
+			} };
+			data.arcLengthDivisions = this.arcLengthDivisions;
+			data.type = this.type;
+			return data;
+		}
+		/**
+		* Deserializes the curve from the given JSON.
+		*
+		* @param {Object} json - The JSON holding the serialized curve.
+		* @return {Curve} A reference to this curve.
+		*/
+		fromJSON(json) {
+			this.arcLengthDivisions = json.arcLengthDivisions;
+			return this;
+		}
+	};
+	function earcut(data, holeIndices, dim = 2) {
+		const hasHoles = holeIndices && holeIndices.length;
+		const outerLen = hasHoles ? holeIndices[0] * dim : data.length;
+		let outerNode = linkedList(data, 0, outerLen, dim, true);
+		const triangles = [];
+		if (!outerNode || outerNode.next === outerNode.prev) return triangles;
+		let minX, minY, invSize;
+		if (hasHoles) outerNode = eliminateHoles(data, holeIndices, outerNode, dim);
+		if (data.length > 80 * dim) {
+			minX = data[0];
+			minY = data[1];
+			let maxX = minX;
+			let maxY = minY;
+			for (let i = dim; i < outerLen; i += dim) {
+				const x = data[i];
+				const y = data[i + 1];
+				if (x < minX) minX = x;
+				if (y < minY) minY = y;
+				if (x > maxX) maxX = x;
+				if (y > maxY) maxY = y;
+			}
+			invSize = Math.max(maxX - minX, maxY - minY);
+			invSize = invSize !== 0 ? 32767 / invSize : 0;
+		}
+		earcutLinked(outerNode, triangles, dim, minX, minY, invSize, 0);
+		return triangles;
+	}
+	function linkedList(data, start, end, dim, clockwise) {
+		let last;
+		if (clockwise === signedArea(data, start, end, dim) > 0) for (let i = start; i < end; i += dim) last = insertNode(i / dim | 0, data[i], data[i + 1], last);
+		else for (let i = end - dim; i >= start; i -= dim) last = insertNode(i / dim | 0, data[i], data[i + 1], last);
+		if (last && equals(last, last.next)) {
+			removeNode(last);
+			last = last.next;
+		}
+		return last;
+	}
+	function filterPoints(start, end) {
+		if (!start) return start;
+		if (!end) end = start;
+		let p = start, again;
+		do {
+			again = false;
+			if (!p.steiner && (equals(p, p.next) || area(p.prev, p, p.next) === 0)) {
+				removeNode(p);
+				p = end = p.prev;
+				if (p === p.next) break;
+				again = true;
+			} else p = p.next;
+		} while (again || p !== end);
+		return end;
+	}
+	function earcutLinked(ear, triangles, dim, minX, minY, invSize, pass) {
+		if (!ear) return;
+		if (!pass && invSize) indexCurve(ear, minX, minY, invSize);
+		let stop = ear;
+		while (ear.prev !== ear.next) {
+			const prev = ear.prev;
+			const next = ear.next;
+			if (invSize ? isEarHashed(ear, minX, minY, invSize) : isEar(ear)) {
+				triangles.push(prev.i, ear.i, next.i);
+				removeNode(ear);
+				ear = next.next;
+				stop = next.next;
+				continue;
+			}
+			ear = next;
+			if (ear === stop) {
+				if (!pass) earcutLinked(filterPoints(ear), triangles, dim, minX, minY, invSize, 1);
+				else if (pass === 1) {
+					ear = cureLocalIntersections(filterPoints(ear), triangles);
+					earcutLinked(ear, triangles, dim, minX, minY, invSize, 2);
+				} else if (pass === 2) splitEarcut(ear, triangles, dim, minX, minY, invSize);
+				break;
+			}
+		}
+	}
+	function isEar(ear) {
+		const a = ear.prev, b = ear, c = ear.next;
+		if (area(a, b, c) >= 0) return false;
+		const ax = a.x, bx = b.x, cx = c.x, ay = a.y, by = b.y, cy = c.y;
+		const x0 = Math.min(ax, bx, cx), y0 = Math.min(ay, by, cy), x1 = Math.max(ax, bx, cx), y1 = Math.max(ay, by, cy);
+		let p = c.next;
+		while (p !== a) {
+			if (p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1 && pointInTriangleExceptFirst(ax, ay, bx, by, cx, cy, p.x, p.y) && area(p.prev, p, p.next) >= 0) return false;
+			p = p.next;
+		}
+		return true;
+	}
+	function isEarHashed(ear, minX, minY, invSize) {
+		const a = ear.prev, b = ear, c = ear.next;
+		if (area(a, b, c) >= 0) return false;
+		const ax = a.x, bx = b.x, cx = c.x, ay = a.y, by = b.y, cy = c.y;
+		const x0 = Math.min(ax, bx, cx), y0 = Math.min(ay, by, cy), x1 = Math.max(ax, bx, cx), y1 = Math.max(ay, by, cy);
+		const minZ = zOrder(x0, y0, minX, minY, invSize), maxZ = zOrder(x1, y1, minX, minY, invSize);
+		let p = ear.prevZ, n = ear.nextZ;
+		while (p && p.z >= minZ && n && n.z <= maxZ) {
+			if (p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1 && p !== a && p !== c && pointInTriangleExceptFirst(ax, ay, bx, by, cx, cy, p.x, p.y) && area(p.prev, p, p.next) >= 0) return false;
+			p = p.prevZ;
+			if (n.x >= x0 && n.x <= x1 && n.y >= y0 && n.y <= y1 && n !== a && n !== c && pointInTriangleExceptFirst(ax, ay, bx, by, cx, cy, n.x, n.y) && area(n.prev, n, n.next) >= 0) return false;
+			n = n.nextZ;
+		}
+		while (p && p.z >= minZ) {
+			if (p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1 && p !== a && p !== c && pointInTriangleExceptFirst(ax, ay, bx, by, cx, cy, p.x, p.y) && area(p.prev, p, p.next) >= 0) return false;
+			p = p.prevZ;
+		}
+		while (n && n.z <= maxZ) {
+			if (n.x >= x0 && n.x <= x1 && n.y >= y0 && n.y <= y1 && n !== a && n !== c && pointInTriangleExceptFirst(ax, ay, bx, by, cx, cy, n.x, n.y) && area(n.prev, n, n.next) >= 0) return false;
+			n = n.nextZ;
+		}
+		return true;
+	}
+	function cureLocalIntersections(start, triangles) {
+		let p = start;
+		do {
+			const a = p.prev, b = p.next.next;
+			if (!equals(a, b) && intersects(a, p, p.next, b) && locallyInside(a, b) && locallyInside(b, a)) {
+				triangles.push(a.i, p.i, b.i);
+				removeNode(p);
+				removeNode(p.next);
+				p = start = b;
+			}
+			p = p.next;
+		} while (p !== start);
+		return filterPoints(p);
+	}
+	function splitEarcut(start, triangles, dim, minX, minY, invSize) {
+		let a = start;
+		do {
+			let b = a.next.next;
+			while (b !== a.prev) {
+				if (a.i !== b.i && isValidDiagonal(a, b)) {
+					let c = splitPolygon(a, b);
+					a = filterPoints(a, a.next);
+					c = filterPoints(c, c.next);
+					earcutLinked(a, triangles, dim, minX, minY, invSize, 0);
+					earcutLinked(c, triangles, dim, minX, minY, invSize, 0);
+					return;
+				}
+				b = b.next;
+			}
+			a = a.next;
+		} while (a !== start);
+	}
+	function eliminateHoles(data, holeIndices, outerNode, dim) {
+		const queue = [];
+		for (let i = 0, len = holeIndices.length; i < len; i++) {
+			const list = linkedList(data, holeIndices[i] * dim, i < len - 1 ? holeIndices[i + 1] * dim : data.length, dim, false);
+			if (list === list.next) list.steiner = true;
+			queue.push(getLeftmost(list));
+		}
+		queue.sort(compareXYSlope);
+		for (let i = 0; i < queue.length; i++) outerNode = eliminateHole(queue[i], outerNode);
+		return outerNode;
+	}
+	function compareXYSlope(a, b) {
+		let result = a.x - b.x;
+		if (result === 0) {
+			result = a.y - b.y;
+			if (result === 0) result = (a.next.y - a.y) / (a.next.x - a.x) - (b.next.y - b.y) / (b.next.x - b.x);
+		}
+		return result;
+	}
+	function eliminateHole(hole, outerNode) {
+		const bridge = findHoleBridge(hole, outerNode);
+		if (!bridge) return outerNode;
+		const bridgeReverse = splitPolygon(bridge, hole);
+		filterPoints(bridgeReverse, bridgeReverse.next);
+		return filterPoints(bridge, bridge.next);
+	}
+	function findHoleBridge(hole, outerNode) {
+		let p = outerNode;
+		const hx = hole.x;
+		const hy = hole.y;
+		let qx = -Infinity;
+		let m;
+		if (equals(hole, p)) return p;
+		do {
+			if (equals(hole, p.next)) return p.next;
+			else if (hy <= p.y && hy >= p.next.y && p.next.y !== p.y) {
+				const x = p.x + (hy - p.y) * (p.next.x - p.x) / (p.next.y - p.y);
+				if (x <= hx && x > qx) {
+					qx = x;
+					m = p.x < p.next.x ? p : p.next;
+					if (x === hx) return m;
+				}
+			}
+			p = p.next;
+		} while (p !== outerNode);
+		if (!m) return null;
+		const stop = m;
+		const mx = m.x;
+		const my = m.y;
+		let tanMin = Infinity;
+		p = m;
+		do {
+			if (hx >= p.x && p.x >= mx && hx !== p.x && pointInTriangle(hy < my ? hx : qx, hy, mx, my, hy < my ? qx : hx, hy, p.x, p.y)) {
+				const tan = Math.abs(hy - p.y) / (hx - p.x);
+				if (locallyInside(p, hole) && (tan < tanMin || tan === tanMin && (p.x > m.x || p.x === m.x && sectorContainsSector(m, p)))) {
+					m = p;
+					tanMin = tan;
+				}
+			}
+			p = p.next;
+		} while (p !== stop);
+		return m;
+	}
+	function sectorContainsSector(m, p) {
+		return area(m.prev, m, p.prev) < 0 && area(p.next, m, m.next) < 0;
+	}
+	function indexCurve(start, minX, minY, invSize) {
+		let p = start;
+		do {
+			if (p.z === 0) p.z = zOrder(p.x, p.y, minX, minY, invSize);
+			p.prevZ = p.prev;
+			p.nextZ = p.next;
+			p = p.next;
+		} while (p !== start);
+		p.prevZ.nextZ = null;
+		p.prevZ = null;
+		sortLinked(p);
+	}
+	function sortLinked(list) {
+		let numMerges;
+		let inSize = 1;
+		do {
+			let p = list;
+			let e;
+			list = null;
+			let tail = null;
+			numMerges = 0;
+			while (p) {
+				numMerges++;
+				let q = p;
+				let pSize = 0;
+				for (let i = 0; i < inSize; i++) {
+					pSize++;
+					q = q.nextZ;
+					if (!q) break;
+				}
+				let qSize = inSize;
+				while (pSize > 0 || qSize > 0 && q) {
+					if (pSize !== 0 && (qSize === 0 || !q || p.z <= q.z)) {
+						e = p;
+						p = p.nextZ;
+						pSize--;
+					} else {
+						e = q;
+						q = q.nextZ;
+						qSize--;
+					}
+					if (tail) tail.nextZ = e;
+					else list = e;
+					e.prevZ = tail;
+					tail = e;
+				}
+				p = q;
+			}
+			tail.nextZ = null;
+			inSize *= 2;
+		} while (numMerges > 1);
+		return list;
+	}
+	function zOrder(x, y, minX, minY, invSize) {
+		x = (x - minX) * invSize | 0;
+		y = (y - minY) * invSize | 0;
+		x = (x | x << 8) & 16711935;
+		x = (x | x << 4) & 252645135;
+		x = (x | x << 2) & 858993459;
+		x = (x | x << 1) & 1431655765;
+		y = (y | y << 8) & 16711935;
+		y = (y | y << 4) & 252645135;
+		y = (y | y << 2) & 858993459;
+		y = (y | y << 1) & 1431655765;
+		return x | y << 1;
+	}
+	function getLeftmost(start) {
+		let p = start, leftmost = start;
+		do {
+			if (p.x < leftmost.x || p.x === leftmost.x && p.y < leftmost.y) leftmost = p;
+			p = p.next;
+		} while (p !== start);
+		return leftmost;
+	}
+	function pointInTriangle(ax, ay, bx, by, cx, cy, px, py) {
+		return (cx - px) * (ay - py) >= (ax - px) * (cy - py) && (ax - px) * (by - py) >= (bx - px) * (ay - py) && (bx - px) * (cy - py) >= (cx - px) * (by - py);
+	}
+	function pointInTriangleExceptFirst(ax, ay, bx, by, cx, cy, px, py) {
+		return !(ax === px && ay === py) && pointInTriangle(ax, ay, bx, by, cx, cy, px, py);
+	}
+	function isValidDiagonal(a, b) {
+		return a.next.i !== b.i && a.prev.i !== b.i && !intersectsPolygon(a, b) && (locallyInside(a, b) && locallyInside(b, a) && middleInside(a, b) && (area(a.prev, a, b.prev) || area(a, b.prev, b)) || equals(a, b) && area(a.prev, a, a.next) > 0 && area(b.prev, b, b.next) > 0);
+	}
+	function area(p, q, r) {
+		return (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y);
+	}
+	function equals(p1, p2) {
+		return p1.x === p2.x && p1.y === p2.y;
+	}
+	function intersects(p1, q1, p2, q2) {
+		const o1 = sign(area(p1, q1, p2));
+		const o2 = sign(area(p1, q1, q2));
+		const o3 = sign(area(p2, q2, p1));
+		const o4 = sign(area(p2, q2, q1));
+		if (o1 !== o2 && o3 !== o4) return true;
+		if (o1 === 0 && onSegment(p1, p2, q1)) return true;
+		if (o2 === 0 && onSegment(p1, q2, q1)) return true;
+		if (o3 === 0 && onSegment(p2, p1, q2)) return true;
+		if (o4 === 0 && onSegment(p2, q1, q2)) return true;
+		return false;
+	}
+	function onSegment(p, q, r) {
+		return q.x <= Math.max(p.x, r.x) && q.x >= Math.min(p.x, r.x) && q.y <= Math.max(p.y, r.y) && q.y >= Math.min(p.y, r.y);
+	}
+	function sign(num) {
+		return num > 0 ? 1 : num < 0 ? -1 : 0;
+	}
+	function intersectsPolygon(a, b) {
+		let p = a;
+		do {
+			if (p.i !== a.i && p.next.i !== a.i && p.i !== b.i && p.next.i !== b.i && intersects(p, p.next, a, b)) return true;
+			p = p.next;
+		} while (p !== a);
+		return false;
+	}
+	function locallyInside(a, b) {
+		return area(a.prev, a, a.next) < 0 ? area(a, b, a.next) >= 0 && area(a, a.prev, b) >= 0 : area(a, b, a.prev) < 0 || area(a, a.next, b) < 0;
+	}
+	function middleInside(a, b) {
+		let p = a;
+		let inside = false;
+		const px = (a.x + b.x) / 2;
+		const py = (a.y + b.y) / 2;
+		do {
+			if (p.y > py !== p.next.y > py && p.next.y !== p.y && px < (p.next.x - p.x) * (py - p.y) / (p.next.y - p.y) + p.x) inside = !inside;
+			p = p.next;
+		} while (p !== a);
+		return inside;
+	}
+	function splitPolygon(a, b) {
+		const a2 = createNode(a.i, a.x, a.y), b2 = createNode(b.i, b.x, b.y), an = a.next, bp = b.prev;
+		a.next = b;
+		b.prev = a;
+		a2.next = an;
+		an.prev = a2;
+		b2.next = a2;
+		a2.prev = b2;
+		bp.next = b2;
+		b2.prev = bp;
+		return b2;
+	}
+	function insertNode(i, x, y, last) {
+		const p = createNode(i, x, y);
+		if (!last) {
+			p.prev = p;
+			p.next = p;
+		} else {
+			p.next = last.next;
+			p.prev = last;
+			last.next.prev = p;
+			last.next = p;
+		}
+		return p;
+	}
+	function removeNode(p) {
+		p.next.prev = p.prev;
+		p.prev.next = p.next;
+		if (p.prevZ) p.prevZ.nextZ = p.nextZ;
+		if (p.nextZ) p.nextZ.prevZ = p.prevZ;
+	}
+	function createNode(i, x, y) {
+		return {
+			i,
+			x,
+			y,
+			prev: null,
+			next: null,
+			z: 0,
+			prevZ: null,
+			nextZ: null,
+			steiner: false
+		};
+	}
+	function signedArea(data, start, end, dim) {
+		let sum = 0;
+		for (let i = start, j = end - dim; i < end; i += dim) {
+			sum += (data[j] - data[i]) * (data[i + 1] + data[j + 1]);
+			j = i;
+		}
+		return sum;
+	}
+	/**
+	* An implementation of the earcut polygon triangulation algorithm.
+	* The code is a port of [mapbox/earcut](https://github.com/mapbox/earcut).
+	*
+	* @see https://github.com/mapbox/earcut
+	*/
+	var Earcut = class {
+		/**
+		* Triangulates the given shape definition by returning an array of triangles.
+		*
+		* @param {Array<number>} data - An array with 2D points.
+		* @param {Array<number>} holeIndices - An array with indices defining holes.
+		* @param {number} [dim=2] - The number of coordinates per vertex in the input array.
+		* @return {Array<number>} An array representing the triangulated faces. Each face is defined by three consecutive numbers
+		* representing vertex indices.
+		*/
+		static triangulate(data, holeIndices, dim = 2) {
+			return earcut(data, holeIndices, dim);
+		}
+	};
+	/**
+	* A class containing utility functions for shapes.
+	*
+	* @hideconstructor
+	*/
+	var ShapeUtils = class ShapeUtils {
+		/**
+		* Calculate area of a ( 2D ) contour polygon.
+		*
+		* @param {Array<Vector2>} contour - An array of 2D points.
+		* @return {number} The area.
+		*/
+		static area(contour) {
+			const n = contour.length;
+			let a = 0;
+			for (let p = n - 1, q = 0; q < n; p = q++) a += contour[p].x * contour[q].y - contour[q].x * contour[p].y;
+			return a * .5;
+		}
+		/**
+		* Returns `true` if the given contour uses a clockwise winding order.
+		*
+		* @param {Array<Vector2>} pts - An array of 2D points defining a polygon.
+		* @return {boolean} Whether the given contour uses a clockwise winding order or not.
+		*/
+		static isClockWise(pts) {
+			return ShapeUtils.area(pts) < 0;
+		}
+		/**
+		* Triangulates the given shape definition.
+		*
+		* @param {Array<Vector2>} contour - An array of 2D points defining the contour.
+		* @param {Array<Array<Vector2>>} holes - An array that holds arrays of 2D points defining the holes.
+		* @return {Array<Array<number>>} An array that holds for each face definition an array with three indices.
+		*/
+		static triangulateShape(contour, holes) {
+			const vertices = [];
+			const holeIndices = [];
+			const faces = [];
+			removeDupEndPts(contour);
+			addContour(vertices, contour);
+			let holeIndex = contour.length;
+			holes.forEach(removeDupEndPts);
+			for (let i = 0; i < holes.length; i++) {
+				holeIndices.push(holeIndex);
+				holeIndex += holes[i].length;
+				addContour(vertices, holes[i]);
+			}
+			const triangles = Earcut.triangulate(vertices, holeIndices);
+			for (let i = 0; i < triangles.length; i += 3) faces.push(triangles.slice(i, i + 3));
+			return faces;
+		}
+	};
+	function removeDupEndPts(points) {
+		const l = points.length;
+		if (l > 2 && points[l - 1].equals(points[0])) points.pop();
+	}
+	function addContour(vertices, contour) {
+		for (let i = 0; i < contour.length; i++) {
+			vertices.push(contour[i].x);
+			vertices.push(contour[i].y);
+		}
+	}
+	/**
 	* A geometry class for representing a plane.
 	*
 	* ```js
@@ -19269,6 +20078,777 @@ var MitaVRM = (function(exports) {
 			this.specularIntensityMap = source.specularIntensityMap;
 			this.specularColor.copy(source.specularColor);
 			this.specularColorMap = source.specularColorMap;
+			return this;
+		}
+	};
+	/**
+	* A material for shiny surfaces with specular highlights.
+	*
+	* The material uses a non-physically based [Blinn-Phong](https://en.wikipedia.org/wiki/Blinn-Phong_shading_model)
+	* model for calculating reflectance. Unlike the Lambertian model used in the
+	* {@link MeshLambertMaterial} this can simulate shiny surfaces with specular
+	* highlights (such as varnished wood). `MeshPhongMaterial` uses per-fragment shading.
+	*
+	* Performance will generally be greater when using this material over the
+	* {@link MeshStandardMaterial} or {@link MeshPhysicalMaterial}, at the cost of
+	* some graphical accuracy.
+	*
+	* @augments Material
+	* @demo scenes/material-browser.html#MeshPhongMaterial
+	*/
+	var MeshPhongMaterial = class extends Material {
+		/**
+		* Constructs a new mesh phong material.
+		*
+		* @param {Object} [parameters] - An object with one or more properties
+		* defining the material's appearance. Any property of the material
+		* (including any property from inherited materials) can be passed
+		* in here. Color values can be passed any type of value accepted
+		* by {@link Color#set}.
+		*/
+		constructor(parameters) {
+			super();
+			/**
+			* This flag can be used for type testing.
+			*
+			* @type {boolean}
+			* @readonly
+			* @default true
+			*/
+			this.isMeshPhongMaterial = true;
+			this.type = "MeshPhongMaterial";
+			/**
+			* Color of the material.
+			*
+			* @type {Color}
+			* @default (1,1,1)
+			*/
+			this.color = new Color(16777215);
+			/**
+			* Specular color of the material. The default color is set to `0x111111` (very dark grey)
+			*
+			* This defines how shiny the material is and the color of its shine.
+			*
+			* @type {Color}
+			*/
+			this.specular = new Color(1118481);
+			/**
+			* How shiny the specular highlight is; a higher value gives a sharper highlight.
+			*
+			* @type {number}
+			* @default 30
+			*/
+			this.shininess = 30;
+			/**
+			* The color map. May optionally include an alpha channel, typically combined
+			* with {@link Material#transparent} or {@link Material#alphaTest}. The texture map
+			* color is modulated by the diffuse `color`.
+			*
+			* `map` represents color data, and the texture must be assigned a
+			* {@link Texture#colorSpace}. Most `map` textures set
+			* `texture.colorSpace = SRGBColorSpace`.
+			*
+			* @type {?Texture}
+			* @default null
+			*/
+			this.map = null;
+			/**
+			* The light map. Requires a second set of UVs.
+			*
+			* `lightMap` represents pre-baked illuminance data, and the texture must be assigned
+			* a {@link Texture#colorSpace}. Most `lightMap` textures set
+			* `texture.colorSpace = LinearSRGBColorSpace` and use float-type formats
+			* such as `.exr` or `.hdr`.
+			*
+			* @type {?Texture}
+			* @default null
+			*/
+			this.lightMap = null;
+			/**
+			* Intensity of the baked light.
+			*
+			* @type {number}
+			* @default 1
+			*/
+			this.lightMapIntensity = 1;
+			/**
+			* The red channel of this texture is used as the ambient occlusion map.
+			* Requires a second set of UVs.
+			*
+			* `aoMap` represents non-color data. Any texture assigned must have
+			* `texture.colorSpace = NoColorSpace` (default).
+			*
+			* @type {?Texture}
+			* @default null
+			*/
+			this.aoMap = null;
+			/**
+			* Intensity of the ambient occlusion effect. Range is `[0,1]`, where `0`
+			* disables ambient occlusion. Where intensity is `1` and the AO map's
+			* red channel is also `1`, ambient light is fully occluded on a surface.
+			*
+			* @type {number}
+			* @default 1
+			*/
+			this.aoMapIntensity = 1;
+			/**
+			* Emissive (light) color of the material, essentially a solid color
+			* unaffected by other lighting.
+			*
+			* @type {Color}
+			* @default (0,0,0)
+			*/
+			this.emissive = new Color(0);
+			/**
+			* Intensity of the emissive light. Modulates the emissive color.
+			*
+			* @type {number}
+			* @default 1
+			*/
+			this.emissiveIntensity = 1;
+			/**
+			* Set emissive (glow) map. The emissive map color is modulated by the
+			* emissive color and the emissive intensity. If you have an emissive map,
+			* be sure to set the emissive color to something other than black.
+			*
+			* `emissiveMap` represents color data, and the texture must be assigned a
+			* {@link Texture#colorSpace}. Most `emissiveMap` textures set
+			* `texture.colorSpace = SRGBColorSpace`.
+			*
+			* @type {?Texture}
+			* @default null
+			*/
+			this.emissiveMap = null;
+			/**
+			* The texture to create a bump map. The black and white values map to the
+			* perceived depth in relation to the lights. Bump doesn't actually affect
+			* the geometry of the object, only the lighting. If a normal map is defined
+			* this will be ignored.
+			*
+			* `bumpMap` represents non-color data. Any texture assigned must have
+			* `texture.colorSpace = NoColorSpace` (default).
+			*
+			* @type {?Texture}
+			* @default null
+			*/
+			this.bumpMap = null;
+			/**
+			* How much the bump map affects the material. Typical range is `[0,1]`.
+			*
+			* @type {number}
+			* @default 1
+			*/
+			this.bumpScale = 1;
+			/**
+			* The texture to create a normal map. The RGB values affect the surface
+			* normal for each pixel fragment and change the way the color is lit. Normal
+			* maps do not change the actual shape of the surface, only the lighting. In
+			* case the material has a normal map authored using the left handed
+			* convention, the `y` component of `normalScale` should be negated to compensate
+			* for the different handedness.
+			*
+			* `normalMap` represents non-color data. Any texture assigned must have
+			* `texture.colorSpace = NoColorSpace` (default).
+			*
+			* @type {?Texture}
+			* @default null
+			*/
+			this.normalMap = null;
+			/**
+			* The type of normal map.
+			*
+			* @type {(TangentSpaceNormalMap|ObjectSpaceNormalMap)}
+			* @default TangentSpaceNormalMap
+			*/
+			this.normalMapType = 0;
+			/**
+			* How much the normal map affects the material. Typical value range is `[0,1]`.
+			*
+			* @type {Vector2}
+			* @default (1,1)
+			*/
+			this.normalScale = new Vector2(1, 1);
+			/**
+			* The displacement map affects the position of the mesh's vertices. Unlike
+			* other maps which only affect the light and shade of the material the
+			* displaced vertices can cast shadows, block other objects, and otherwise
+			* act as real geometry. The displacement texture is an image where the value
+			* of each pixel (white being the highest) is mapped against, and
+			* repositions, the vertices of the mesh. For best results, pair a
+			* displacement map with a matching normal map, since the renderer can
+			* not recompute surface normals from the displaced vertices.
+			*
+			* `displacementMap` represents non-color data. Any texture assigned must have
+			* `texture.colorSpace = NoColorSpace` (default).
+			*
+			* @type {?Texture}
+			* @default null
+			*/
+			this.displacementMap = null;
+			/**
+			* How much the displacement map affects the mesh (where black is no
+			* displacement, and white is maximum displacement). Without a displacement
+			* map set, this value is not applied.
+			*
+			* @type {number}
+			* @default 0
+			*/
+			this.displacementScale = 1;
+			/**
+			* The offset of the displacement map's values on the mesh's vertices.
+			* The bias is added to the scaled sample of the displacement map.
+			* Without a displacement map set, this value is not applied.
+			*
+			* @type {number}
+			* @default 0
+			*/
+			this.displacementBias = 0;
+			/**
+			* The specular map value affects both how much the specular surface
+			* highlight contributes and how much of the environment map affects the
+			* surface.
+			*
+			* `specularMap` represents color data, and the texture must be assigned a
+			* {@link Texture#colorSpace}. Most `specularMap` textures set
+			* `texture.colorSpace = SRGBColorSpace`.
+			*
+			* @type {?Texture}
+			* @default null
+			*/
+			this.specularMap = null;
+			/**
+			* The alpha map is a grayscale texture that controls the opacity across the
+			* surface (black: fully transparent; white: fully opaque).
+			*
+			* Only the color of the texture is used, ignoring the alpha channel if one
+			* exists. For RGB and RGBA textures, the renderer will use the green channel
+			* when sampling this texture due to the extra bit of precision provided for
+			* green in DXT-compressed and uncompressed RGB 565 formats. Luminance-only and
+			* luminance/alpha textures will also still work as expected.
+			*
+			* `alphaMap` represents non-color data. Any texture assigned must have
+			* `texture.colorSpace = NoColorSpace` (default).
+			*
+			* @type {?Texture}
+			* @default null
+			*/
+			this.alphaMap = null;
+			/**
+			* The environment map.
+			*
+			* `envMap` represents luminance data, and the texture must be assigned
+			* a {@link Texture#colorSpace}. Most `envMap` textures set
+			* `texture.colorSpace = LinearSRGBColorSpace` and use float-type formats
+			* such as `.exr` or `.hdr`.
+			*
+			* @type {?Texture}
+			* @default null
+			*/
+			this.envMap = null;
+			/**
+			* The rotation of the environment map in radians.
+			*
+			* @type {Euler}
+			* @default (0,0,0)
+			*/
+			this.envMapRotation = new Euler();
+			/**
+			* How to combine the result of the surface's color with the environment map, if any.
+			*
+			* When set to `MixOperation`, the {@link MeshBasicMaterial#reflectivity} is used to
+			* blend between the two colors.
+			*
+			* @type {(MultiplyOperation|MixOperation|AddOperation)}
+			* @default MultiplyOperation
+			*/
+			this.combine = 0;
+			/**
+			* How much the environment map affects the surface.
+			* The valid range is between `0` (no reflections) and `1` (full reflections).
+			*
+			* @type {number}
+			* @default 1
+			*/
+			this.reflectivity = 1;
+			/**
+			* Scales the effect of the environment map by multiplying its color.
+			*
+			* @type {number}
+			* @default 1
+			*/
+			this.envMapIntensity = 1;
+			/**
+			* The index of refraction (IOR) of air (approximately 1) divided by the
+			* index of refraction of the material. It is used with environment mapping
+			* modes {@link CubeRefractionMapping} and {@link EquirectangularRefractionMapping}.
+			* The refraction ratio should not exceed `1`.
+			*
+			* @type {number}
+			* @default 0.98
+			*/
+			this.refractionRatio = .98;
+			/**
+			* Renders the geometry as a wireframe.
+			*
+			* @type {boolean}
+			* @default false
+			*/
+			this.wireframe = false;
+			/**
+			* Controls the thickness of the wireframe.
+			*
+			* Can only be used with {@link SVGRenderer}.
+			*
+			* @type {number}
+			* @default 1
+			*/
+			this.wireframeLinewidth = 1;
+			/**
+			* Defines appearance of wireframe ends.
+			*
+			* Can only be used with {@link SVGRenderer}.
+			*
+			* @type {('round'|'bevel'|'miter')}
+			* @default 'round'
+			*/
+			this.wireframeLinecap = "round";
+			/**
+			* Defines appearance of wireframe joints.
+			*
+			* Can only be used with {@link SVGRenderer}.
+			*
+			* @type {('round'|'bevel'|'miter')}
+			* @default 'round'
+			*/
+			this.wireframeLinejoin = "round";
+			/**
+			* Whether the material is rendered with flat shading or not.
+			*
+			* @type {boolean}
+			* @default false
+			*/
+			this.flatShading = false;
+			/**
+			* Whether the material is affected by fog or not.
+			*
+			* @type {boolean}
+			* @default true
+			*/
+			this.fog = true;
+			this.setValues(parameters);
+		}
+		copy(source) {
+			super.copy(source);
+			this.color.copy(source.color);
+			this.specular.copy(source.specular);
+			this.shininess = source.shininess;
+			this.map = source.map;
+			this.lightMap = source.lightMap;
+			this.lightMapIntensity = source.lightMapIntensity;
+			this.aoMap = source.aoMap;
+			this.aoMapIntensity = source.aoMapIntensity;
+			this.emissive.copy(source.emissive);
+			this.emissiveMap = source.emissiveMap;
+			this.emissiveIntensity = source.emissiveIntensity;
+			this.bumpMap = source.bumpMap;
+			this.bumpScale = source.bumpScale;
+			this.normalMap = source.normalMap;
+			this.normalMapType = source.normalMapType;
+			this.normalScale.copy(source.normalScale);
+			this.displacementMap = source.displacementMap;
+			this.displacementScale = source.displacementScale;
+			this.displacementBias = source.displacementBias;
+			this.specularMap = source.specularMap;
+			this.alphaMap = source.alphaMap;
+			this.envMap = source.envMap;
+			this.envMapRotation.copy(source.envMapRotation);
+			this.combine = source.combine;
+			this.reflectivity = source.reflectivity;
+			this.envMapIntensity = source.envMapIntensity;
+			this.refractionRatio = source.refractionRatio;
+			this.wireframe = source.wireframe;
+			this.wireframeLinewidth = source.wireframeLinewidth;
+			this.wireframeLinecap = source.wireframeLinecap;
+			this.wireframeLinejoin = source.wireframeLinejoin;
+			this.flatShading = source.flatShading;
+			this.fog = source.fog;
+			return this;
+		}
+	};
+	/**
+	* A material for non-shiny surfaces, without specular highlights.
+	*
+	* The material uses a non-physically based [Lambertian](https://en.wikipedia.org/wiki/Lambertian_reflectance)
+	* model for calculating reflectance. This can simulate some surfaces (such
+	* as untreated wood or stone) well, but cannot simulate shiny surfaces with
+	* specular highlights (such as varnished wood). `MeshLambertMaterial` uses per-fragment
+	* shading.
+	*
+	* Due to the simplicity of the reflectance and illumination models,
+	* performance will be greater when using this material over the
+	* {@link MeshPhongMaterial}, {@link MeshStandardMaterial} or
+	* {@link MeshPhysicalMaterial}, at the cost of some graphical accuracy.
+	*
+	* @augments Material
+	* @demo scenes/material-browser.html#MeshLambertMaterial
+	*/
+	var MeshLambertMaterial = class extends Material {
+		/**
+		* Constructs a new mesh lambert material.
+		*
+		* @param {Object} [parameters] - An object with one or more properties
+		* defining the material's appearance. Any property of the material
+		* (including any property from inherited materials) can be passed
+		* in here. Color values can be passed any type of value accepted
+		* by {@link Color#set}.
+		*/
+		constructor(parameters) {
+			super();
+			/**
+			* This flag can be used for type testing.
+			*
+			* @type {boolean}
+			* @readonly
+			* @default true
+			*/
+			this.isMeshLambertMaterial = true;
+			this.type = "MeshLambertMaterial";
+			/**
+			* Color of the material.
+			*
+			* @type {Color}
+			* @default (1,1,1)
+			*/
+			this.color = new Color(16777215);
+			/**
+			* The color map. May optionally include an alpha channel, typically combined
+			* with {@link Material#transparent} or {@link Material#alphaTest}. The texture map
+			* color is modulated by the diffuse `color`.
+			*
+			* `map` represents color data, and the texture must be assigned a
+			* {@link Texture#colorSpace}. Most `map` textures set
+			* `texture.colorSpace = SRGBColorSpace`.
+			*
+			* @type {?Texture}
+			* @default null
+			*/
+			this.map = null;
+			/**
+			* The light map. Requires a second set of UVs.
+			*
+			* `lightMap` represents pre-baked illuminance data, and the texture must be assigned
+			* a {@link Texture#colorSpace}. Most `lightMap` textures set
+			* `texture.colorSpace = LinearSRGBColorSpace` and use float-type formats
+			* such as `.exr` or `.hdr`.
+			*
+			* @type {?Texture}
+			* @default null
+			*/
+			this.lightMap = null;
+			/**
+			* Intensity of the baked light.
+			*
+			* @type {number}
+			* @default 1
+			*/
+			this.lightMapIntensity = 1;
+			/**
+			* The red channel of this texture is used as the ambient occlusion map.
+			* Requires a second set of UVs.
+			*
+			* `aoMap` represents non-color data. Any texture assigned must have
+			* `texture.colorSpace = NoColorSpace` (default).
+			*
+			* @type {?Texture}
+			* @default null
+			*/
+			this.aoMap = null;
+			/**
+			* Intensity of the ambient occlusion effect. Range is `[0,1]`, where `0`
+			* disables ambient occlusion. Where intensity is `1` and the AO map's
+			* red channel is also `1`, ambient light is fully occluded on a surface.
+			*
+			* @type {number}
+			* @default 1
+			*/
+			this.aoMapIntensity = 1;
+			/**
+			* Emissive (light) color of the material, essentially a solid color
+			* unaffected by other lighting.
+			*
+			* @type {Color}
+			* @default (0,0,0)
+			*/
+			this.emissive = new Color(0);
+			/**
+			* Intensity of the emissive light. Modulates the emissive color.
+			*
+			* @type {number}
+			* @default 1
+			*/
+			this.emissiveIntensity = 1;
+			/**
+			* Set emissive (glow) map. The emissive map color is modulated by the
+			* emissive color and the emissive intensity. If you have an emissive map,
+			* be sure to set the emissive color to something other than black.
+			*
+			* `emissiveMap` represents color data, and the texture must be assigned a
+			* {@link Texture#colorSpace}. Most `emissiveMap` textures set
+			* `texture.colorSpace = SRGBColorSpace`.
+			*
+			* @type {?Texture}
+			* @default null
+			*/
+			this.emissiveMap = null;
+			/**
+			* The texture to create a bump map. The black and white values map to the
+			* perceived depth in relation to the lights. Bump doesn't actually affect
+			* the geometry of the object, only the lighting. If a normal map is defined
+			* this will be ignored.
+			*
+			* `bumpMap` represents non-color data. Any texture assigned must have
+			* `texture.colorSpace = NoColorSpace` (default).
+			*
+			* @type {?Texture}
+			* @default null
+			*/
+			this.bumpMap = null;
+			/**
+			* How much the bump map affects the material. Typical range is `[0,1]`.
+			*
+			* @type {number}
+			* @default 1
+			*/
+			this.bumpScale = 1;
+			/**
+			* The texture to create a normal map. The RGB values affect the surface
+			* normal for each pixel fragment and change the way the color is lit. Normal
+			* maps do not change the actual shape of the surface, only the lighting. In
+			* case the material has a normal map authored using the left handed
+			* convention, the `y` component of `normalScale` should be negated to compensate
+			* for the different handedness.
+			*
+			* `normalMap` represents non-color data. Any texture assigned must have
+			* `texture.colorSpace = NoColorSpace` (default).
+			*
+			* @type {?Texture}
+			* @default null
+			*/
+			this.normalMap = null;
+			/**
+			* The type of normal map.
+			*
+			* @type {(TangentSpaceNormalMap|ObjectSpaceNormalMap)}
+			* @default TangentSpaceNormalMap
+			*/
+			this.normalMapType = 0;
+			/**
+			* How much the normal map affects the material. Typical value range is `[0,1]`.
+			*
+			* @type {Vector2}
+			* @default (1,1)
+			*/
+			this.normalScale = new Vector2(1, 1);
+			/**
+			* The displacement map affects the position of the mesh's vertices. Unlike
+			* other maps which only affect the light and shade of the material the
+			* displaced vertices can cast shadows, block other objects, and otherwise
+			* act as real geometry. The displacement texture is an image where the value
+			* of each pixel (white being the highest) is mapped against, and
+			* repositions, the vertices of the mesh. For best results, pair a
+			* displacement map with a matching normal map, since the renderer can
+			* not recompute surface normals from the displaced vertices.
+			*
+			* `displacementMap` represents non-color data. Any texture assigned must have
+			* `texture.colorSpace = NoColorSpace` (default).
+			*
+			* @type {?Texture}
+			* @default null
+			*/
+			this.displacementMap = null;
+			/**
+			* How much the displacement map affects the mesh (where black is no
+			* displacement, and white is maximum displacement). Without a displacement
+			* map set, this value is not applied.
+			*
+			* @type {number}
+			* @default 0
+			*/
+			this.displacementScale = 1;
+			/**
+			* The offset of the displacement map's values on the mesh's vertices.
+			* The bias is added to the scaled sample of the displacement map.
+			* Without a displacement map set, this value is not applied.
+			*
+			* @type {number}
+			* @default 0
+			*/
+			this.displacementBias = 0;
+			/**
+			* Specular map used by the material.
+			*
+			* `specularMap` represents color data, and the texture must be assigned a
+			* {@link Texture#colorSpace}. Most `specularMap` textures set
+			* `texture.colorSpace = SRGBColorSpace`.
+			*
+			* @type {?Texture}
+			* @default null
+			*/
+			this.specularMap = null;
+			/**
+			* The alpha map is a grayscale texture that controls the opacity across the
+			* surface (black: fully transparent; white: fully opaque).
+			*
+			* Only the color of the texture is used, ignoring the alpha channel if one
+			* exists. For RGB and RGBA textures, the renderer will use the green channel
+			* when sampling this texture due to the extra bit of precision provided for
+			* green in DXT-compressed and uncompressed RGB 565 formats. Luminance-only and
+			* luminance/alpha textures will also still work as expected.
+			*
+			* `alphaMap` represents non-color data. Any texture assigned must have
+			* `texture.colorSpace = NoColorSpace` (default).
+			*
+			* @type {?Texture}
+			* @default null
+			*/
+			this.alphaMap = null;
+			/**
+			* The environment map.
+			*
+			* `envMap` represents luminance data, and the texture must be assigned
+			* a {@link Texture#colorSpace}. Most `envMap` textures set
+			* `texture.colorSpace = LinearSRGBColorSpace` and use float-type formats
+			* such as `.exr` or `.hdr`.
+			*
+			* @type {?Texture}
+			* @default null
+			*/
+			this.envMap = null;
+			/**
+			* The rotation of the environment map in radians.
+			*
+			* @type {Euler}
+			* @default (0,0,0)
+			*/
+			this.envMapRotation = new Euler();
+			/**
+			* How to combine the result of the surface's color with the environment map, if any.
+			*
+			* When set to `MixOperation`, the {@link MeshBasicMaterial#reflectivity} is used to
+			* blend between the two colors.
+			*
+			* @type {(MultiplyOperation|MixOperation|AddOperation)}
+			* @default MultiplyOperation
+			*/
+			this.combine = 0;
+			/**
+			* How much the environment map affects the surface.
+			* The valid range is between `0` (no reflections) and `1` (full reflections).
+			*
+			* @type {number}
+			* @default 1
+			*/
+			this.reflectivity = 1;
+			/**
+			* Scales the effect of the environment map by multiplying its color.
+			*
+			* @type {number}
+			* @default 1
+			*/
+			this.envMapIntensity = 1;
+			/**
+			* The index of refraction (IOR) of air (approximately 1) divided by the
+			* index of refraction of the material. It is used with environment mapping
+			* modes {@link CubeRefractionMapping} and {@link EquirectangularRefractionMapping}.
+			* The refraction ratio should not exceed `1`.
+			*
+			* @type {number}
+			* @default 0.98
+			*/
+			this.refractionRatio = .98;
+			/**
+			* Renders the geometry as a wireframe.
+			*
+			* @type {boolean}
+			* @default false
+			*/
+			this.wireframe = false;
+			/**
+			* Controls the thickness of the wireframe.
+			*
+			* Can only be used with {@link SVGRenderer}.
+			*
+			* @type {number}
+			* @default 1
+			*/
+			this.wireframeLinewidth = 1;
+			/**
+			* Defines appearance of wireframe ends.
+			*
+			* Can only be used with {@link SVGRenderer}.
+			*
+			* @type {('round'|'bevel'|'miter')}
+			* @default 'round'
+			*/
+			this.wireframeLinecap = "round";
+			/**
+			* Defines appearance of wireframe joints.
+			*
+			* Can only be used with {@link SVGRenderer}.
+			*
+			* @type {('round'|'bevel'|'miter')}
+			* @default 'round'
+			*/
+			this.wireframeLinejoin = "round";
+			/**
+			* Whether the material is rendered with flat shading or not.
+			*
+			* @type {boolean}
+			* @default false
+			*/
+			this.flatShading = false;
+			/**
+			* Whether the material is affected by fog or not.
+			*
+			* @type {boolean}
+			* @default true
+			*/
+			this.fog = true;
+			this.setValues(parameters);
+		}
+		copy(source) {
+			super.copy(source);
+			this.color.copy(source.color);
+			this.map = source.map;
+			this.lightMap = source.lightMap;
+			this.lightMapIntensity = source.lightMapIntensity;
+			this.aoMap = source.aoMap;
+			this.aoMapIntensity = source.aoMapIntensity;
+			this.emissive.copy(source.emissive);
+			this.emissiveMap = source.emissiveMap;
+			this.emissiveIntensity = source.emissiveIntensity;
+			this.bumpMap = source.bumpMap;
+			this.bumpScale = source.bumpScale;
+			this.normalMap = source.normalMap;
+			this.normalMapType = source.normalMapType;
+			this.normalScale.copy(source.normalScale);
+			this.displacementMap = source.displacementMap;
+			this.displacementScale = source.displacementScale;
+			this.displacementBias = source.displacementBias;
+			this.specularMap = source.specularMap;
+			this.alphaMap = source.alphaMap;
+			this.envMap = source.envMap;
+			this.envMapRotation.copy(source.envMapRotation);
+			this.combine = source.combine;
+			this.reflectivity = source.reflectivity;
+			this.envMapIntensity = source.envMapIntensity;
+			this.refractionRatio = source.refractionRatio;
+			this.wireframe = source.wireframe;
+			this.wireframeLinewidth = source.wireframeLinewidth;
+			this.wireframeLinecap = source.wireframeLinecap;
+			this.wireframeLinejoin = source.wireframeLinejoin;
+			this.flatShading = source.flatShading;
+			this.fog = source.fog;
 			return this;
 		}
 	};
@@ -23077,6 +24657,38 @@ var MitaVRM = (function(exports) {
 		}
 	};
 	/**
+	* This light globally illuminates all objects in the scene equally.
+	*
+	* It cannot be used to cast shadows as it does not have a direction.
+	*
+	* ```js
+	* const light = new THREE.AmbientLight( 0x404040 ); // soft white light
+	* scene.add( light );
+	* ```
+	*
+	* @augments Light
+	*/
+	var AmbientLight = class extends Light {
+		/**
+		* Constructs a new ambient light.
+		*
+		* @param {(number|Color|string)} [color=0xffffff] - The light's color.
+		* @param {number} [intensity=1] - The light's strength/intensity.
+		*/
+		constructor(color, intensity) {
+			super(color, intensity);
+			/**
+			* This flag can be used for type testing.
+			*
+			* @type {boolean}
+			* @readonly
+			* @default true
+			*/
+			this.isAmbientLight = true;
+			this.type = "AmbientLight";
+		}
+	};
+	/**
 	* A class with loader utility functions.
 	*/
 	var LoaderUtils = class {
@@ -23466,6 +25078,193 @@ var MitaVRM = (function(exports) {
 			* @type {Array<PerspectiveCamera>}
 			*/
 			this.cameras = array;
+		}
+	};
+	/**
+	* Buffered scene graph property that allows weighted accumulation; used internally.
+	*/
+	var PropertyMixer = class {
+		/**
+		* Constructs a new property mixer.
+		*
+		* @param {PropertyBinding} binding - The property binding.
+		* @param {string} typeName - The keyframe track type name.
+		* @param {number} valueSize - The keyframe track value size.
+		*/
+		constructor(binding, typeName, valueSize) {
+			/**
+			* The property binding.
+			*
+			* @type {PropertyBinding}
+			*/
+			this.binding = binding;
+			/**
+			* The keyframe track value size.
+			*
+			* @type {number}
+			*/
+			this.valueSize = valueSize;
+			let mixFunction, mixFunctionAdditive, setIdentity;
+			switch (typeName) {
+				case "quaternion":
+					mixFunction = this._slerp;
+					mixFunctionAdditive = this._slerpAdditive;
+					setIdentity = this._setAdditiveIdentityQuaternion;
+					this.buffer = new Float64Array(valueSize * 6);
+					this._workIndex = 5;
+					break;
+				case "string":
+				case "bool":
+					mixFunction = this._select;
+					mixFunctionAdditive = this._select;
+					setIdentity = this._setAdditiveIdentityOther;
+					this.buffer = new Array(valueSize * 5);
+					break;
+				default:
+					mixFunction = this._lerp;
+					mixFunctionAdditive = this._lerpAdditive;
+					setIdentity = this._setAdditiveIdentityNumeric;
+					this.buffer = new Float64Array(valueSize * 5);
+			}
+			this._mixBufferRegion = mixFunction;
+			this._mixBufferRegionAdditive = mixFunctionAdditive;
+			this._setIdentity = setIdentity;
+			this._origIndex = 3;
+			this._addIndex = 4;
+			/**
+			* Accumulated weight of the property binding.
+			*
+			* @type {number}
+			* @default 0
+			*/
+			this.cumulativeWeight = 0;
+			/**
+			* Accumulated additive weight of the property binding.
+			*
+			* @type {number}
+			* @default 0
+			*/
+			this.cumulativeWeightAdditive = 0;
+			/**
+			* Number of active keyframe tracks currently using this property binding.
+			*
+			* @type {number}
+			* @default 0
+			*/
+			this.useCount = 0;
+			/**
+			* Number of keyframe tracks referencing this property binding.
+			*
+			* @type {number}
+			* @default 0
+			*/
+			this.referenceCount = 0;
+		}
+		/**
+		* Accumulates data in the `incoming` region into `accu<i>`.
+		*
+		* @param {number} accuIndex - The accumulation index.
+		* @param {number} weight - The weight.
+		*/
+		accumulate(accuIndex, weight) {
+			const buffer = this.buffer, stride = this.valueSize, offset = accuIndex * stride + stride;
+			let currentWeight = this.cumulativeWeight;
+			if (currentWeight === 0) {
+				for (let i = 0; i !== stride; ++i) buffer[offset + i] = buffer[i];
+				currentWeight = weight;
+			} else {
+				currentWeight += weight;
+				const mix = weight / currentWeight;
+				this._mixBufferRegion(buffer, offset, 0, mix, stride);
+			}
+			this.cumulativeWeight = currentWeight;
+		}
+		/**
+		* Accumulates data in the `incoming` region into `add`.
+		*
+		* @param {number} weight - The weight.
+		*/
+		accumulateAdditive(weight) {
+			const buffer = this.buffer, stride = this.valueSize, offset = stride * this._addIndex;
+			if (this.cumulativeWeightAdditive === 0) this._setIdentity();
+			this._mixBufferRegionAdditive(buffer, offset, 0, weight, stride);
+			this.cumulativeWeightAdditive += weight;
+		}
+		/**
+		* Applies the state of `accu<i>` to the binding when accus differ.
+		*
+		* @param {number} accuIndex - The accumulation index.
+		*/
+		apply(accuIndex) {
+			const stride = this.valueSize, buffer = this.buffer, offset = accuIndex * stride + stride, weight = this.cumulativeWeight, weightAdditive = this.cumulativeWeightAdditive, binding = this.binding;
+			this.cumulativeWeight = 0;
+			this.cumulativeWeightAdditive = 0;
+			if (weight < 1) {
+				const originalValueOffset = stride * this._origIndex;
+				this._mixBufferRegion(buffer, offset, originalValueOffset, 1 - weight, stride);
+			}
+			if (weightAdditive > 0) this._mixBufferRegionAdditive(buffer, offset, this._addIndex * stride, 1, stride);
+			for (let i = stride, e = stride + stride; i !== e; ++i) if (buffer[i] !== buffer[i + stride]) {
+				binding.setValue(buffer, offset);
+				break;
+			}
+		}
+		/**
+		* Remembers the state of the bound property and copy it to both accus.
+		*/
+		saveOriginalState() {
+			const binding = this.binding;
+			const buffer = this.buffer, stride = this.valueSize, originalValueOffset = stride * this._origIndex;
+			binding.getValue(buffer, originalValueOffset);
+			for (let i = stride, e = originalValueOffset; i !== e; ++i) buffer[i] = buffer[originalValueOffset + i % stride];
+			this._setIdentity();
+			this.cumulativeWeight = 0;
+			this.cumulativeWeightAdditive = 0;
+		}
+		/**
+		* Applies the state previously taken via {@link PropertyMixer#saveOriginalState} to the binding.
+		*/
+		restoreOriginalState() {
+			const originalValueOffset = this.valueSize * 3;
+			this.binding.setValue(this.buffer, originalValueOffset);
+		}
+		_setAdditiveIdentityNumeric() {
+			const startIndex = this._addIndex * this.valueSize;
+			const endIndex = startIndex + this.valueSize;
+			for (let i = startIndex; i < endIndex; i++) this.buffer[i] = 0;
+		}
+		_setAdditiveIdentityQuaternion() {
+			this._setAdditiveIdentityNumeric();
+			this.buffer[this._addIndex * this.valueSize + 3] = 1;
+		}
+		_setAdditiveIdentityOther() {
+			const startIndex = this._origIndex * this.valueSize;
+			const targetIndex = this._addIndex * this.valueSize;
+			for (let i = 0; i < this.valueSize; i++) this.buffer[targetIndex + i] = this.buffer[startIndex + i];
+		}
+		_select(buffer, dstOffset, srcOffset, t, stride) {
+			if (t >= .5) for (let i = 0; i !== stride; ++i) buffer[dstOffset + i] = buffer[srcOffset + i];
+		}
+		_slerp(buffer, dstOffset, srcOffset, t) {
+			Quaternion.slerpFlat(buffer, dstOffset, buffer, dstOffset, buffer, srcOffset, t);
+		}
+		_slerpAdditive(buffer, dstOffset, srcOffset, t, stride) {
+			const workOffset = this._workIndex * stride;
+			Quaternion.multiplyQuaternionsFlat(buffer, workOffset, buffer, dstOffset, buffer, srcOffset);
+			Quaternion.slerpFlat(buffer, dstOffset, buffer, dstOffset, buffer, workOffset, t);
+		}
+		_lerp(buffer, dstOffset, srcOffset, t, stride) {
+			const s = 1 - t;
+			for (let i = 0; i !== stride; ++i) {
+				const j = dstOffset + i;
+				buffer[j] = buffer[j] * s + buffer[srcOffset + i] * t;
+			}
+		}
+		_lerpAdditive(buffer, dstOffset, srcOffset, t, stride) {
+			for (let i = 0; i !== stride; ++i) {
+				const j = dstOffset + i;
+				buffer[j] = buffer[j] + buffer[srcOffset + i] * t;
+			}
 		}
 	};
 	const _RESERVED_CHARS_RE = "\\[\\]\\.:\\/";
@@ -23867,6 +25666,993 @@ var MitaVRM = (function(exports) {
 			PropertyBinding.prototype._setValue_fromArray_setMatrixWorldNeedsUpdate
 		]
 	];
+	/**
+	* An instance of `AnimationAction` schedules the playback of an animation which is
+	* stored in {@link AnimationClip}.
+	*/
+	var AnimationAction = class {
+		/**
+		* Constructs a new animation action.
+		*
+		* @param {AnimationMixer} mixer - The mixer that is controlled by this action.
+		* @param {AnimationClip} clip - The animation clip that holds the actual keyframes.
+		* @param {?Object3D} [localRoot=null] - The root object on which this action is performed.
+		* @param {(NormalAnimationBlendMode|AdditiveAnimationBlendMode)} [blendMode] - The blend mode.
+		*/
+		constructor(mixer, clip, localRoot = null, blendMode = clip.blendMode) {
+			this._mixer = mixer;
+			this._clip = clip;
+			this._localRoot = localRoot;
+			/**
+			* Defines how the animation is blended/combined when two or more animations
+			* are simultaneously played.
+			*
+			* @type {(NormalAnimationBlendMode|AdditiveAnimationBlendMode)}
+			*/
+			this.blendMode = blendMode;
+			const tracks = clip.tracks, nTracks = tracks.length, interpolants = new Array(nTracks);
+			const interpolantSettings = {
+				endingStart: ZeroCurvatureEnding,
+				endingEnd: ZeroCurvatureEnding
+			};
+			for (let i = 0; i !== nTracks; ++i) {
+				const interpolant = tracks[i].createInterpolant(null);
+				interpolants[i] = interpolant;
+				interpolant.settings = interpolantSettings;
+			}
+			this._interpolantSettings = interpolantSettings;
+			this._interpolants = interpolants;
+			this._propertyBindings = new Array(nTracks);
+			this._cacheIndex = null;
+			this._byClipCacheIndex = null;
+			this._timeScaleInterpolant = null;
+			this._restoreTimeScale = null;
+			this._weightInterpolant = null;
+			/**
+			* The loop mode, set via {@link AnimationAction#setLoop}.
+			*
+			* @type {(LoopRepeat|LoopOnce|LoopPingPong)}
+			* @default LoopRepeat
+			*/
+			this.loop = LoopRepeat;
+			this._loopCount = -1;
+			this._startTime = null;
+			/**
+			* The local time of this action (in seconds, starting with `0`).
+			*
+			* The value gets clamped or wrapped to `[0,clip.duration]` (according to the
+			* loop state).
+			*
+			* @type {number}
+			* @default Infinity
+			*/
+			this.time = 0;
+			/**
+			* Scaling factor for the {@link AnimationAction#time}. A value of `0` causes the
+			* animation to pause. Negative values cause the animation to play backwards.
+			*
+			* @type {number}
+			* @default 1
+			*/
+			this.timeScale = 1;
+			this._effectiveTimeScale = 1;
+			/**
+			* The degree of influence of this action (in the interval `[0, 1]`). Values
+			* between `0` (no impact) and `1` (full impact) can be used to blend between
+			* several actions.
+			*
+			* @type {number}
+			* @default 1
+			*/
+			this.weight = 1;
+			this._effectiveWeight = 1;
+			/**
+			* The number of repetitions of the performed clip over the course of this action.
+			* Can be set via {@link AnimationAction#setLoop}.
+			*
+			* Setting this number has no effect if {@link AnimationAction#loop} is set to
+			* `THREE:LoopOnce`.
+			*
+			* @type {number}
+			* @default Infinity
+			*/
+			this.repetitions = Infinity;
+			/**
+			* If set to `true`, the playback of the action is paused.
+			*
+			* @type {boolean}
+			* @default false
+			*/
+			this.paused = false;
+			/**
+			* If set to `false`, the action is disabled so it has no impact.
+			*
+			* When the action is re-enabled, the animation continues from its current
+			* time (setting `enabled` to `false` doesn't reset the action).
+			*
+			* @type {boolean}
+			* @default true
+			*/
+			this.enabled = true;
+			/**
+			* If set to true the animation will automatically be paused on its last frame.
+			*
+			* If set to false, {@link AnimationAction#enabled} will automatically be switched
+			* to `false` when the last loop of the action has finished, so that this action has
+			* no further impact.
+			*
+			* Note: This member has no impact if the action is interrupted (it
+			* has only an effect if its last loop has really finished).
+			*
+			* @type {boolean}
+			* @default false
+			*/
+			this.clampWhenFinished = false;
+			/**
+			* Enables smooth interpolation without separate clips for start, loop and end.
+			*
+			* @type {boolean}
+			* @default true
+			*/
+			this.zeroSlopeAtStart = true;
+			/**
+			* Enables smooth interpolation without separate clips for start, loop and end.
+			*
+			* @type {boolean}
+			* @default true
+			*/
+			this.zeroSlopeAtEnd = true;
+		}
+		/**
+		* Starts the playback of the animation.
+		*
+		* @return {AnimationAction} A reference to this animation action.
+		*/
+		play() {
+			this._mixer._activateAction(this);
+			return this;
+		}
+		/**
+		* Stops the playback of the animation.
+		*
+		* @return {AnimationAction} A reference to this animation action.
+		*/
+		stop() {
+			this._mixer._deactivateAction(this);
+			return this.reset();
+		}
+		/**
+		* Resets the playback of the animation.
+		*
+		* @return {AnimationAction} A reference to this animation action.
+		*/
+		reset() {
+			this.paused = false;
+			this.enabled = true;
+			this.time = 0;
+			this._loopCount = -1;
+			this._startTime = null;
+			return this.stopFading().stopWarping();
+		}
+		/**
+		* Returns `true` if the animation is running.
+		*
+		* @return {boolean} Whether the animation is running or not.
+		*/
+		isRunning() {
+			return this.enabled && !this.paused && this.timeScale !== 0 && this._startTime === null && this._mixer._isActiveAction(this);
+		}
+		/**
+		* Returns `true` when {@link AnimationAction#play} has been called.
+		*
+		* @return {boolean} Whether the animation is scheduled or not.
+		*/
+		isScheduled() {
+			return this._mixer._isActiveAction(this);
+		}
+		/**
+		* Defines the time when the animation should start.
+		*
+		* @param {number} time - The start time in seconds.
+		* @return {AnimationAction} A reference to this animation action.
+		*/
+		startAt(time) {
+			this._startTime = time;
+			return this;
+		}
+		/**
+		* Configures the loop settings for this action.
+		*
+		* @param {(LoopRepeat|LoopOnce|LoopPingPong)} mode - The loop mode.
+		* @param {number} repetitions - The number of repetitions.
+		* @return {AnimationAction} A reference to this animation action.
+		*/
+		setLoop(mode, repetitions) {
+			this.loop = mode;
+			this.repetitions = repetitions;
+			return this;
+		}
+		/**
+		* Sets the effective weight of this action.
+		*
+		* An action has no effect and thus an effective weight of zero when the
+		* action is disabled.
+		*
+		* @param {number} weight - The weight to set.
+		* @return {AnimationAction} A reference to this animation action.
+		*/
+		setEffectiveWeight(weight) {
+			this.weight = weight;
+			this._effectiveWeight = this.enabled ? weight : 0;
+			return this.stopFading();
+		}
+		/**
+		* Returns the effective weight of this action.
+		*
+		* @return {number} The effective weight.
+		*/
+		getEffectiveWeight() {
+			return this._effectiveWeight;
+		}
+		/**
+		* Fades the animation in by increasing its weight gradually from `0` to `1`,
+		* within the passed time interval.
+		*
+		* @param {number} duration - The duration of the fade.
+		* @return {AnimationAction} A reference to this animation action.
+		*/
+		fadeIn(duration) {
+			return this._scheduleFading(duration, 0, 1);
+		}
+		/**
+		* Fades the animation out by decreasing its weight gradually from `1` to `0`,
+		* within the passed time interval.
+		*
+		* @param {number} duration - The duration of the fade.
+		* @return {AnimationAction} A reference to this animation action.
+		*/
+		fadeOut(duration) {
+			return this._scheduleFading(duration, 1, 0);
+		}
+		/**
+		* Causes this action to fade in and the given action to fade out,
+		* within the passed time interval.
+		*
+		* @param {AnimationAction} fadeOutAction - The animation action to fade out.
+		* @param {number} duration - The duration of the fade.
+		* @param {boolean} [warp=false] - Whether warping should be used or not.
+		* @return {AnimationAction} A reference to this animation action.
+		*/
+		crossFadeFrom(fadeOutAction, duration, warp = false) {
+			fadeOutAction.fadeOut(duration);
+			this.fadeIn(duration);
+			if (warp === true) {
+				const fadeInDuration = this._clip.duration, fadeOutDuration = fadeOutAction._clip.duration, startEndRatio = fadeOutDuration / fadeInDuration, endStartRatio = fadeInDuration / fadeOutDuration;
+				fadeOutAction._restoreTimeScale = fadeOutAction.timeScale;
+				this._restoreTimeScale = this.timeScale;
+				fadeOutAction.warp(1, startEndRatio, duration);
+				this.warp(endStartRatio, 1, duration);
+			}
+			return this;
+		}
+		/**
+		* Causes this action to fade out and the given action to fade in,
+		* within the passed time interval.
+		*
+		* @param {AnimationAction} fadeInAction - The animation action to fade in.
+		* @param {number} duration - The duration of the fade.
+		* @param {boolean} [warp=false] - Whether warping should be used or not.
+		* @return {AnimationAction} A reference to this animation action.
+		*/
+		crossFadeTo(fadeInAction, duration, warp = false) {
+			return fadeInAction.crossFadeFrom(this, duration, warp);
+		}
+		/**
+		* Stops any fading which is applied to this action.
+		*
+		* @return {AnimationAction} A reference to this animation action.
+		*/
+		stopFading() {
+			const weightInterpolant = this._weightInterpolant;
+			if (weightInterpolant !== null) {
+				this._weightInterpolant = null;
+				this._mixer._takeBackControlInterpolant(weightInterpolant);
+			}
+			return this;
+		}
+		/**
+		* Sets the effective time scale of this action.
+		*
+		* An action has no effect and thus an effective time scale of zero when the
+		* action is paused.
+		*
+		* @param {number} timeScale - The time scale to set.
+		* @return {AnimationAction} A reference to this animation action.
+		*/
+		setEffectiveTimeScale(timeScale) {
+			this.timeScale = timeScale;
+			this._effectiveTimeScale = this.paused ? 0 : timeScale;
+			return this.stopWarping();
+		}
+		/**
+		* Returns the effective time scale of this action.
+		*
+		* @return {number} The effective time scale.
+		*/
+		getEffectiveTimeScale() {
+			return this._effectiveTimeScale;
+		}
+		/**
+		* Sets the duration for a single loop of this action.
+		*
+		* @param {number} duration - The duration to set.
+		* @return {AnimationAction} A reference to this animation action.
+		*/
+		setDuration(duration) {
+			this.timeScale = this._clip.duration / duration;
+			return this.stopWarping();
+		}
+		/**
+		* Synchronizes this action with the passed other action.
+		*
+		* @param {AnimationAction} action - The action to sync with.
+		* @return {AnimationAction} A reference to this animation action.
+		*/
+		syncWith(action) {
+			this.time = action.time;
+			this.timeScale = action.timeScale;
+			return this.stopWarping();
+		}
+		/**
+		* Decelerates this animation's speed to `0` within the passed time interval.
+		*
+		* @param {number} duration - The duration.
+		* @return {AnimationAction} A reference to this animation action.
+		*/
+		halt(duration) {
+			return this.warp(this._effectiveTimeScale, 0, duration);
+		}
+		/**
+		* Changes the playback speed, within the passed time interval, by modifying
+		* {@link AnimationAction#timeScale} gradually from `startTimeScale` to
+		* `endTimeScale`.
+		*
+		* @param {number} startTimeScale - The start time scale.
+		* @param {number} endTimeScale - The end time scale.
+		* @param {number} duration - The duration.
+		* @return {AnimationAction} A reference to this animation action.
+		*/
+		warp(startTimeScale, endTimeScale, duration) {
+			const mixer = this._mixer, now = mixer.time, timeScale = this.timeScale;
+			let interpolant = this._timeScaleInterpolant;
+			if (interpolant === null) {
+				interpolant = mixer._lendControlInterpolant();
+				this._timeScaleInterpolant = interpolant;
+			}
+			const times = interpolant.parameterPositions, values = interpolant.sampleValues;
+			times[0] = now;
+			times[1] = now + duration;
+			values[0] = startTimeScale / timeScale;
+			values[1] = endTimeScale / timeScale;
+			return this;
+		}
+		/**
+		* Stops any scheduled warping which is applied to this action.
+		*
+		* @return {AnimationAction} A reference to this animation action.
+		*/
+		stopWarping() {
+			const timeScaleInterpolant = this._timeScaleInterpolant;
+			if (timeScaleInterpolant !== null) {
+				this._timeScaleInterpolant = null;
+				this._mixer._takeBackControlInterpolant(timeScaleInterpolant);
+			}
+			this._restoreTimeScale = null;
+			return this;
+		}
+		/**
+		* Returns the animation mixer of this animation action.
+		*
+		* @return {AnimationMixer} The animation mixer.
+		*/
+		getMixer() {
+			return this._mixer;
+		}
+		/**
+		* Returns the animation clip of this animation action.
+		*
+		* @return {AnimationClip} The animation clip.
+		*/
+		getClip() {
+			return this._clip;
+		}
+		/**
+		* Returns the root object of this animation action.
+		*
+		* @return {Object3D} The root object.
+		*/
+		getRoot() {
+			return this._localRoot || this._mixer._root;
+		}
+		_update(time, deltaTime, timeDirection, accuIndex) {
+			if (!this.enabled) {
+				this._updateWeight(time);
+				return;
+			}
+			const startTime = this._startTime;
+			if (startTime !== null) {
+				const timeRunning = (time - startTime) * timeDirection;
+				if (timeRunning < 0 || timeDirection === 0) deltaTime = 0;
+				else {
+					this._startTime = null;
+					deltaTime = timeDirection * timeRunning;
+				}
+			}
+			deltaTime *= this._updateTimeScale(time);
+			const clipTime = this._updateTime(deltaTime);
+			const weight = this._updateWeight(time);
+			if (weight > 0) {
+				const interpolants = this._interpolants;
+				const propertyMixers = this._propertyBindings;
+				switch (this.blendMode) {
+					case AdditiveAnimationBlendMode:
+						for (let j = 0, m = interpolants.length; j !== m; ++j) {
+							interpolants[j].evaluate(clipTime);
+							propertyMixers[j].accumulateAdditive(weight);
+						}
+						break;
+					case NormalAnimationBlendMode:
+					default: for (let j = 0, m = interpolants.length; j !== m; ++j) {
+						interpolants[j].evaluate(clipTime);
+						propertyMixers[j].accumulate(accuIndex, weight);
+					}
+				}
+			}
+		}
+		_updateWeight(time) {
+			let weight = 0;
+			if (this.enabled) {
+				weight = this.weight;
+				const interpolant = this._weightInterpolant;
+				if (interpolant !== null) {
+					const interpolantValue = interpolant.evaluate(time)[0];
+					weight *= interpolantValue;
+					if (time > interpolant.parameterPositions[1]) {
+						this.stopFading();
+						if (interpolantValue === 0) this.enabled = false;
+					}
+				}
+			}
+			this._effectiveWeight = weight;
+			return weight;
+		}
+		_updateTimeScale(time) {
+			let timeScale = 0;
+			if (!this.paused) {
+				timeScale = this.timeScale;
+				const interpolant = this._timeScaleInterpolant;
+				if (interpolant !== null) {
+					const interpolantValue = interpolant.evaluate(time)[0];
+					timeScale *= interpolantValue;
+					if (time > interpolant.parameterPositions[1]) {
+						if (timeScale === 0) this.paused = true;
+						else {
+							if (this._restoreTimeScale !== null) timeScale = this._restoreTimeScale;
+							this.timeScale = timeScale;
+						}
+						this.stopWarping();
+					}
+				}
+			}
+			this._effectiveTimeScale = timeScale;
+			return timeScale;
+		}
+		_updateTime(deltaTime) {
+			const duration = this._clip.duration;
+			const loop = this.loop;
+			let time = this.time + deltaTime;
+			let loopCount = this._loopCount;
+			const pingPong = loop === LoopPingPong;
+			if (deltaTime === 0) {
+				if (loopCount === -1) return time;
+				return pingPong && (loopCount & 1) === 1 ? duration - time : time;
+			}
+			if (loop === 2200) {
+				if (loopCount === -1) {
+					this._loopCount = 0;
+					this._setEndings(true, true, false);
+				}
+				handle_stop: {
+					if (time >= duration) time = duration;
+					else if (time < 0) time = 0;
+					else {
+						this.time = time;
+						break handle_stop;
+					}
+					if (this.clampWhenFinished) this.paused = true;
+					else this.enabled = false;
+					this.time = time;
+					this._mixer.dispatchEvent({
+						type: "finished",
+						action: this,
+						direction: deltaTime < 0 ? -1 : 1
+					});
+				}
+			} else {
+				if (loopCount === -1) {
+					if (deltaTime >= 0) {
+						loopCount = 0;
+						this._setEndings(true, this.repetitions === 0, pingPong);
+					} else this._setEndings(this.repetitions === 0, true, pingPong);
+				}
+				if (time >= duration || time < 0) {
+					const loopDelta = Math.floor(time / duration);
+					time -= duration * loopDelta;
+					loopCount += Math.abs(loopDelta);
+					const pending = this.repetitions - loopCount;
+					if (pending <= 0) {
+						if (this.clampWhenFinished) this.paused = true;
+						else this.enabled = false;
+						time = deltaTime > 0 ? duration : 0;
+						this.time = time;
+						this._mixer.dispatchEvent({
+							type: "finished",
+							action: this,
+							direction: deltaTime > 0 ? 1 : -1
+						});
+					} else {
+						if (pending === 1) {
+							const atStart = deltaTime < 0;
+							this._setEndings(atStart, !atStart, pingPong);
+						} else this._setEndings(false, false, pingPong);
+						this._loopCount = loopCount;
+						this.time = time;
+						this._mixer.dispatchEvent({
+							type: "loop",
+							action: this,
+							loopDelta
+						});
+					}
+				} else {
+					this._loopCount = loopCount;
+					this.time = time;
+				}
+				if (pingPong && (loopCount & 1) === 1) return duration - time;
+			}
+			return time;
+		}
+		_setEndings(atStart, atEnd, pingPong) {
+			const settings = this._interpolantSettings;
+			if (pingPong) {
+				settings.endingStart = ZeroSlopeEnding;
+				settings.endingEnd = ZeroSlopeEnding;
+			} else {
+				if (atStart) settings.endingStart = this.zeroSlopeAtStart ? ZeroSlopeEnding : ZeroCurvatureEnding;
+				else settings.endingStart = WrapAroundEnding;
+				if (atEnd) settings.endingEnd = this.zeroSlopeAtEnd ? ZeroSlopeEnding : ZeroCurvatureEnding;
+				else settings.endingEnd = WrapAroundEnding;
+			}
+		}
+		_scheduleFading(duration, weightNow, weightThen) {
+			const mixer = this._mixer, now = mixer.time;
+			let interpolant = this._weightInterpolant;
+			if (interpolant === null) {
+				interpolant = mixer._lendControlInterpolant();
+				this._weightInterpolant = interpolant;
+			}
+			const times = interpolant.parameterPositions, values = interpolant.sampleValues;
+			times[0] = now;
+			values[0] = weightNow;
+			times[1] = now + duration;
+			values[1] = weightThen;
+			return this;
+		}
+	};
+	const _controlInterpolantsResultBuffer = /* @__PURE__ */ new Float32Array(1);
+	/**
+	* `AnimationMixer` is a player for animations on a particular object in
+	* the scene. When multiple objects in the scene are animated independently,
+	* one `AnimationMixer` may be used for each object.
+	*/
+	var AnimationMixer = class extends EventDispatcher {
+		/**
+		* Constructs a new animation mixer.
+		*
+		* @param {Object3D} root - The object whose animations shall be played by this mixer.
+		*/
+		constructor(root) {
+			super();
+			this._root = root;
+			this._initMemoryManager();
+			this._accuIndex = 0;
+			/**
+			* The global mixer time (in seconds; starting with `0` on the mixer's creation).
+			*
+			* @type {number}
+			* @default 0
+			*/
+			this.time = 0;
+			/**
+			* A scaling factor for the global time.
+			*
+			* Note: Setting this member to `0` and later back to `1` is a
+			* possibility to pause/unpause all actions that are controlled by this
+			* mixer.
+			*
+			* @type {number}
+			* @default 1
+			*/
+			this.timeScale = 1;
+			if (typeof __THREE_DEVTOOLS__ !== "undefined") __THREE_DEVTOOLS__.dispatchEvent(new CustomEvent("observe", { detail: this }));
+		}
+		_bindAction(action, prototypeAction) {
+			const root = action._localRoot || this._root, tracks = action._clip.tracks, nTracks = tracks.length, bindings = action._propertyBindings, interpolants = action._interpolants, rootUuid = root.uuid, bindingsByRoot = this._bindingsByRootAndName;
+			let bindingsByName = bindingsByRoot[rootUuid];
+			if (bindingsByName === void 0) {
+				bindingsByName = {};
+				bindingsByRoot[rootUuid] = bindingsByName;
+			}
+			for (let i = 0; i !== nTracks; ++i) {
+				const track = tracks[i], trackName = track.name;
+				let binding = bindingsByName[trackName];
+				if (binding !== void 0) {
+					++binding.referenceCount;
+					bindings[i] = binding;
+				} else {
+					binding = bindings[i];
+					if (binding !== void 0) {
+						if (binding._cacheIndex === null) {
+							++binding.referenceCount;
+							this._addInactiveBinding(binding, rootUuid, trackName);
+						}
+						continue;
+					}
+					const path = prototypeAction && prototypeAction._propertyBindings[i].binding.parsedPath;
+					binding = new PropertyMixer(PropertyBinding.create(root, trackName, path), track.ValueTypeName, track.getValueSize());
+					++binding.referenceCount;
+					this._addInactiveBinding(binding, rootUuid, trackName);
+					bindings[i] = binding;
+				}
+				interpolants[i].resultBuffer = binding.buffer;
+			}
+		}
+		_activateAction(action) {
+			if (!this._isActiveAction(action)) {
+				if (action._cacheIndex === null) {
+					const rootUuid = (action._localRoot || this._root).uuid, clipUuid = action._clip.uuid, actionsForClip = this._actionsByClip[clipUuid];
+					this._bindAction(action, actionsForClip && actionsForClip.knownActions[0]);
+					this._addInactiveAction(action, clipUuid, rootUuid);
+				}
+				const bindings = action._propertyBindings;
+				for (let i = 0, n = bindings.length; i !== n; ++i) {
+					const binding = bindings[i];
+					if (binding.useCount++ === 0) {
+						this._lendBinding(binding);
+						binding.saveOriginalState();
+					}
+				}
+				this._lendAction(action);
+			}
+		}
+		_deactivateAction(action) {
+			if (this._isActiveAction(action)) {
+				const bindings = action._propertyBindings;
+				for (let i = 0, n = bindings.length; i !== n; ++i) {
+					const binding = bindings[i];
+					if (--binding.useCount === 0) {
+						binding.restoreOriginalState();
+						this._takeBackBinding(binding);
+					}
+				}
+				this._takeBackAction(action);
+			}
+		}
+		_initMemoryManager() {
+			this._actions = [];
+			this._nActiveActions = 0;
+			this._actionsByClip = {};
+			this._bindings = [];
+			this._nActiveBindings = 0;
+			this._bindingsByRootAndName = {};
+			this._controlInterpolants = [];
+			this._nActiveControlInterpolants = 0;
+			const scope = this;
+			this.stats = {
+				actions: {
+					get total() {
+						return scope._actions.length;
+					},
+					get inUse() {
+						return scope._nActiveActions;
+					}
+				},
+				bindings: {
+					get total() {
+						return scope._bindings.length;
+					},
+					get inUse() {
+						return scope._nActiveBindings;
+					}
+				},
+				controlInterpolants: {
+					get total() {
+						return scope._controlInterpolants.length;
+					},
+					get inUse() {
+						return scope._nActiveControlInterpolants;
+					}
+				}
+			};
+		}
+		_isActiveAction(action) {
+			const index = action._cacheIndex;
+			return index !== null && index < this._nActiveActions;
+		}
+		_addInactiveAction(action, clipUuid, rootUuid) {
+			const actions = this._actions, actionsByClip = this._actionsByClip;
+			let actionsForClip = actionsByClip[clipUuid];
+			if (actionsForClip === void 0) {
+				actionsForClip = {
+					knownActions: [action],
+					actionByRoot: {}
+				};
+				action._byClipCacheIndex = 0;
+				actionsByClip[clipUuid] = actionsForClip;
+			} else {
+				const knownActions = actionsForClip.knownActions;
+				action._byClipCacheIndex = knownActions.length;
+				knownActions.push(action);
+			}
+			action._cacheIndex = actions.length;
+			actions.push(action);
+			actionsForClip.actionByRoot[rootUuid] = action;
+		}
+		_removeInactiveAction(action) {
+			const actions = this._actions, lastInactiveAction = actions[actions.length - 1], cacheIndex = action._cacheIndex;
+			lastInactiveAction._cacheIndex = cacheIndex;
+			actions[cacheIndex] = lastInactiveAction;
+			actions.pop();
+			action._cacheIndex = null;
+			const clipUuid = action._clip.uuid, actionsByClip = this._actionsByClip, actionsForClip = actionsByClip[clipUuid], knownActionsForClip = actionsForClip.knownActions, lastKnownAction = knownActionsForClip[knownActionsForClip.length - 1], byClipCacheIndex = action._byClipCacheIndex;
+			lastKnownAction._byClipCacheIndex = byClipCacheIndex;
+			knownActionsForClip[byClipCacheIndex] = lastKnownAction;
+			knownActionsForClip.pop();
+			action._byClipCacheIndex = null;
+			const actionByRoot = actionsForClip.actionByRoot, rootUuid = (action._localRoot || this._root).uuid;
+			delete actionByRoot[rootUuid];
+			if (knownActionsForClip.length === 0) delete actionsByClip[clipUuid];
+			this._removeInactiveBindingsForAction(action);
+		}
+		_removeInactiveBindingsForAction(action) {
+			const bindings = action._propertyBindings;
+			for (let i = 0, n = bindings.length; i !== n; ++i) {
+				const binding = bindings[i];
+				if (--binding.referenceCount === 0) this._removeInactiveBinding(binding);
+			}
+		}
+		_lendAction(action) {
+			const actions = this._actions, prevIndex = action._cacheIndex, lastActiveIndex = this._nActiveActions++, firstInactiveAction = actions[lastActiveIndex];
+			action._cacheIndex = lastActiveIndex;
+			actions[lastActiveIndex] = action;
+			firstInactiveAction._cacheIndex = prevIndex;
+			actions[prevIndex] = firstInactiveAction;
+		}
+		_takeBackAction(action) {
+			const actions = this._actions, prevIndex = action._cacheIndex, firstInactiveIndex = --this._nActiveActions, lastActiveAction = actions[firstInactiveIndex];
+			action._cacheIndex = firstInactiveIndex;
+			actions[firstInactiveIndex] = action;
+			lastActiveAction._cacheIndex = prevIndex;
+			actions[prevIndex] = lastActiveAction;
+		}
+		_addInactiveBinding(binding, rootUuid, trackName) {
+			const bindingsByRoot = this._bindingsByRootAndName, bindings = this._bindings;
+			let bindingByName = bindingsByRoot[rootUuid];
+			if (bindingByName === void 0) {
+				bindingByName = {};
+				bindingsByRoot[rootUuid] = bindingByName;
+			}
+			bindingByName[trackName] = binding;
+			binding._cacheIndex = bindings.length;
+			bindings.push(binding);
+		}
+		_removeInactiveBinding(binding) {
+			const bindings = this._bindings, propBinding = binding.binding, rootUuid = propBinding.rootNode.uuid, trackName = propBinding.path, bindingsByRoot = this._bindingsByRootAndName, bindingByName = bindingsByRoot[rootUuid], lastInactiveBinding = bindings[bindings.length - 1], cacheIndex = binding._cacheIndex;
+			lastInactiveBinding._cacheIndex = cacheIndex;
+			bindings[cacheIndex] = lastInactiveBinding;
+			bindings.pop();
+			delete bindingByName[trackName];
+			if (Object.keys(bindingByName).length === 0) delete bindingsByRoot[rootUuid];
+		}
+		_lendBinding(binding) {
+			const bindings = this._bindings, prevIndex = binding._cacheIndex, lastActiveIndex = this._nActiveBindings++, firstInactiveBinding = bindings[lastActiveIndex];
+			binding._cacheIndex = lastActiveIndex;
+			bindings[lastActiveIndex] = binding;
+			firstInactiveBinding._cacheIndex = prevIndex;
+			bindings[prevIndex] = firstInactiveBinding;
+		}
+		_takeBackBinding(binding) {
+			const bindings = this._bindings, prevIndex = binding._cacheIndex, firstInactiveIndex = --this._nActiveBindings, lastActiveBinding = bindings[firstInactiveIndex];
+			binding._cacheIndex = firstInactiveIndex;
+			bindings[firstInactiveIndex] = binding;
+			lastActiveBinding._cacheIndex = prevIndex;
+			bindings[prevIndex] = lastActiveBinding;
+		}
+		_lendControlInterpolant() {
+			const interpolants = this._controlInterpolants, lastActiveIndex = this._nActiveControlInterpolants++;
+			let interpolant = interpolants[lastActiveIndex];
+			if (interpolant === void 0) {
+				interpolant = new LinearInterpolant(/* @__PURE__ */ new Float32Array(2), /* @__PURE__ */ new Float32Array(2), 1, _controlInterpolantsResultBuffer);
+				interpolant.__cacheIndex = lastActiveIndex;
+				interpolants[lastActiveIndex] = interpolant;
+			}
+			return interpolant;
+		}
+		_takeBackControlInterpolant(interpolant) {
+			const interpolants = this._controlInterpolants, prevIndex = interpolant.__cacheIndex, firstInactiveIndex = --this._nActiveControlInterpolants, lastActiveInterpolant = interpolants[firstInactiveIndex];
+			interpolant.__cacheIndex = firstInactiveIndex;
+			interpolants[firstInactiveIndex] = interpolant;
+			lastActiveInterpolant.__cacheIndex = prevIndex;
+			interpolants[prevIndex] = lastActiveInterpolant;
+		}
+		/**
+		* Returns an instance of {@link AnimationAction} for the passed clip.
+		*
+		* If an action fitting the clip and root parameters doesn't yet exist, it
+		* will be created by this method. Calling this method several times with the
+		* same clip and root parameters always returns the same action.
+		*
+		* @param {AnimationClip|string} clip - An animation clip or alternatively the name of the animation clip.
+		* @param {Object3D} [optionalRoot] - An alternative root object.
+		* @param {(NormalAnimationBlendMode|AdditiveAnimationBlendMode)} [blendMode] - The blend mode.
+		* @return {?AnimationAction} The animation action.
+		*/
+		clipAction(clip, optionalRoot, blendMode) {
+			const root = optionalRoot || this._root, rootUuid = root.uuid;
+			let clipObject = typeof clip === "string" ? AnimationClip.findByName(root, clip) : clip;
+			const clipUuid = clipObject !== null ? clipObject.uuid : clip;
+			const actionsForClip = this._actionsByClip[clipUuid];
+			let prototypeAction = null;
+			if (blendMode === void 0) {
+				if (clipObject !== null) blendMode = clipObject.blendMode;
+				else blendMode = NormalAnimationBlendMode;
+			}
+			if (actionsForClip !== void 0) {
+				const existingAction = actionsForClip.actionByRoot[rootUuid];
+				if (existingAction !== void 0 && existingAction.blendMode === blendMode) return existingAction;
+				prototypeAction = actionsForClip.knownActions[0];
+				if (clipObject === null) clipObject = prototypeAction._clip;
+			}
+			if (clipObject === null) return null;
+			const newAction = new AnimationAction(this, clipObject, optionalRoot, blendMode);
+			this._bindAction(newAction, prototypeAction);
+			this._addInactiveAction(newAction, clipUuid, rootUuid);
+			return newAction;
+		}
+		/**
+		* Returns an existing animation action for the passed clip.
+		*
+		* @param {AnimationClip|string} clip - An animation clip or alternatively the name of the animation clip.
+		* @param {Object3D} [optionalRoot] - An alternative root object.
+		* @return {?AnimationAction} The animation action. Returns `null` if no action was found.
+		*/
+		existingAction(clip, optionalRoot) {
+			const root = optionalRoot || this._root, rootUuid = root.uuid, clipObject = typeof clip === "string" ? AnimationClip.findByName(root, clip) : clip, clipUuid = clipObject ? clipObject.uuid : clip, actionsForClip = this._actionsByClip[clipUuid];
+			if (actionsForClip !== void 0) return actionsForClip.actionByRoot[rootUuid] || null;
+			return null;
+		}
+		/**
+		* Deactivates all previously scheduled actions on this mixer.
+		*
+		* @return {AnimationMixer} A reference to this animation mixer.
+		*/
+		stopAllAction() {
+			const actions = this._actions, nActions = this._nActiveActions;
+			for (let i = nActions - 1; i >= 0; --i) actions[i].stop();
+			return this;
+		}
+		/**
+		* Advances the global mixer time and updates the animation.
+		*
+		* This is usually done in the render loop by passing the delta
+		* time from {@link Clock} or {@link Timer}.
+		*
+		* @param {number} deltaTime - The delta time in seconds.
+		* @return {AnimationMixer} A reference to this animation mixer.
+		*/
+		update(deltaTime) {
+			deltaTime *= this.timeScale;
+			const actions = this._actions, nActions = this._nActiveActions, time = this.time += deltaTime, timeDirection = Math.sign(deltaTime), accuIndex = this._accuIndex ^= 1;
+			for (let i = 0; i !== nActions; ++i) actions[i]._update(time, deltaTime, timeDirection, accuIndex);
+			const bindings = this._bindings, nBindings = this._nActiveBindings;
+			for (let i = 0; i !== nBindings; ++i) bindings[i].apply(accuIndex);
+			return this;
+		}
+		/**
+		* Sets the global mixer to a specific time and updates the animation accordingly.
+		*
+		* This is useful when you need to jump to an exact time in an animation. The
+		* input parameter will be scaled by {@link AnimationMixer#timeScale}
+		*
+		* @param {number} time - The time to set in seconds.
+		* @return {AnimationMixer} A reference to this animation mixer.
+		*/
+		setTime(time) {
+			this.time = 0;
+			for (let i = 0; i < this._actions.length; i++) this._actions[i].time = 0;
+			return this.update(time);
+		}
+		/**
+		* Returns this mixer's root object.
+		*
+		* @return {Object3D} The mixer's root object.
+		*/
+		getRoot() {
+			return this._root;
+		}
+		/**
+		* Deallocates all memory resources for a clip. Before using this method make
+		* sure to call {@link AnimationAction#stop} for all related actions.
+		*
+		* @param {AnimationClip} clip - The clip to uncache.
+		*/
+		uncacheClip(clip) {
+			const actions = this._actions, clipUuid = clip.uuid, actionsByClip = this._actionsByClip, actionsForClip = actionsByClip[clipUuid];
+			if (actionsForClip !== void 0) {
+				const actionsToRemove = actionsForClip.knownActions;
+				for (let i = 0, n = actionsToRemove.length; i !== n; ++i) {
+					const action = actionsToRemove[i];
+					this._deactivateAction(action);
+					const cacheIndex = action._cacheIndex, lastInactiveAction = actions[actions.length - 1];
+					action._cacheIndex = null;
+					action._byClipCacheIndex = null;
+					lastInactiveAction._cacheIndex = cacheIndex;
+					actions[cacheIndex] = lastInactiveAction;
+					actions.pop();
+					this._removeInactiveBindingsForAction(action);
+				}
+				delete actionsByClip[clipUuid];
+			}
+		}
+		/**
+		* Deallocates all memory resources for a root object. Before using this
+		* method make sure to call {@link AnimationAction#stop} for all related
+		* actions or alternatively {@link AnimationMixer#stopAllAction} when the
+		* mixer operates on a single root.
+		*
+		* @param {Object3D} root - The root object to uncache.
+		*/
+		uncacheRoot(root) {
+			const rootUuid = root.uuid, actionsByClip = this._actionsByClip;
+			for (const clipUuid in actionsByClip) {
+				const action = actionsByClip[clipUuid].actionByRoot[rootUuid];
+				if (action !== void 0) {
+					this._deactivateAction(action);
+					this._removeInactiveAction(action);
+				}
+			}
+			const bindingByName = this._bindingsByRootAndName[rootUuid];
+			if (bindingByName !== void 0) for (const trackName in bindingByName) {
+				const binding = bindingByName[trackName];
+				binding.restoreOriginalState();
+				this._removeInactiveBinding(binding);
+			}
+		}
+		/**
+		* Deallocates all memory resources for an action. The action is identified by the
+		* given clip and an optional root object. Before using this method make
+		* sure to call {@link AnimationAction#stop} to deactivate the action.
+		*
+		* @param {AnimationClip|string} clip - An animation clip or alternatively the name of the animation clip.
+		* @param {Object3D} [optionalRoot] - An alternative root object.
+		*/
+		uncacheAction(clip, optionalRoot) {
+			const action = this.existingAction(clip, optionalRoot);
+			if (action !== null) {
+				this._deactivateAction(action);
+				this._removeInactiveAction(action);
+			}
+		}
+	};
 	/**
 	* An alternative version of a buffer attribute with more control over the VBO.
 	*
@@ -37776,6 +40562,2921 @@ void main() {
 			return primitiveDef.targets !== void 0 ? addMorphTargets(geometry, primitiveDef.targets, parser) : geometry;
 		});
 	}
+	// node_modules/three/examples/jsm/libs/fflate.module.js
+	/*!
+	fflate - fast JavaScript compression/decompression
+	<https://101arrowz.github.io/fflate>
+	Licensed under MIT. https://github.com/101arrowz/fflate/blob/master/LICENSE
+	version 0.8.2
+	*/
+	var u8 = Uint8Array;
+	var u16 = Uint16Array;
+	var i32 = Int32Array;
+	var fleb = new u8([
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		1,
+		1,
+		1,
+		1,
+		2,
+		2,
+		2,
+		2,
+		3,
+		3,
+		3,
+		3,
+		4,
+		4,
+		4,
+		4,
+		5,
+		5,
+		5,
+		5,
+		0,
+		0,
+		0,
+		0
+	]);
+	var fdeb = new u8([
+		0,
+		0,
+		0,
+		0,
+		1,
+		1,
+		2,
+		2,
+		3,
+		3,
+		4,
+		4,
+		5,
+		5,
+		6,
+		6,
+		7,
+		7,
+		8,
+		8,
+		9,
+		9,
+		10,
+		10,
+		11,
+		11,
+		12,
+		12,
+		13,
+		13,
+		0,
+		0
+	]);
+	var clim = new u8([
+		16,
+		17,
+		18,
+		0,
+		8,
+		7,
+		9,
+		6,
+		10,
+		5,
+		11,
+		4,
+		12,
+		3,
+		13,
+		2,
+		14,
+		1,
+		15
+	]);
+	var freb = function(eb, start) {
+		var b = new u16(31);
+		for (var i = 0; i < 31; ++i) b[i] = start += 1 << eb[i - 1];
+		var r = new i32(b[30]);
+		for (var i = 1; i < 30; ++i) for (var j = b[i]; j < b[i + 1]; ++j) r[j] = j - b[i] << 5 | i;
+		return {
+			b,
+			r
+		};
+	};
+	var _a = freb(fleb, 2);
+	var fl = _a.b;
+	var revfl = _a.r;
+	fl[28] = 258, revfl[258] = 28;
+	var _b = freb(fdeb, 0);
+	var fd = _b.b;
+	_b.r;
+	var rev = new u16(32768);
+	for (var i = 0; i < 32768; ++i) {
+		var x = (i & 43690) >> 1 | (i & 21845) << 1;
+		x = (x & 52428) >> 2 | (x & 13107) << 2;
+		x = (x & 61680) >> 4 | (x & 3855) << 4;
+		rev[i] = ((x & 65280) >> 8 | (x & 255) << 8) >> 1;
+	}
+	var hMap = (function(cd, mb, r) {
+		var s = cd.length;
+		var i = 0;
+		var l = new u16(mb);
+		for (; i < s; ++i) if (cd[i]) ++l[cd[i] - 1];
+		var le = new u16(mb);
+		for (i = 1; i < mb; ++i) le[i] = le[i - 1] + l[i - 1] << 1;
+		var co;
+		if (r) {
+			co = new u16(1 << mb);
+			var rvb = 15 - mb;
+			for (i = 0; i < s; ++i) if (cd[i]) {
+				var sv = i << 4 | cd[i];
+				var r_1 = mb - cd[i];
+				var v = le[cd[i] - 1]++ << r_1;
+				for (var m = v | (1 << r_1) - 1; v <= m; ++v) co[rev[v] >> rvb] = sv;
+			}
+		} else {
+			co = new u16(s);
+			for (i = 0; i < s; ++i) if (cd[i]) co[i] = rev[le[cd[i] - 1]++] >> 15 - cd[i];
+		}
+		return co;
+	});
+	var flt = new u8(288);
+	for (var i = 0; i < 144; ++i) flt[i] = 8;
+	for (var i = 144; i < 256; ++i) flt[i] = 9;
+	for (var i = 256; i < 280; ++i) flt[i] = 7;
+	for (var i = 280; i < 288; ++i) flt[i] = 8;
+	var fdt = new u8(32);
+	for (var i = 0; i < 32; ++i) fdt[i] = 5;
+	var flrm = /*#__PURE__*/ hMap(flt, 9, 1);
+	var fdrm = /*#__PURE__*/ hMap(fdt, 5, 1);
+	var max = function(a) {
+		var m = a[0];
+		for (var i = 1; i < a.length; ++i) if (a[i] > m) m = a[i];
+		return m;
+	};
+	var bits = function(d, p, m) {
+		var o = p / 8 | 0;
+		return (d[o] | d[o + 1] << 8) >> (p & 7) & m;
+	};
+	var bits16 = function(d, p) {
+		var o = p / 8 | 0;
+		return (d[o] | d[o + 1] << 8 | d[o + 2] << 16) >> (p & 7);
+	};
+	var shft = function(p) {
+		return (p + 7) / 8 | 0;
+	};
+	var slc = function(v, s, e) {
+		if (s == null || s < 0) s = 0;
+		if (e == null || e > v.length) e = v.length;
+		return new u8(v.subarray(s, e));
+	};
+	var ec = [
+		"unexpected EOF",
+		"invalid block type",
+		"invalid length/literal",
+		"invalid distance",
+		"stream finished",
+		"no stream handler",
+		,
+		"no callback",
+		"invalid UTF-8 data",
+		"extra field too long",
+		"date not in range 1980-2099",
+		"filename too long",
+		"stream finishing",
+		"invalid zip data"
+	];
+	var err = function(ind, msg, nt) {
+		var e = new Error(msg || ec[ind]);
+		e.code = ind;
+		if (Error.captureStackTrace) Error.captureStackTrace(e, err);
+		if (!nt) throw e;
+		return e;
+	};
+	var inflt = function(dat, st, buf, dict) {
+		var sl = dat.length, dl = dict ? dict.length : 0;
+		if (!sl || st.f && !st.l) return buf || new u8(0);
+		var noBuf = !buf;
+		var resize = noBuf || st.i != 2;
+		var noSt = st.i;
+		if (noBuf) buf = new u8(sl * 3);
+		var cbuf = function(l) {
+			var bl = buf.length;
+			if (l > bl) {
+				var nbuf = new u8(Math.max(bl * 2, l));
+				nbuf.set(buf);
+				buf = nbuf;
+			}
+		};
+		var final = st.f || 0, pos = st.p || 0, bt = st.b || 0, lm = st.l, dm = st.d, lbt = st.m, dbt = st.n;
+		var tbts = sl * 8;
+		do {
+			if (!lm) {
+				final = bits(dat, pos, 1);
+				var type = bits(dat, pos + 1, 3);
+				pos += 3;
+				if (!type) {
+					var s = shft(pos) + 4, l = dat[s - 4] | dat[s - 3] << 8, t = s + l;
+					if (t > sl) {
+						if (noSt) err(0);
+						break;
+					}
+					if (resize) cbuf(bt + l);
+					buf.set(dat.subarray(s, t), bt);
+					st.b = bt += l, st.p = pos = t * 8, st.f = final;
+					continue;
+				} else if (type == 1) lm = flrm, dm = fdrm, lbt = 9, dbt = 5;
+				else if (type == 2) {
+					var hLit = bits(dat, pos, 31) + 257, hcLen = bits(dat, pos + 10, 15) + 4;
+					var tl = hLit + bits(dat, pos + 5, 31) + 1;
+					pos += 14;
+					var ldt = new u8(tl);
+					var clt = new u8(19);
+					for (var i = 0; i < hcLen; ++i) clt[clim[i]] = bits(dat, pos + i * 3, 7);
+					pos += hcLen * 3;
+					var clb = max(clt), clbmsk = (1 << clb) - 1;
+					var clm = hMap(clt, clb, 1);
+					for (var i = 0; i < tl;) {
+						var r = clm[bits(dat, pos, clbmsk)];
+						pos += r & 15;
+						var s = r >> 4;
+						if (s < 16) ldt[i++] = s;
+						else {
+							var c = 0, n = 0;
+							if (s == 16) n = 3 + bits(dat, pos, 3), pos += 2, c = ldt[i - 1];
+							else if (s == 17) n = 3 + bits(dat, pos, 7), pos += 3;
+							else if (s == 18) n = 11 + bits(dat, pos, 127), pos += 7;
+							while (n--) ldt[i++] = c;
+						}
+					}
+					var lt = ldt.subarray(0, hLit), dt = ldt.subarray(hLit);
+					lbt = max(lt);
+					dbt = max(dt);
+					lm = hMap(lt, lbt, 1);
+					dm = hMap(dt, dbt, 1);
+				} else err(1);
+				if (pos > tbts) {
+					if (noSt) err(0);
+					break;
+				}
+			}
+			if (resize) cbuf(bt + 131072);
+			var lms = (1 << lbt) - 1, dms = (1 << dbt) - 1;
+			var lpos = pos;
+			for (;; lpos = pos) {
+				var c = lm[bits16(dat, pos) & lms], sym = c >> 4;
+				pos += c & 15;
+				if (pos > tbts) {
+					if (noSt) err(0);
+					break;
+				}
+				if (!c) err(2);
+				if (sym < 256) buf[bt++] = sym;
+				else if (sym == 256) {
+					lpos = pos, lm = null;
+					break;
+				} else {
+					var add = sym - 254;
+					if (sym > 264) {
+						var i = sym - 257, b = fleb[i];
+						add = bits(dat, pos, (1 << b) - 1) + fl[i];
+						pos += b;
+					}
+					var d = dm[bits16(dat, pos) & dms], dsym = d >> 4;
+					if (!d) err(3);
+					pos += d & 15;
+					var dt = fd[dsym];
+					if (dsym > 3) {
+						var b = fdeb[dsym];
+						dt += bits16(dat, pos) & (1 << b) - 1, pos += b;
+					}
+					if (pos > tbts) {
+						if (noSt) err(0);
+						break;
+					}
+					if (resize) cbuf(bt + 131072);
+					var end = bt + add;
+					if (bt < dt) {
+						var shift = dl - dt, dend = Math.min(dt, end);
+						if (shift + bt < 0) err(3);
+						for (; bt < dend; ++bt) buf[bt] = dict[shift + bt];
+					}
+					for (; bt < end; ++bt) buf[bt] = buf[bt - dt];
+				}
+			}
+			st.l = lm, st.p = lpos, st.b = bt, st.f = final;
+			if (lm) final = 1, st.m = lbt, st.d = dm, st.n = dbt;
+		} while (!final);
+		return bt != buf.length && noBuf ? slc(buf, 0, bt) : buf.subarray(0, bt);
+	};
+	var et = /*#__PURE__*/ new u8(0);
+	var zls = function(d, dict) {
+		if ((d[0] & 15) != 8 || d[0] >> 4 > 7 || (d[0] << 8 | d[1]) % 31) err(6, "invalid zlib data");
+		if ((d[1] >> 5 & 1) == +!dict) err(6, "invalid zlib data: " + (d[1] & 32 ? "need" : "unexpected") + " dictionary");
+		return (d[1] >> 3 & 4) + 2;
+	};
+	/**
+	* Expands Zlib data
+	* @param data The data to decompress
+	* @param opts The decompression options
+	* @returns The decompressed version of the data
+	*/
+	function unzlibSync(data, opts) {
+		return inflt(data.subarray(zls(data, opts && opts.dictionary), -4), { i: 2 }, opts && opts.out, opts && opts.dictionary);
+	}
+	var td = typeof TextDecoder != "undefined" && /*#__PURE__*/ new TextDecoder();
+	try {
+		td.decode(et, { stream: true });
+	} catch (e) {}
+	// node_modules/three/examples/jsm/curves/NURBSUtils.js
+	/**
+	* @module NURBSUtils
+	* @three_import import * as NURBSUtils from 'three/addons/curves/NURBSUtils.js';
+	*/
+	/**
+	* Finds knot vector span.
+	*
+	* @param {number} p - The degree.
+	* @param {number} u - The parametric value.
+	* @param {Array<number>} U - The knot vector.
+	* @return {number} The span.
+	*/
+	function findSpan(p, u, U) {
+		const n = U.length - p - 1;
+		if (u >= U[n]) return n - 1;
+		if (u <= U[p]) return p;
+		let low = p;
+		let high = n;
+		let mid = Math.floor((low + high) / 2);
+		while (u < U[mid] || u >= U[mid + 1]) {
+			if (u < U[mid]) high = mid;
+			else low = mid;
+			mid = Math.floor((low + high) / 2);
+		}
+		return mid;
+	}
+	/**
+	* Calculates basis functions. See The NURBS Book, page 70, algorithm A2.2.
+	*
+	* @param {number} span - The span in which `u` lies.
+	* @param {number} u - The parametric value.
+	* @param {number} p - The degree.
+	* @param {Array<number>} U - The knot vector.
+	* @return {Array<number>} Array[p+1] with basis functions values.
+	*/
+	function calcBasisFunctions(span, u, p, U) {
+		const N = [];
+		const left = [];
+		const right = [];
+		N[0] = 1;
+		for (let j = 1; j <= p; ++j) {
+			left[j] = u - U[span + 1 - j];
+			right[j] = U[span + j] - u;
+			let saved = 0;
+			for (let r = 0; r < j; ++r) {
+				const rv = right[r + 1];
+				const lv = left[j - r];
+				const temp = N[r] / (rv + lv);
+				N[r] = saved + rv * temp;
+				saved = lv * temp;
+			}
+			N[j] = saved;
+		}
+		return N;
+	}
+	/**
+	* Calculates B-Spline curve points. See The NURBS Book, page 82, algorithm A3.1.
+	*
+	* @param {number} p - The degree of the B-Spline.
+	* @param {Array<number>} U - The knot vector.
+	* @param {Array<Vector4>} P - The control points
+	* @param {number} u - The parametric point.
+	* @return {Vector4} The point for given `u`.
+	*/
+	function calcBSplinePoint(p, U, P, u) {
+		const span = findSpan(p, u, U);
+		const N = calcBasisFunctions(span, u, p, U);
+		const C = new Vector4(0, 0, 0, 0);
+		for (let j = 0; j <= p; ++j) {
+			const point = P[span - p + j];
+			const Nj = N[j];
+			const wNj = point.w * Nj;
+			C.x += point.x * wNj;
+			C.y += point.y * wNj;
+			C.z += point.z * wNj;
+			C.w += point.w * Nj;
+		}
+		return C;
+	}
+	/**
+	* Calculates basis functions derivatives. See The NURBS Book, page 72, algorithm A2.3.
+	*
+	* @param {number} span - The span in which `u` lies.
+	* @param {number} u - The parametric point.
+	* @param {number} p - The degree.
+	* @param {number} n - number of derivatives to calculate
+	* @param {Array<number>} U - The knot vector.
+	* @return {Array<Array<number>>} An array[n+1][p+1] with basis functions derivatives.
+	*/
+	function calcBasisFunctionDerivatives(span, u, p, n, U) {
+		const zeroArr = [];
+		for (let i = 0; i <= p; ++i) zeroArr[i] = 0;
+		const ders = [];
+		for (let i = 0; i <= n; ++i) ders[i] = zeroArr.slice(0);
+		const ndu = [];
+		for (let i = 0; i <= p; ++i) ndu[i] = zeroArr.slice(0);
+		ndu[0][0] = 1;
+		const left = zeroArr.slice(0);
+		const right = zeroArr.slice(0);
+		for (let j = 1; j <= p; ++j) {
+			left[j] = u - U[span + 1 - j];
+			right[j] = U[span + j] - u;
+			let saved = 0;
+			for (let r = 0; r < j; ++r) {
+				const rv = right[r + 1];
+				const lv = left[j - r];
+				ndu[j][r] = rv + lv;
+				const temp = ndu[r][j - 1] / ndu[j][r];
+				ndu[r][j] = saved + rv * temp;
+				saved = lv * temp;
+			}
+			ndu[j][j] = saved;
+		}
+		for (let j = 0; j <= p; ++j) ders[0][j] = ndu[j][p];
+		for (let r = 0; r <= p; ++r) {
+			let s1 = 0;
+			let s2 = 1;
+			const a = [];
+			for (let i = 0; i <= p; ++i) a[i] = zeroArr.slice(0);
+			a[0][0] = 1;
+			for (let k = 1; k <= n; ++k) {
+				let d = 0;
+				const rk = r - k;
+				const pk = p - k;
+				if (r >= k) {
+					a[s2][0] = a[s1][0] / ndu[pk + 1][rk];
+					d = a[s2][0] * ndu[rk][pk];
+				}
+				const j1 = rk >= -1 ? 1 : -rk;
+				const j2 = r - 1 <= pk ? k - 1 : p - r;
+				for (let j = j1; j <= j2; ++j) {
+					a[s2][j] = (a[s1][j] - a[s1][j - 1]) / ndu[pk + 1][rk + j];
+					d += a[s2][j] * ndu[rk + j][pk];
+				}
+				if (r <= pk) {
+					a[s2][k] = -a[s1][k - 1] / ndu[pk + 1][r];
+					d += a[s2][k] * ndu[r][pk];
+				}
+				ders[k][r] = d;
+				const j = s1;
+				s1 = s2;
+				s2 = j;
+			}
+		}
+		let r = p;
+		for (let k = 1; k <= n; ++k) {
+			for (let j = 0; j <= p; ++j) ders[k][j] *= r;
+			r *= p - k;
+		}
+		return ders;
+	}
+	/**
+	* Calculates derivatives of a B-Spline. See The NURBS Book, page 93, algorithm A3.2.
+	*
+	* @param {number} p - The degree.
+	* @param {Array<number>} U - The knot vector.
+	* @param {Array<Vector4>} P - The control points
+	* @param {number} u - The parametric point.
+	* @param {number} nd - The number of derivatives.
+	* @return {Array<Vector4>} An array[d+1] with derivatives.
+	*/
+	function calcBSplineDerivatives(p, U, P, u, nd) {
+		const du = nd < p ? nd : p;
+		const CK = [];
+		const span = findSpan(p, u, U);
+		const nders = calcBasisFunctionDerivatives(span, u, p, du, U);
+		const Pw = [];
+		for (let i = 0; i < P.length; ++i) {
+			const point = P[i].clone();
+			const w = point.w;
+			point.x *= w;
+			point.y *= w;
+			point.z *= w;
+			Pw[i] = point;
+		}
+		for (let k = 0; k <= du; ++k) {
+			const point = Pw[span - p].clone().multiplyScalar(nders[k][0]);
+			for (let j = 1; j <= p; ++j) point.add(Pw[span - p + j].clone().multiplyScalar(nders[k][j]));
+			CK[k] = point;
+		}
+		for (let k = du + 1; k <= nd + 1; ++k) CK[k] = new Vector4(0, 0, 0);
+		return CK;
+	}
+	/**
+	* Calculates "K over I".
+	*
+	* @param {number} k - The K value.
+	* @param {number} i - The I value.
+	* @return {number} k!/(i!(k-i)!)
+	*/
+	function calcKoverI(k, i) {
+		let nom = 1;
+		for (let j = 2; j <= k; ++j) nom *= j;
+		let denom = 1;
+		for (let j = 2; j <= i; ++j) denom *= j;
+		for (let j = 2; j <= k - i; ++j) denom *= j;
+		return nom / denom;
+	}
+	/**
+	* Calculates derivatives (0-nd) of rational curve. See The NURBS Book, page 127, algorithm A4.2.
+	*
+	* @param {Array<Vector4>} Pders - Array with derivatives.
+	* @return {Array<Vector3>} An array with derivatives for rational curve.
+	*/
+	function calcRationalCurveDerivatives(Pders) {
+		const nd = Pders.length;
+		const Aders = [];
+		const wders = [];
+		for (let i = 0; i < nd; ++i) {
+			const point = Pders[i];
+			Aders[i] = new Vector3(point.x, point.y, point.z);
+			wders[i] = point.w;
+		}
+		const CK = [];
+		for (let k = 0; k < nd; ++k) {
+			const v = Aders[k].clone();
+			for (let i = 1; i <= k; ++i) v.sub(CK[k - i].clone().multiplyScalar(calcKoverI(k, i) * wders[i]));
+			CK[k] = v.divideScalar(wders[0]);
+		}
+		return CK;
+	}
+	/**
+	* Calculates NURBS curve derivatives. See The NURBS Book, page 127, algorithm A4.2.
+	*
+	* @param {number} p - The degree.
+	* @param {Array<number>} U - The knot vector.
+	* @param {Array<Vector4>} P - The control points in homogeneous space.
+	* @param {number} u - The parametric point.
+	* @param {number} nd - The number of derivatives.
+	* @return {Array<Vector3>} array with derivatives for rational curve.
+	*/
+	function calcNURBSDerivatives(p, U, P, u, nd) {
+		return calcRationalCurveDerivatives(calcBSplineDerivatives(p, U, P, u, nd));
+	}
+	// node_modules/three/examples/jsm/curves/NURBSCurve.js
+	/**
+	* This class represents a NURBS curve.
+	*
+	* Implementation is based on `(x, y [, z=0 [, w=1]])` control points with `w=weight`.
+	*
+	* @augments Curve
+	* @three_import import { NURBSCurve } from 'three/addons/curves/NURBSCurve.js';
+	*/
+	var NURBSCurve = class extends Curve {
+		/**
+		* Constructs a new NURBS curve.
+		*
+		* @param {number} degree - The NURBS degree.
+		* @param {Array<number>} knots - The knots as a flat array of numbers.
+		* @param {Array<Vector2|Vector3|Vector4>} controlPoints - An array holding control points.
+		* @param {number} [startKnot] - Index of the start knot into the `knots` array.
+		* @param {number} [endKnot] - Index of the end knot into the `knots` array.
+		*/
+		constructor(degree, knots, controlPoints, startKnot, endKnot) {
+			super();
+			const knotsLength = knots ? knots.length - 1 : 0;
+			const pointsLength = controlPoints ? controlPoints.length : 0;
+			/**
+			* The NURBS degree.
+			*
+			* @type {number}
+			*/
+			this.degree = degree;
+			/**
+			* The knots as a flat array of numbers.
+			*
+			* @type {Array<number>}
+			*/
+			this.knots = knots;
+			/**
+			* An array of control points.
+			*
+			* @type {Array<Vector4>}
+			*/
+			this.controlPoints = [];
+			/**
+			* Index of the start knot into the `knots` array.
+			*
+			* @type {number}
+			*/
+			this.startKnot = startKnot || 0;
+			/**
+			* Index of the end knot into the `knots` array.
+			*
+			* @type {number}
+			*/
+			this.endKnot = endKnot || knotsLength;
+			for (let i = 0; i < pointsLength; ++i) {
+				const point = controlPoints[i];
+				this.controlPoints[i] = new Vector4(point.x, point.y, point.z, point.w);
+			}
+		}
+		/**
+		* This method returns a vector in 3D space for the given interpolation factor.
+		*
+		* @param {number} t - A interpolation factor representing a position on the curve. Must be in the range `[0,1]`.
+		* @param {Vector3} [optionalTarget] - The optional target vector the result is written to.
+		* @return {Vector3} The position on the curve.
+		*/
+		getPoint(t, optionalTarget = new Vector3()) {
+			const point = optionalTarget;
+			const u = this.knots[this.startKnot] + t * (this.knots[this.endKnot] - this.knots[this.startKnot]);
+			const hpoint = calcBSplinePoint(this.degree, this.knots, this.controlPoints, u);
+			if (hpoint.w !== 1) hpoint.divideScalar(hpoint.w);
+			return point.set(hpoint.x, hpoint.y, hpoint.z);
+		}
+		/**
+		* Returns a unit vector tangent for the given interpolation factor.
+		*
+		* @param {number} t - The interpolation factor.
+		* @param {Vector3} [optionalTarget] - The optional target vector the result is written to.
+		* @return {Vector3} The tangent vector.
+		*/
+		getTangent(t, optionalTarget = new Vector3()) {
+			const tangent = optionalTarget;
+			const u = this.knots[0] + t * (this.knots[this.knots.length - 1] - this.knots[0]);
+			const ders = calcNURBSDerivatives(this.degree, this.knots, this.controlPoints, u, 1);
+			tangent.copy(ders[1]).normalize();
+			return tangent;
+		}
+		toJSON() {
+			const data = super.toJSON();
+			data.degree = this.degree;
+			data.knots = [...this.knots];
+			data.controlPoints = this.controlPoints.map((p) => p.toArray());
+			data.startKnot = this.startKnot;
+			data.endKnot = this.endKnot;
+			return data;
+		}
+		fromJSON(json) {
+			super.fromJSON(json);
+			this.degree = json.degree;
+			this.knots = [...json.knots];
+			this.controlPoints = json.controlPoints.map((p) => new Vector4(p[0], p[1], p[2], p[3]));
+			this.startKnot = json.startKnot;
+			this.endKnot = json.endKnot;
+			return this;
+		}
+	};
+	// node_modules/three/examples/jsm/loaders/FBXLoader.js
+	let fbxTree;
+	let connections;
+	let sceneGraph;
+	/**
+	* A loader for the FBX format.
+	*
+	* Requires FBX file to be >= 7.0 and in ASCII or >= 6400 in Binary format.
+	* Versions lower than this may load but will probably have errors.
+	*
+	* Needs Support:
+	* - Morph normals / blend shape normals
+	*
+	* FBX format references:
+	* - [C++ SDK reference](https://help.autodesk.com/view/FBX/2017/ENU/?guid=__cpp_ref_index_html)
+	*
+	* Binary format specification:
+	* - [FBX binary file format specification](https://code.blender.org/2013/08/fbx-binary-file-format-specification/)
+	*
+	* ```js
+	* const loader = new FBXLoader();
+	* const object = await loader.loadAsync( 'models/fbx/stanford-bunny.fbx' );
+	* scene.add( object );
+	* ```
+	*
+	* @augments Loader
+	* @three_import import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+	*/
+	var FBXLoader = class extends Loader {
+		/**
+		* Constructs a new FBX loader.
+		*
+		* @param {LoadingManager} [manager] - The loading manager.
+		*/
+		constructor(manager) {
+			super(manager);
+			/**
+			* Whether to trim animation clips to the time range of their
+			* animation stacks and shift them to start at time zero. Useful
+			* for assets that define multiple clips on a single timeline.
+			*
+			* @type {boolean}
+			* @default false
+			*/
+			this.trimAnimationClips = false;
+		}
+		/**
+		* Starts loading from the given URL and passes the loaded FBX asset
+		* to the `onLoad()` callback.
+		*
+		* @param {string} url - The path/URL of the file to be loaded. This can also be a data URI.
+		* @param {function(Group)} onLoad - Executed when the loading process has been finished.
+		* @param {onProgressCallback} onProgress - Executed while the loading is in progress.
+		* @param {onErrorCallback} onError - Executed when errors occur.
+		*/
+		load(url, onLoad, onProgress, onError) {
+			const scope = this;
+			const path = scope.path === "" ? LoaderUtils.extractUrlBase(url) : scope.path;
+			const loader = new FileLoader(this.manager);
+			loader.setPath(scope.path);
+			loader.setResponseType("arraybuffer");
+			loader.setRequestHeader(scope.requestHeader);
+			loader.setWithCredentials(scope.withCredentials);
+			loader.load(url, function(buffer) {
+				try {
+					onLoad(scope.parse(buffer, path));
+				} catch (e) {
+					if (onError) onError(e);
+					else console.error(e);
+					scope.manager.itemError(url);
+				}
+			}, onProgress, onError);
+		}
+		/**
+		* Parses the given FBX data and returns the resulting group.
+		*
+		* @param {ArrayBuffer} FBXBuffer - The raw FBX data as an array buffer.
+		* @param {string} path - The URL base path.
+		* @return {Group} An object representing the parsed asset.
+		*/
+		parse(FBXBuffer, path) {
+			if (isFbxFormatBinary(FBXBuffer)) fbxTree = new BinaryParser().parse(FBXBuffer);
+			else {
+				const FBXText = convertArrayBufferToString(FBXBuffer);
+				if (!isFbxFormatASCII(FBXText)) throw new Error("THREE.FBXLoader: Unknown format.");
+				if (getFbxVersion(FBXText) < 7e3) throw new Error("THREE.FBXLoader: FBX version not supported, FileVersion: " + getFbxVersion(FBXText));
+				fbxTree = new TextParser().parse(FBXText);
+			}
+			return new FBXTreeParser(new TextureLoader(this.manager).setPath(this.resourcePath || path).setCrossOrigin(this.crossOrigin), this.manager, this.trimAnimationClips).parse(fbxTree);
+		}
+	};
+	var FBXTreeParser = class {
+		constructor(textureLoader, manager, trimAnimationClips) {
+			this.textureLoader = textureLoader;
+			this.manager = manager;
+			this.trimAnimationClips = trimAnimationClips;
+		}
+		parse() {
+			connections = this.parseConnections();
+			const images = this.parseImages();
+			const textures = this.parseTextures(images);
+			const materials = this.parseMaterials(textures);
+			const deformers = this.parseDeformers();
+			const geometryMap = new GeometryParser().parse(deformers);
+			this.parseScene(deformers, geometryMap, materials);
+			return sceneGraph;
+		}
+		parseConnections() {
+			const connectionMap = /* @__PURE__ */ new Map();
+			if ("Connections" in fbxTree) fbxTree.Connections.connections.forEach(function(rawConnection) {
+				const fromID = rawConnection[0];
+				const toID = rawConnection[1];
+				const relationship = rawConnection[2];
+				if (!connectionMap.has(fromID)) connectionMap.set(fromID, {
+					parents: [],
+					children: []
+				});
+				const parentRelationship = {
+					ID: toID,
+					relationship
+				};
+				connectionMap.get(fromID).parents.push(parentRelationship);
+				if (!connectionMap.has(toID)) connectionMap.set(toID, {
+					parents: [],
+					children: []
+				});
+				const childRelationship = {
+					ID: fromID,
+					relationship
+				};
+				connectionMap.get(toID).children.push(childRelationship);
+			});
+			return connectionMap;
+		}
+		parseImages() {
+			const images = {};
+			const blobs = {};
+			if ("Video" in fbxTree.Objects) {
+				const videoNodes = fbxTree.Objects.Video;
+				for (const nodeID in videoNodes) {
+					const videoNode = videoNodes[nodeID];
+					const id = parseInt(nodeID);
+					images[id] = videoNode.RelativeFilename || videoNode.Filename;
+					if ("Content" in videoNode) {
+						const arrayBufferContent = videoNode.Content instanceof ArrayBuffer && videoNode.Content.byteLength > 0;
+						const base64Content = typeof videoNode.Content === "string" && videoNode.Content !== "";
+						if (arrayBufferContent || base64Content) {
+							const image = this.parseImage(videoNodes[nodeID]);
+							blobs[videoNode.RelativeFilename || videoNode.Filename] = image;
+						}
+					}
+				}
+			}
+			for (const id in images) {
+				const filename = images[id];
+				if (blobs[filename] !== void 0) images[id] = blobs[filename];
+				else images[id] = images[id].split("\\").pop();
+			}
+			return images;
+		}
+		parseImage(videoNode) {
+			const content = videoNode.Content;
+			const fileName = videoNode.RelativeFilename || videoNode.Filename;
+			const extension = fileName.slice(fileName.lastIndexOf(".") + 1).toLowerCase();
+			let type;
+			switch (extension) {
+				case "bmp":
+					type = "image/bmp";
+					break;
+				case "jpg":
+				case "jpeg":
+					type = "image/jpeg";
+					break;
+				case "png":
+					type = "image/png";
+					break;
+				case "tif":
+					type = "image/tiff";
+					break;
+				case "tga":
+					if (this.manager.getHandler(".tga") === null) console.warn("FBXLoader: TGA loader not found, skipping ", fileName);
+					type = "image/tga";
+					break;
+				case "webp":
+					type = "image/webp";
+					break;
+				default:
+					console.warn("FBXLoader: Image type \"" + extension + "\" is not supported.");
+					return;
+			}
+			if (typeof content === "string") return "data:" + type + ";base64," + content;
+			else {
+				const array = new Uint8Array(content);
+				return URL.createObjectURL(new Blob([array], { type }));
+			}
+		}
+		parseTextures(images) {
+			const textureMap = /* @__PURE__ */ new Map();
+			if ("Texture" in fbxTree.Objects) {
+				const textureNodes = fbxTree.Objects.Texture;
+				for (const nodeID in textureNodes) {
+					const texture = this.parseTexture(textureNodes[nodeID], images);
+					textureMap.set(parseInt(nodeID), texture);
+				}
+			}
+			return textureMap;
+		}
+		parseTexture(textureNode, images) {
+			const texture = this.loadTexture(textureNode, images);
+			texture.ID = textureNode.id;
+			texture.name = textureNode.attrName;
+			const wrapModeU = textureNode.WrapModeU;
+			const wrapModeV = textureNode.WrapModeV;
+			const valueU = wrapModeU !== void 0 ? wrapModeU.value : 0;
+			const valueV = wrapModeV !== void 0 ? wrapModeV.value : 0;
+			texture.wrapS = valueU === 0 ? RepeatWrapping : ClampToEdgeWrapping;
+			texture.wrapT = valueV === 0 ? RepeatWrapping : ClampToEdgeWrapping;
+			if ("Scaling" in textureNode) {
+				const values = textureNode.Scaling.value;
+				texture.repeat.x = values[0];
+				texture.repeat.y = values[1];
+			}
+			if ("Translation" in textureNode) {
+				const values = textureNode.Translation.value;
+				texture.offset.x = values[0];
+				texture.offset.y = values[1];
+			}
+			return texture;
+		}
+		loadTexture(textureNode, images) {
+			const extension = textureNode.FileName.split(".").pop().toLowerCase();
+			let loader = this.manager.getHandler(`.${extension}`);
+			if (loader === null) loader = this.textureLoader;
+			const loaderPath = loader.path;
+			if (!loaderPath) loader.setPath(this.textureLoader.path);
+			const children = connections.get(textureNode.id).children;
+			let fileName;
+			if (children !== void 0 && children.length > 0 && images[children[0].ID] !== void 0) {
+				fileName = images[children[0].ID];
+				if (fileName.indexOf("blob:") === 0 || fileName.indexOf("data:") === 0) loader.setPath(void 0);
+			}
+			if (fileName === void 0) {
+				console.warn("FBXLoader: Undefined filename, creating placeholder texture.");
+				return new Texture();
+			}
+			const texture = loader.load(fileName);
+			loader.setPath(loaderPath);
+			return texture;
+		}
+		parseMaterials(textureMap) {
+			const materialMap = /* @__PURE__ */ new Map();
+			if ("Material" in fbxTree.Objects) {
+				const materialNodes = fbxTree.Objects.Material;
+				for (const nodeID in materialNodes) {
+					const material = this.parseMaterial(materialNodes[nodeID], textureMap);
+					if (material !== null) materialMap.set(parseInt(nodeID), material);
+				}
+			}
+			return materialMap;
+		}
+		parseMaterial(materialNode, textureMap) {
+			const ID = materialNode.id;
+			const name = materialNode.attrName;
+			let type = materialNode.ShadingModel;
+			if (typeof type === "object") type = type.value;
+			if (!connections.has(ID)) return null;
+			const parameters = this.parseParameters(materialNode, textureMap, ID);
+			let material;
+			switch (type.toLowerCase()) {
+				case "phong":
+					material = new MeshPhongMaterial();
+					break;
+				case "lambert":
+					material = new MeshLambertMaterial();
+					break;
+				default:
+					console.warn("THREE.FBXLoader: unknown material type \"%s\". Defaulting to MeshPhongMaterial.", type);
+					material = new MeshPhongMaterial();
+			}
+			material.setValues(parameters);
+			material.name = name;
+			return material;
+		}
+		parseParameters(materialNode, textureMap, ID) {
+			const parameters = {};
+			if (materialNode.BumpFactor) parameters.bumpScale = materialNode.BumpFactor.value;
+			if (materialNode.Diffuse) parameters.color = ColorManagement.colorSpaceToWorking(new Color().fromArray(materialNode.Diffuse.value), SRGBColorSpace);
+			else if (materialNode.DiffuseColor && (materialNode.DiffuseColor.type === "Color" || materialNode.DiffuseColor.type === "ColorRGB")) parameters.color = ColorManagement.colorSpaceToWorking(new Color().fromArray(materialNode.DiffuseColor.value), SRGBColorSpace);
+			if (materialNode.DisplacementFactor) parameters.displacementScale = materialNode.DisplacementFactor.value;
+			if (materialNode.Emissive) parameters.emissive = ColorManagement.colorSpaceToWorking(new Color().fromArray(materialNode.Emissive.value), SRGBColorSpace);
+			else if (materialNode.EmissiveColor && (materialNode.EmissiveColor.type === "Color" || materialNode.EmissiveColor.type === "ColorRGB")) parameters.emissive = ColorManagement.colorSpaceToWorking(new Color().fromArray(materialNode.EmissiveColor.value), SRGBColorSpace);
+			if (materialNode.EmissiveFactor) parameters.emissiveIntensity = parseFloat(materialNode.EmissiveFactor.value);
+			parameters.opacity = 1 - (materialNode.TransparencyFactor ? parseFloat(materialNode.TransparencyFactor.value) : 0);
+			if (parameters.opacity === 1 || parameters.opacity === 0) {
+				parameters.opacity = materialNode.Opacity ? parseFloat(materialNode.Opacity.value) : null;
+				if (parameters.opacity === null) parameters.opacity = 1;
+			}
+			if (parameters.opacity < 1) parameters.transparent = true;
+			if (materialNode.ReflectionFactor) parameters.reflectivity = materialNode.ReflectionFactor.value;
+			if (materialNode.Shininess) parameters.shininess = materialNode.Shininess.value;
+			if (materialNode.Specular) parameters.specular = ColorManagement.colorSpaceToWorking(new Color().fromArray(materialNode.Specular.value), SRGBColorSpace);
+			else if (materialNode.SpecularColor && materialNode.SpecularColor.type === "Color") parameters.specular = ColorManagement.colorSpaceToWorking(new Color().fromArray(materialNode.SpecularColor.value), SRGBColorSpace);
+			const scope = this;
+			connections.get(ID).children.forEach(function(child) {
+				const type = child.relationship;
+				switch (type) {
+					case "Bump":
+						parameters.bumpMap = scope.getTexture(textureMap, child.ID);
+						break;
+					case "Maya|TEX_ao_map":
+						parameters.aoMap = scope.getTexture(textureMap, child.ID);
+						break;
+					case "DiffuseColor":
+					case "Maya|TEX_color_map":
+						parameters.map = scope.getTexture(textureMap, child.ID);
+						if (parameters.map !== void 0) parameters.map.colorSpace = SRGBColorSpace;
+						break;
+					case "DisplacementColor":
+						parameters.displacementMap = scope.getTexture(textureMap, child.ID);
+						break;
+					case "EmissiveColor":
+						parameters.emissiveMap = scope.getTexture(textureMap, child.ID);
+						if (parameters.emissiveMap !== void 0) parameters.emissiveMap.colorSpace = SRGBColorSpace;
+						break;
+					case "NormalMap":
+					case "Maya|TEX_normal_map":
+						parameters.normalMap = scope.getTexture(textureMap, child.ID);
+						break;
+					case "ReflectionColor":
+						parameters.envMap = scope.getTexture(textureMap, child.ID);
+						if (parameters.envMap !== void 0) {
+							parameters.envMap.mapping = 303;
+							parameters.envMap.colorSpace = SRGBColorSpace;
+						}
+						break;
+					case "SpecularColor":
+						parameters.specularMap = scope.getTexture(textureMap, child.ID);
+						if (parameters.specularMap !== void 0) parameters.specularMap.colorSpace = SRGBColorSpace;
+						break;
+					case "TransparentColor":
+					case "TransparencyFactor":
+						parameters.alphaMap = scope.getTexture(textureMap, child.ID);
+						parameters.transparent = true;
+						break;
+					default: console.warn("THREE.FBXLoader: %s map is not supported in three.js, skipping texture.", type);
+				}
+			});
+			return parameters;
+		}
+		getTexture(textureMap, id) {
+			if ("LayeredTexture" in fbxTree.Objects && id in fbxTree.Objects.LayeredTexture) {
+				console.warn("THREE.FBXLoader: layered textures are not supported in three.js. Discarding all but first layer.");
+				id = connections.get(id).children[0].ID;
+			}
+			return textureMap.get(id);
+		}
+		parseDeformers() {
+			const skeletons = {};
+			const morphTargets = {};
+			if ("Deformer" in fbxTree.Objects) {
+				const DeformerNodes = fbxTree.Objects.Deformer;
+				for (const nodeID in DeformerNodes) {
+					const deformerNode = DeformerNodes[nodeID];
+					const relationships = connections.get(parseInt(nodeID));
+					if (deformerNode.attrType === "Skin") {
+						const skeleton = this.parseSkeleton(relationships, DeformerNodes);
+						skeleton.ID = nodeID;
+						if (relationships.parents.length > 1) console.warn("THREE.FBXLoader: skeleton attached to more than one geometry is not supported.");
+						skeleton.geometryID = relationships.parents[0].ID;
+						skeletons[nodeID] = skeleton;
+					} else if (deformerNode.attrType === "BlendShape") {
+						const morphTarget = { id: nodeID };
+						morphTarget.rawTargets = this.parseMorphTargets(relationships, DeformerNodes);
+						morphTarget.id = nodeID;
+						if (relationships.parents.length > 1) console.warn("THREE.FBXLoader: morph target attached to more than one geometry is not supported.");
+						morphTargets[nodeID] = morphTarget;
+					}
+				}
+			}
+			return {
+				skeletons,
+				morphTargets
+			};
+		}
+		parseSkeleton(relationships, deformerNodes) {
+			const rawBones = [];
+			relationships.children.forEach(function(child) {
+				const boneNode = deformerNodes[child.ID];
+				if (boneNode.attrType !== "Cluster") return;
+				const rawBone = {
+					ID: child.ID,
+					indices: [],
+					weights: [],
+					transformLink: new Matrix4().fromArray(boneNode.TransformLink.a)
+				};
+				if ("Indexes" in boneNode) {
+					rawBone.indices = boneNode.Indexes.a;
+					rawBone.weights = boneNode.Weights.a;
+				}
+				rawBones.push(rawBone);
+			});
+			return {
+				rawBones,
+				bones: []
+			};
+		}
+		parseMorphTargets(relationships, deformerNodes) {
+			const rawMorphTargets = [];
+			for (let i = 0; i < relationships.children.length; i++) {
+				const child = relationships.children[i];
+				const morphTargetNode = deformerNodes[child.ID];
+				const rawMorphTarget = {
+					name: morphTargetNode.attrName,
+					initialWeight: morphTargetNode.DeformPercent,
+					id: morphTargetNode.id,
+					fullWeights: morphTargetNode.FullWeights.a
+				};
+				if (morphTargetNode.attrType !== "BlendShapeChannel") return;
+				rawMorphTarget.geoID = connections.get(parseInt(child.ID)).children.filter(function(child) {
+					return child.relationship === void 0;
+				})[0].ID;
+				rawMorphTargets.push(rawMorphTarget);
+			}
+			return rawMorphTargets;
+		}
+		parseScene(deformers, geometryMap, materialMap) {
+			sceneGraph = new Group();
+			const modelMap = this.parseModels(deformers.skeletons, geometryMap, materialMap);
+			const modelNodes = fbxTree.Objects.Model;
+			const scope = this;
+			modelMap.forEach(function(model) {
+				const modelNode = modelNodes[model.ID];
+				scope.setLookAtProperties(model, modelNode);
+				connections.get(model.ID).parents.forEach(function(connection) {
+					const parent = modelMap.get(connection.ID);
+					if (parent !== void 0) parent.add(model);
+				});
+				if (model.parent === null) sceneGraph.add(model);
+			});
+			this.addGlobalSceneSettings();
+			sceneGraph.traverse(function(node) {
+				if (node.userData.transformData) {
+					if (node.parent) {
+						node.userData.transformData.parentMatrix = node.parent.matrix;
+						node.userData.transformData.parentMatrixWorld = node.parent.matrixWorld;
+					}
+					const transform = generateTransform(node.userData.transformData);
+					node.applyMatrix4(transform);
+					node.updateWorldMatrix();
+				}
+			});
+			const bindPoseMatrices = this.parsePoseNodes();
+			const clusterBoneIDs = /* @__PURE__ */ new Set();
+			for (const ID in deformers.skeletons) deformers.skeletons[ID].rawBones.forEach(function(_, i) {
+				const bone = deformers.skeletons[ID].bones[i];
+				if (bone) clusterBoneIDs.add(bone.ID);
+			});
+			const tempMatrix = new Matrix4();
+			sceneGraph.traverse(function(node) {
+				if (node.isBone && node.ID !== void 0 && !clusterBoneIDs.has(node.ID)) {
+					const bindPose = bindPoseMatrices[node.ID];
+					if (bindPose !== void 0) {
+						if (node.parent) {
+							tempMatrix.copy(node.parent.matrixWorld).invert();
+							tempMatrix.multiply(bindPose);
+						} else tempMatrix.copy(bindPose);
+						tempMatrix.decompose(node.position, node.quaternion, node.scale);
+						node.updateMatrix();
+						node.matrixWorld.copy(bindPose);
+					}
+				}
+			});
+			this.bindSkeleton(deformers.skeletons, geometryMap, modelMap);
+			const animations = new AnimationParser(this.trimAnimationClips).parse();
+			if (sceneGraph.children.length === 1 && sceneGraph.children[0].isGroup) {
+				sceneGraph.children[0].animations = animations;
+				Object.assign(sceneGraph.children[0].userData, sceneGraph.userData);
+				sceneGraph = sceneGraph.children[0];
+			}
+			sceneGraph.animations = animations;
+			if ("GlobalSettings" in fbxTree && "UpAxis" in fbxTree.GlobalSettings) {
+				if (fbxTree.GlobalSettings.UpAxis.value === 2) {
+					console.warn("THREE.FBXLoader: You are loading an asset with a Z-UP coordinate system. The loader just rotates the asset to transform it into Y-UP. The vertex data are not converted.");
+					sceneGraph.rotation.set(-Math.PI / 2, 0, 0);
+				}
+			}
+		}
+		parseModels(skeletons, geometryMap, materialMap) {
+			const modelMap = /* @__PURE__ */ new Map();
+			const modelNodes = fbxTree.Objects.Model;
+			for (const nodeID in modelNodes) {
+				const id = parseInt(nodeID);
+				const node = modelNodes[nodeID];
+				const relationships = connections.get(id);
+				let model = this.buildSkeleton(relationships, skeletons, id, node.attrName);
+				if (!model) {
+					switch (node.attrType) {
+						case "Camera":
+							model = this.createCamera(relationships);
+							break;
+						case "Light":
+							model = this.createLight(relationships);
+							break;
+						case "Mesh":
+							model = this.createMesh(relationships, geometryMap, materialMap);
+							break;
+						case "NurbsCurve":
+							model = this.createCurve(relationships, geometryMap);
+							break;
+						case "LimbNode":
+						case "Root":
+							model = new Bone();
+							break;
+						default: model = new Group();
+					}
+					model.name = node.attrName ? PropertyBinding.sanitizeNodeName(node.attrName) : "";
+					model.userData.originalName = node.attrName;
+					model.ID = id;
+				}
+				this.getTransformData(model, node);
+				modelMap.set(id, model);
+			}
+			return modelMap;
+		}
+		buildSkeleton(relationships, skeletons, id, name) {
+			let bone = null;
+			relationships.parents.forEach(function(parent) {
+				for (const ID in skeletons) {
+					const skeleton = skeletons[ID];
+					skeleton.rawBones.forEach(function(rawBone, i) {
+						if (rawBone.ID === parent.ID) {
+							const subBone = bone;
+							bone = new Bone();
+							bone.matrixWorld.copy(rawBone.transformLink);
+							bone.name = name ? PropertyBinding.sanitizeNodeName(name) : "";
+							bone.userData.originalName = name;
+							bone.ID = id;
+							skeleton.bones[i] = bone;
+							if (subBone !== null) bone.add(subBone);
+						}
+					});
+				}
+			});
+			return bone;
+		}
+		createCamera(relationships) {
+			let model;
+			let cameraAttribute;
+			relationships.children.forEach(function(child) {
+				const attr = fbxTree.Objects.NodeAttribute[child.ID];
+				if (attr !== void 0) cameraAttribute = attr;
+			});
+			if (cameraAttribute === void 0) model = new Object3D();
+			else {
+				let type = 0;
+				if (cameraAttribute.CameraProjectionType !== void 0 && cameraAttribute.CameraProjectionType.value === 1) type = 1;
+				let nearClippingPlane = 1;
+				if (cameraAttribute.NearPlane !== void 0) nearClippingPlane = cameraAttribute.NearPlane.value / 1e3;
+				let farClippingPlane = 1e3;
+				if (cameraAttribute.FarPlane !== void 0) farClippingPlane = cameraAttribute.FarPlane.value / 1e3;
+				let width = window.innerWidth;
+				let height = window.innerHeight;
+				if (cameraAttribute.AspectWidth !== void 0 && cameraAttribute.AspectHeight !== void 0) {
+					width = cameraAttribute.AspectWidth.value;
+					height = cameraAttribute.AspectHeight.value;
+				}
+				const aspect = width / height;
+				let fov = 45;
+				if (cameraAttribute.FieldOfView !== void 0) fov = cameraAttribute.FieldOfView.value;
+				const focalLength = cameraAttribute.FocalLength ? cameraAttribute.FocalLength.value : null;
+				switch (type) {
+					case 0:
+						model = new PerspectiveCamera(fov, aspect, nearClippingPlane, farClippingPlane);
+						if (focalLength !== null) model.setFocalLength(focalLength);
+						break;
+					case 1:
+						console.warn("THREE.FBXLoader: Orthographic cameras not supported yet.");
+						model = new Object3D();
+						break;
+					default:
+						console.warn("THREE.FBXLoader: Unknown camera type " + type + ".");
+						model = new Object3D();
+				}
+			}
+			return model;
+		}
+		createLight(relationships) {
+			let model;
+			let lightAttribute;
+			relationships.children.forEach(function(child) {
+				const attr = fbxTree.Objects.NodeAttribute[child.ID];
+				if (attr !== void 0) lightAttribute = attr;
+			});
+			if (lightAttribute === void 0) model = new Object3D();
+			else {
+				let type;
+				if (lightAttribute.LightType === void 0) type = 0;
+				else type = lightAttribute.LightType.value;
+				let color = 16777215;
+				if (lightAttribute.Color !== void 0) color = ColorManagement.colorSpaceToWorking(new Color().fromArray(lightAttribute.Color.value), SRGBColorSpace);
+				let intensity = lightAttribute.Intensity === void 0 ? 1 : lightAttribute.Intensity.value / 100;
+				if (lightAttribute.CastLightOnObject !== void 0 && lightAttribute.CastLightOnObject.value === 0) intensity = 0;
+				let distance = 0;
+				if (lightAttribute.FarAttenuationEnd !== void 0) {
+					if (lightAttribute.EnableFarAttenuation !== void 0 && lightAttribute.EnableFarAttenuation.value === 0) distance = 0;
+					else distance = lightAttribute.FarAttenuationEnd.value;
+				}
+				const decay = 1;
+				switch (type) {
+					case 0:
+						model = new PointLight(color, intensity, distance, decay);
+						break;
+					case 1:
+						model = new DirectionalLight(color, intensity);
+						break;
+					case 2:
+						let angle = Math.PI / 3;
+						let penumbra = 0;
+						if (lightAttribute.OuterAngle !== void 0) {
+							angle = MathUtils.degToRad(lightAttribute.OuterAngle.value);
+							if (lightAttribute.InnerAngle !== void 0) {
+								penumbra = 1 - lightAttribute.InnerAngle.value / lightAttribute.OuterAngle.value;
+								penumbra = Math.max(0, penumbra);
+							}
+						} else if (lightAttribute.InnerAngle !== void 0) angle = MathUtils.degToRad(lightAttribute.InnerAngle.value);
+						model = new SpotLight(color, intensity, distance, angle, penumbra, decay);
+						break;
+					default:
+						console.warn("THREE.FBXLoader: Unknown light type " + lightAttribute.LightType.value + ", defaulting to a PointLight.");
+						model = new PointLight(color, intensity);
+				}
+				if (lightAttribute.CastShadows !== void 0 && lightAttribute.CastShadows.value === 1) model.castShadow = true;
+			}
+			return model;
+		}
+		createMesh(relationships, geometryMap, materialMap) {
+			let model;
+			let geometry = null;
+			let material = null;
+			const materials = [];
+			relationships.children.forEach(function(child) {
+				if (geometryMap.has(child.ID)) geometry = geometryMap.get(child.ID);
+				if (materialMap.has(child.ID)) materials.push(materialMap.get(child.ID));
+			});
+			if (materials.length > 1) material = materials;
+			else if (materials.length > 0) material = materials[0];
+			else {
+				material = new MeshPhongMaterial({
+					name: Loader.DEFAULT_MATERIAL_NAME,
+					color: 13421772
+				});
+				materials.push(material);
+			}
+			if ("color" in geometry.attributes) materials.forEach(function(material) {
+				material.vertexColors = true;
+			});
+			if (geometry.groups.length > 0) {
+				let needsDefaultMaterial = false;
+				for (let i = 0, il = geometry.groups.length; i < il; i++) {
+					const group = geometry.groups[i];
+					if (group.materialIndex < 0 || group.materialIndex >= materials.length) {
+						group.materialIndex = materials.length;
+						needsDefaultMaterial = true;
+					}
+				}
+				if (needsDefaultMaterial) {
+					const defaultMaterial = new MeshPhongMaterial();
+					materials.push(defaultMaterial);
+				}
+			}
+			if (geometry.FBX_Deformer) {
+				model = new SkinnedMesh(geometry, material);
+				model.normalizeSkinWeights();
+			} else model = new Mesh(geometry, material);
+			return model;
+		}
+		createCurve(relationships, geometryMap) {
+			return new Line(relationships.children.reduce(function(geo, child) {
+				if (geometryMap.has(child.ID)) geo = geometryMap.get(child.ID);
+				return geo;
+			}, null), new LineBasicMaterial({
+				name: Loader.DEFAULT_MATERIAL_NAME,
+				color: 3342591,
+				linewidth: 1
+			}));
+		}
+		getTransformData(model, modelNode) {
+			const transformData = {};
+			if ("InheritType" in modelNode) transformData.inheritType = parseInt(modelNode.InheritType.value);
+			if ("RotationOrder" in modelNode) transformData.eulerOrder = getEulerOrder(modelNode.RotationOrder.value);
+			else transformData.eulerOrder = getEulerOrder(0);
+			if ("Lcl_Translation" in modelNode) transformData.translation = modelNode.Lcl_Translation.value;
+			if ("PreRotation" in modelNode) transformData.preRotation = modelNode.PreRotation.value;
+			if ("Lcl_Rotation" in modelNode) transformData.rotation = modelNode.Lcl_Rotation.value;
+			if ("PostRotation" in modelNode) transformData.postRotation = modelNode.PostRotation.value;
+			if ("Lcl_Scaling" in modelNode) transformData.scale = modelNode.Lcl_Scaling.value;
+			if ("ScalingOffset" in modelNode) transformData.scalingOffset = modelNode.ScalingOffset.value;
+			if ("ScalingPivot" in modelNode) transformData.scalingPivot = modelNode.ScalingPivot.value;
+			if ("RotationOffset" in modelNode) transformData.rotationOffset = modelNode.RotationOffset.value;
+			if ("RotationPivot" in modelNode) transformData.rotationPivot = modelNode.RotationPivot.value;
+			model.userData.transformData = transformData;
+		}
+		setLookAtProperties(model, modelNode) {
+			if ("LookAtProperty" in modelNode) connections.get(model.ID).children.forEach(function(child) {
+				if (child.relationship === "LookAtProperty") {
+					const lookAtTarget = fbxTree.Objects.Model[child.ID];
+					if ("Lcl_Translation" in lookAtTarget) {
+						const pos = lookAtTarget.Lcl_Translation.value;
+						if (model.target !== void 0) {
+							model.target.position.fromArray(pos);
+							sceneGraph.add(model.target);
+						} else model.lookAt(new Vector3().fromArray(pos));
+					}
+				}
+			});
+		}
+		bindSkeleton(skeletons, geometryMap, modelMap) {
+			for (const ID in skeletons) {
+				const skeleton = skeletons[ID];
+				const boneInverses = [];
+				for (let i = 0, l = skeleton.bones.length; i < l; i++) {
+					const inverse = new Matrix4();
+					if (skeleton.bones[i] && skeleton.rawBones[i]) inverse.copy(skeleton.rawBones[i].transformLink).invert();
+					boneInverses.push(inverse);
+				}
+				connections.get(parseInt(skeleton.ID)).parents.forEach(function(parent) {
+					if (geometryMap.has(parent.ID)) {
+						const geoID = parent.ID;
+						connections.get(geoID).parents.forEach(function(geoConnParent) {
+							if (modelMap.has(geoConnParent.ID)) {
+								const model = modelMap.get(geoConnParent.ID);
+								model.updateMatrixWorld(true);
+								model.bind(new Skeleton(skeleton.bones, boneInverses), model.matrixWorld);
+							}
+						});
+					}
+				});
+			}
+		}
+		parsePoseNodes() {
+			const bindMatrices = {};
+			if ("Pose" in fbxTree.Objects) {
+				const BindPoseNode = fbxTree.Objects.Pose;
+				for (const nodeID in BindPoseNode) if (BindPoseNode[nodeID].attrType === "BindPose" && BindPoseNode[nodeID].NbPoseNodes > 0) {
+					const poseNodes = BindPoseNode[nodeID].PoseNode;
+					if (Array.isArray(poseNodes)) poseNodes.forEach(function(poseNode) {
+						bindMatrices[poseNode.Node] = new Matrix4().fromArray(poseNode.Matrix.a);
+					});
+					else bindMatrices[poseNodes.Node] = new Matrix4().fromArray(poseNodes.Matrix.a);
+				}
+			}
+			return bindMatrices;
+		}
+		addGlobalSceneSettings() {
+			if ("GlobalSettings" in fbxTree) {
+				if ("AmbientColor" in fbxTree.GlobalSettings) {
+					const ambientColor = fbxTree.GlobalSettings.AmbientColor.value;
+					const r = ambientColor[0];
+					const g = ambientColor[1];
+					const b = ambientColor[2];
+					if (r !== 0 || g !== 0 || b !== 0) {
+						const color = new Color().setRGB(r, g, b, SRGBColorSpace);
+						sceneGraph.add(new AmbientLight(color, 1));
+					}
+				}
+				if ("UnitScaleFactor" in fbxTree.GlobalSettings) sceneGraph.userData.unitScaleFactor = fbxTree.GlobalSettings.UnitScaleFactor.value;
+			}
+		}
+	};
+	var GeometryParser = class {
+		constructor() {
+			this.negativeMaterialIndices = false;
+		}
+		parse(deformers) {
+			const geometryMap = /* @__PURE__ */ new Map();
+			if ("Geometry" in fbxTree.Objects) {
+				const geoNodes = fbxTree.Objects.Geometry;
+				for (const nodeID in geoNodes) {
+					const relationships = connections.get(parseInt(nodeID));
+					const geo = this.parseGeometry(relationships, geoNodes[nodeID], deformers);
+					geometryMap.set(parseInt(nodeID), geo);
+				}
+			}
+			if (this.negativeMaterialIndices === true) console.warn("THREE.FBXLoader: The FBX file contains invalid (negative) material indices. The asset might not render as expected.");
+			return geometryMap;
+		}
+		parseGeometry(relationships, geoNode, deformers) {
+			switch (geoNode.attrType) {
+				case "Mesh": return this.parseMeshGeometry(relationships, geoNode, deformers);
+				case "NurbsCurve": return this.parseNurbsGeometry(geoNode);
+			}
+		}
+		parseMeshGeometry(relationships, geoNode, deformers) {
+			const skeletons = deformers.skeletons;
+			const morphTargets = [];
+			const modelNodes = relationships.parents.map(function(parent) {
+				return fbxTree.Objects.Model[parent.ID];
+			});
+			if (modelNodes.length === 0) return;
+			const skeleton = relationships.children.reduce(function(skeleton, child) {
+				if (skeletons[child.ID] !== void 0) skeleton = skeletons[child.ID];
+				return skeleton;
+			}, null);
+			relationships.children.forEach(function(child) {
+				if (deformers.morphTargets[child.ID] !== void 0) morphTargets.push(deformers.morphTargets[child.ID]);
+			});
+			const modelNode = modelNodes[0];
+			const transformData = {};
+			if ("RotationOrder" in modelNode) transformData.eulerOrder = getEulerOrder(modelNode.RotationOrder.value);
+			if ("InheritType" in modelNode) transformData.inheritType = parseInt(modelNode.InheritType.value);
+			if ("GeometricTranslation" in modelNode) transformData.translation = modelNode.GeometricTranslation.value;
+			if ("GeometricRotation" in modelNode) transformData.rotation = modelNode.GeometricRotation.value;
+			if ("GeometricScaling" in modelNode) transformData.scale = modelNode.GeometricScaling.value;
+			const transform = generateTransform(transformData);
+			return this.genGeometry(geoNode, skeleton, morphTargets, transform);
+		}
+		genGeometry(geoNode, skeleton, morphTargets, preTransform) {
+			const geo = new BufferGeometry();
+			if (geoNode.attrName) geo.name = geoNode.attrName;
+			const geoInfo = this.parseGeoNode(geoNode, skeleton);
+			const buffers = this.genBuffers(geoInfo);
+			const positionAttribute = new Float32BufferAttribute(buffers.vertex, 3);
+			positionAttribute.applyMatrix4(preTransform);
+			geo.setAttribute("position", positionAttribute);
+			if (buffers.colors.length > 0) geo.setAttribute("color", new Float32BufferAttribute(buffers.colors, 3));
+			if (skeleton) {
+				geo.setAttribute("skinIndex", new Uint16BufferAttribute(buffers.weightsIndices, 4));
+				geo.setAttribute("skinWeight", new Float32BufferAttribute(buffers.vertexWeights, 4));
+				geo.FBX_Deformer = skeleton;
+			}
+			if (buffers.normal.length > 0) {
+				const normalMatrix = new Matrix3().getNormalMatrix(preTransform);
+				const normalAttribute = new Float32BufferAttribute(buffers.normal, 3);
+				normalAttribute.applyNormalMatrix(normalMatrix);
+				geo.setAttribute("normal", normalAttribute);
+			}
+			buffers.uvs.forEach(function(uvBuffer, i) {
+				const name = i === 0 ? "uv" : `uv${i}`;
+				geo.setAttribute(name, new Float32BufferAttribute(buffers.uvs[i], 2));
+			});
+			if (geoInfo.material && geoInfo.material.mappingType !== "AllSame") {
+				let prevMaterialIndex = buffers.materialIndex[0];
+				let startIndex = 0;
+				buffers.materialIndex.forEach(function(currentIndex, i) {
+					if (currentIndex !== prevMaterialIndex) {
+						geo.addGroup(startIndex, i - startIndex, prevMaterialIndex);
+						prevMaterialIndex = currentIndex;
+						startIndex = i;
+					}
+				});
+				if (geo.groups.length > 0) {
+					const lastGroup = geo.groups[geo.groups.length - 1];
+					const lastIndex = lastGroup.start + lastGroup.count;
+					if (lastIndex !== buffers.materialIndex.length) geo.addGroup(lastIndex, buffers.materialIndex.length - lastIndex, prevMaterialIndex);
+				}
+				if (geo.groups.length === 0) geo.addGroup(0, buffers.materialIndex.length, buffers.materialIndex[0]);
+			}
+			this.addMorphTargets(geo, geoNode, morphTargets, preTransform);
+			return geo;
+		}
+		parseGeoNode(geoNode, skeleton) {
+			const geoInfo = {};
+			geoInfo.vertexPositions = geoNode.Vertices !== void 0 ? geoNode.Vertices.a : [];
+			geoInfo.vertexIndices = geoNode.PolygonVertexIndex !== void 0 ? geoNode.PolygonVertexIndex.a : [];
+			if (geoNode.LayerElementColor && geoNode.LayerElementColor[0].Colors) geoInfo.color = this.parseVertexColors(geoNode.LayerElementColor[0]);
+			if (geoNode.LayerElementMaterial) geoInfo.material = this.parseMaterialIndices(geoNode.LayerElementMaterial[0]);
+			if (geoNode.LayerElementNormal) geoInfo.normal = this.parseNormals(geoNode.LayerElementNormal[0]);
+			if (geoNode.LayerElementUV) {
+				geoInfo.uv = [];
+				let i = 0;
+				while (geoNode.LayerElementUV[i]) {
+					if (geoNode.LayerElementUV[i].UV) geoInfo.uv.push(this.parseUVs(geoNode.LayerElementUV[i]));
+					i++;
+				}
+			}
+			geoInfo.weightTable = {};
+			if (skeleton !== null) {
+				geoInfo.skeleton = skeleton;
+				skeleton.rawBones.forEach(function(rawBone, i) {
+					rawBone.indices.forEach(function(index, j) {
+						if (geoInfo.weightTable[index] === void 0) geoInfo.weightTable[index] = [];
+						geoInfo.weightTable[index].push({
+							id: i,
+							weight: rawBone.weights[j]
+						});
+					});
+				});
+			}
+			return geoInfo;
+		}
+		genBuffers(geoInfo) {
+			const buffers = {
+				vertex: [],
+				normal: [],
+				colors: [],
+				uvs: [],
+				materialIndex: [],
+				vertexWeights: [],
+				weightsIndices: []
+			};
+			let polygonIndex = 0;
+			let faceLength = 0;
+			let displayedWeightsWarning = false;
+			let facePositionIndexes = [];
+			let faceNormals = [];
+			let faceColors = [];
+			let faceUVs = [];
+			let faceWeights = [];
+			let faceWeightIndices = [];
+			const scope = this;
+			geoInfo.vertexIndices.forEach(function(vertexIndex, polygonVertexIndex) {
+				let materialIndex;
+				let endOfFace = false;
+				if (vertexIndex < 0) {
+					vertexIndex = vertexIndex ^ -1;
+					endOfFace = true;
+				}
+				let weightIndices = [];
+				let weights = [];
+				facePositionIndexes.push(vertexIndex * 3, vertexIndex * 3 + 1, vertexIndex * 3 + 2);
+				if (geoInfo.color) {
+					const data = getData(polygonVertexIndex, polygonIndex, vertexIndex, geoInfo.color);
+					faceColors.push(data[0], data[1], data[2]);
+				}
+				if (geoInfo.skeleton) {
+					if (geoInfo.weightTable[vertexIndex] !== void 0) geoInfo.weightTable[vertexIndex].forEach(function(wt) {
+						weights.push(wt.weight);
+						weightIndices.push(wt.id);
+					});
+					if (weights.length > 4) {
+						if (!displayedWeightsWarning) {
+							console.warn("THREE.FBXLoader: Vertex has more than 4 skinning weights assigned to vertex. Deleting additional weights.");
+							displayedWeightsWarning = true;
+						}
+						const wIndex = [
+							0,
+							0,
+							0,
+							0
+						];
+						const Weight = [
+							0,
+							0,
+							0,
+							0
+						];
+						weights.forEach(function(weight, weightIndex) {
+							let currentWeight = weight;
+							let currentIndex = weightIndices[weightIndex];
+							Weight.forEach(function(comparedWeight, comparedWeightIndex, comparedWeightArray) {
+								if (currentWeight > comparedWeight) {
+									comparedWeightArray[comparedWeightIndex] = currentWeight;
+									currentWeight = comparedWeight;
+									const tmp = wIndex[comparedWeightIndex];
+									wIndex[comparedWeightIndex] = currentIndex;
+									currentIndex = tmp;
+								}
+							});
+						});
+						weightIndices = wIndex;
+						weights = Weight;
+					}
+					while (weights.length < 4) {
+						weights.push(0);
+						weightIndices.push(0);
+					}
+					for (let i = 0; i < 4; ++i) {
+						faceWeights.push(weights[i]);
+						faceWeightIndices.push(weightIndices[i]);
+					}
+				}
+				if (geoInfo.normal) {
+					const data = getData(polygonVertexIndex, polygonIndex, vertexIndex, geoInfo.normal);
+					faceNormals.push(data[0], data[1], data[2]);
+				}
+				if (geoInfo.material && geoInfo.material.mappingType !== "AllSame") {
+					materialIndex = getData(polygonVertexIndex, polygonIndex, vertexIndex, geoInfo.material)[0];
+					if (materialIndex < 0) {
+						scope.negativeMaterialIndices = true;
+						materialIndex = 0;
+					}
+				}
+				if (geoInfo.uv) geoInfo.uv.forEach(function(uv, i) {
+					const data = getData(polygonVertexIndex, polygonIndex, vertexIndex, uv);
+					if (faceUVs[i] === void 0) faceUVs[i] = [];
+					faceUVs[i].push(data[0]);
+					faceUVs[i].push(data[1]);
+				});
+				faceLength++;
+				if (endOfFace) {
+					scope.genFace(buffers, geoInfo, facePositionIndexes, materialIndex, faceNormals, faceColors, faceUVs, faceWeights, faceWeightIndices, faceLength);
+					polygonIndex++;
+					faceLength = 0;
+					facePositionIndexes = [];
+					faceNormals = [];
+					faceColors = [];
+					faceUVs = [];
+					faceWeights = [];
+					faceWeightIndices = [];
+				}
+			});
+			return buffers;
+		}
+		getNormalNewell(vertices) {
+			const normal = new Vector3(0, 0, 0);
+			for (let i = 0; i < vertices.length; i++) {
+				const current = vertices[i];
+				const next = vertices[(i + 1) % vertices.length];
+				normal.x += (current.y - next.y) * (current.z + next.z);
+				normal.y += (current.z - next.z) * (current.x + next.x);
+				normal.z += (current.x - next.x) * (current.y + next.y);
+			}
+			normal.normalize();
+			return normal;
+		}
+		getNormalTangentAndBitangent(vertices) {
+			const normalVector = this.getNormalNewell(vertices);
+			const tangent = (Math.abs(normalVector.z) > .5 ? new Vector3(0, 1, 0) : new Vector3(0, 0, 1)).cross(normalVector).normalize();
+			return {
+				normal: normalVector,
+				tangent,
+				bitangent: normalVector.clone().cross(tangent).normalize()
+			};
+		}
+		flattenVertex(vertex, normalTangent, normalBitangent) {
+			return new Vector2(vertex.dot(normalTangent), vertex.dot(normalBitangent));
+		}
+		genFace(buffers, geoInfo, facePositionIndexes, materialIndex, faceNormals, faceColors, faceUVs, faceWeights, faceWeightIndices, faceLength) {
+			let triangles;
+			if (faceLength > 3) {
+				const vertices = [];
+				const positions = geoInfo.baseVertexPositions || geoInfo.vertexPositions;
+				for (let i = 0; i < facePositionIndexes.length; i += 3) vertices.push(new Vector3(positions[facePositionIndexes[i]], positions[facePositionIndexes[i + 1]], positions[facePositionIndexes[i + 2]]));
+				const { tangent, bitangent } = this.getNormalTangentAndBitangent(vertices);
+				const triangulationInput = [];
+				for (const vertex of vertices) triangulationInput.push(this.flattenVertex(vertex, tangent, bitangent));
+				triangles = ShapeUtils.triangulateShape(triangulationInput, []);
+			} else triangles = [[
+				0,
+				1,
+				2
+			]];
+			for (const [i0, i1, i2] of triangles) {
+				buffers.vertex.push(geoInfo.vertexPositions[facePositionIndexes[i0 * 3]]);
+				buffers.vertex.push(geoInfo.vertexPositions[facePositionIndexes[i0 * 3 + 1]]);
+				buffers.vertex.push(geoInfo.vertexPositions[facePositionIndexes[i0 * 3 + 2]]);
+				buffers.vertex.push(geoInfo.vertexPositions[facePositionIndexes[i1 * 3]]);
+				buffers.vertex.push(geoInfo.vertexPositions[facePositionIndexes[i1 * 3 + 1]]);
+				buffers.vertex.push(geoInfo.vertexPositions[facePositionIndexes[i1 * 3 + 2]]);
+				buffers.vertex.push(geoInfo.vertexPositions[facePositionIndexes[i2 * 3]]);
+				buffers.vertex.push(geoInfo.vertexPositions[facePositionIndexes[i2 * 3 + 1]]);
+				buffers.vertex.push(geoInfo.vertexPositions[facePositionIndexes[i2 * 3 + 2]]);
+				if (geoInfo.skeleton) {
+					buffers.vertexWeights.push(faceWeights[i0 * 4]);
+					buffers.vertexWeights.push(faceWeights[i0 * 4 + 1]);
+					buffers.vertexWeights.push(faceWeights[i0 * 4 + 2]);
+					buffers.vertexWeights.push(faceWeights[i0 * 4 + 3]);
+					buffers.vertexWeights.push(faceWeights[i1 * 4]);
+					buffers.vertexWeights.push(faceWeights[i1 * 4 + 1]);
+					buffers.vertexWeights.push(faceWeights[i1 * 4 + 2]);
+					buffers.vertexWeights.push(faceWeights[i1 * 4 + 3]);
+					buffers.vertexWeights.push(faceWeights[i2 * 4]);
+					buffers.vertexWeights.push(faceWeights[i2 * 4 + 1]);
+					buffers.vertexWeights.push(faceWeights[i2 * 4 + 2]);
+					buffers.vertexWeights.push(faceWeights[i2 * 4 + 3]);
+					buffers.weightsIndices.push(faceWeightIndices[i0 * 4]);
+					buffers.weightsIndices.push(faceWeightIndices[i0 * 4 + 1]);
+					buffers.weightsIndices.push(faceWeightIndices[i0 * 4 + 2]);
+					buffers.weightsIndices.push(faceWeightIndices[i0 * 4 + 3]);
+					buffers.weightsIndices.push(faceWeightIndices[i1 * 4]);
+					buffers.weightsIndices.push(faceWeightIndices[i1 * 4 + 1]);
+					buffers.weightsIndices.push(faceWeightIndices[i1 * 4 + 2]);
+					buffers.weightsIndices.push(faceWeightIndices[i1 * 4 + 3]);
+					buffers.weightsIndices.push(faceWeightIndices[i2 * 4]);
+					buffers.weightsIndices.push(faceWeightIndices[i2 * 4 + 1]);
+					buffers.weightsIndices.push(faceWeightIndices[i2 * 4 + 2]);
+					buffers.weightsIndices.push(faceWeightIndices[i2 * 4 + 3]);
+				}
+				if (geoInfo.color) {
+					buffers.colors.push(faceColors[i0 * 3]);
+					buffers.colors.push(faceColors[i0 * 3 + 1]);
+					buffers.colors.push(faceColors[i0 * 3 + 2]);
+					buffers.colors.push(faceColors[i1 * 3]);
+					buffers.colors.push(faceColors[i1 * 3 + 1]);
+					buffers.colors.push(faceColors[i1 * 3 + 2]);
+					buffers.colors.push(faceColors[i2 * 3]);
+					buffers.colors.push(faceColors[i2 * 3 + 1]);
+					buffers.colors.push(faceColors[i2 * 3 + 2]);
+				}
+				if (geoInfo.material && geoInfo.material.mappingType !== "AllSame") {
+					buffers.materialIndex.push(materialIndex);
+					buffers.materialIndex.push(materialIndex);
+					buffers.materialIndex.push(materialIndex);
+				}
+				if (geoInfo.normal) {
+					buffers.normal.push(faceNormals[i0 * 3]);
+					buffers.normal.push(faceNormals[i0 * 3 + 1]);
+					buffers.normal.push(faceNormals[i0 * 3 + 2]);
+					buffers.normal.push(faceNormals[i1 * 3]);
+					buffers.normal.push(faceNormals[i1 * 3 + 1]);
+					buffers.normal.push(faceNormals[i1 * 3 + 2]);
+					buffers.normal.push(faceNormals[i2 * 3]);
+					buffers.normal.push(faceNormals[i2 * 3 + 1]);
+					buffers.normal.push(faceNormals[i2 * 3 + 2]);
+				}
+				if (geoInfo.uv) geoInfo.uv.forEach(function(uv, j) {
+					if (buffers.uvs[j] === void 0) buffers.uvs[j] = [];
+					buffers.uvs[j].push(faceUVs[j][i0 * 2]);
+					buffers.uvs[j].push(faceUVs[j][i0 * 2 + 1]);
+					buffers.uvs[j].push(faceUVs[j][i1 * 2]);
+					buffers.uvs[j].push(faceUVs[j][i1 * 2 + 1]);
+					buffers.uvs[j].push(faceUVs[j][i2 * 2]);
+					buffers.uvs[j].push(faceUVs[j][i2 * 2 + 1]);
+				});
+			}
+		}
+		addMorphTargets(parentGeo, parentGeoNode, morphTargets, preTransform) {
+			if (morphTargets.length === 0) return;
+			parentGeo.morphTargetsRelative = true;
+			parentGeo.morphAttributes.position = [];
+			const morphPreTransform = preTransform.clone().setPosition(0, 0, 0);
+			const scope = this;
+			morphTargets.forEach(function(morphTarget) {
+				morphTarget.rawTargets.forEach(function(rawTarget) {
+					const morphGeoNode = fbxTree.Objects.Geometry[rawTarget.geoID];
+					if (morphGeoNode !== void 0) scope.genMorphGeometry(parentGeo, parentGeoNode, morphGeoNode, morphPreTransform, rawTarget.name);
+				});
+			});
+		}
+		genMorphGeometry(parentGeo, parentGeoNode, morphGeoNode, preTransform, name) {
+			const basePositions = parentGeoNode.Vertices !== void 0 ? parentGeoNode.Vertices.a : [];
+			const baseIndices = parentGeoNode.PolygonVertexIndex !== void 0 ? parentGeoNode.PolygonVertexIndex.a : [];
+			const morphPositionsSparse = morphGeoNode.Vertices !== void 0 ? morphGeoNode.Vertices.a : [];
+			const morphIndices = morphGeoNode.Indexes !== void 0 ? morphGeoNode.Indexes.a : [];
+			const length = parentGeo.attributes.position.count * 3;
+			const morphPositions = new Float32Array(length);
+			for (let i = 0; i < morphIndices.length; i++) {
+				const morphIndex = morphIndices[i] * 3;
+				morphPositions[morphIndex] = morphPositionsSparse[i * 3];
+				morphPositions[morphIndex + 1] = morphPositionsSparse[i * 3 + 1];
+				morphPositions[morphIndex + 2] = morphPositionsSparse[i * 3 + 2];
+			}
+			const morphGeoInfo = {
+				vertexIndices: baseIndices,
+				vertexPositions: morphPositions,
+				baseVertexPositions: basePositions
+			};
+			const positionAttribute = new Float32BufferAttribute(this.genBuffers(morphGeoInfo).vertex, 3);
+			positionAttribute.name = name || morphGeoNode.attrName;
+			positionAttribute.applyMatrix4(preTransform);
+			parentGeo.morphAttributes.position.push(positionAttribute);
+		}
+		parseNormals(NormalNode) {
+			const mappingType = NormalNode.MappingInformationType;
+			const referenceType = NormalNode.ReferenceInformationType;
+			const buffer = NormalNode.Normals.a;
+			let indexBuffer = [];
+			if (referenceType === "IndexToDirect") {
+				if ("NormalIndex" in NormalNode) indexBuffer = NormalNode.NormalIndex.a;
+				else if ("NormalsIndex" in NormalNode) indexBuffer = NormalNode.NormalsIndex.a;
+			}
+			return {
+				dataSize: 3,
+				buffer,
+				indices: indexBuffer,
+				mappingType,
+				referenceType
+			};
+		}
+		parseUVs(UVNode) {
+			const mappingType = UVNode.MappingInformationType;
+			const referenceType = UVNode.ReferenceInformationType;
+			const buffer = UVNode.UV.a;
+			let indexBuffer = [];
+			if (referenceType === "IndexToDirect") indexBuffer = UVNode.UVIndex.a;
+			return {
+				dataSize: 2,
+				buffer,
+				indices: indexBuffer,
+				mappingType,
+				referenceType
+			};
+		}
+		parseVertexColors(ColorNode) {
+			const mappingType = ColorNode.MappingInformationType;
+			const referenceType = ColorNode.ReferenceInformationType;
+			const buffer = ColorNode.Colors.a;
+			let indexBuffer = [];
+			if (referenceType === "IndexToDirect") indexBuffer = ColorNode.ColorIndex.a;
+			for (let i = 0, c = new Color(); i < buffer.length; i += 4) {
+				c.fromArray(buffer, i);
+				ColorManagement.colorSpaceToWorking(c, SRGBColorSpace);
+				c.toArray(buffer, i);
+			}
+			return {
+				dataSize: 4,
+				buffer,
+				indices: indexBuffer,
+				mappingType,
+				referenceType
+			};
+		}
+		parseMaterialIndices(MaterialNode) {
+			const mappingType = MaterialNode.MappingInformationType;
+			const referenceType = MaterialNode.ReferenceInformationType;
+			if (mappingType === "NoMappingInformation") return {
+				dataSize: 1,
+				buffer: [0],
+				indices: [0],
+				mappingType: "AllSame",
+				referenceType
+			};
+			const materialIndexBuffer = MaterialNode.Materials.a;
+			const materialIndices = [];
+			for (let i = 0; i < materialIndexBuffer.length; ++i) materialIndices.push(i);
+			return {
+				dataSize: 1,
+				buffer: materialIndexBuffer,
+				indices: materialIndices,
+				mappingType,
+				referenceType
+			};
+		}
+		parseNurbsGeometry(geoNode) {
+			const order = parseInt(geoNode.Order);
+			if (isNaN(order)) {
+				console.error("THREE.FBXLoader: Invalid Order %s given for geometry ID: %s", geoNode.Order, geoNode.id);
+				return new BufferGeometry();
+			}
+			const degree = order - 1;
+			const knots = geoNode.KnotVector.a;
+			const controlPoints = [];
+			const pointsValues = geoNode.Points.a;
+			for (let i = 0, l = pointsValues.length; i < l; i += 4) controlPoints.push(new Vector4().fromArray(pointsValues, i));
+			let startKnot, endKnot;
+			if (geoNode.Form === "Closed") controlPoints.push(controlPoints[0]);
+			else if (geoNode.Form === "Periodic") {
+				startKnot = degree;
+				endKnot = knots.length - 1 - startKnot;
+				for (let i = 0; i < degree; ++i) controlPoints.push(controlPoints[i]);
+			}
+			const points = new NURBSCurve(degree, knots, controlPoints, startKnot, endKnot).getPoints(controlPoints.length * 12);
+			return new BufferGeometry().setFromPoints(points);
+		}
+	};
+	var AnimationParser = class {
+		constructor(trimAnimationClips) {
+			this.trimAnimationClips = trimAnimationClips;
+		}
+		parse() {
+			const animationClips = [];
+			const rawClips = this.parseClips();
+			if (rawClips !== void 0) for (const key in rawClips) {
+				const rawClip = rawClips[key];
+				const clip = this.addClip(rawClip);
+				animationClips.push(clip);
+			}
+			return animationClips;
+		}
+		parseClips() {
+			if (fbxTree.Objects.AnimationCurve === void 0) return void 0;
+			const curveNodesMap = this.parseAnimationCurveNodes();
+			this.parseAnimationCurves(curveNodesMap);
+			const layersMap = this.parseAnimationLayers(curveNodesMap);
+			return this.parseAnimStacks(layersMap);
+		}
+		parseAnimationCurveNodes() {
+			const rawCurveNodes = fbxTree.Objects.AnimationCurveNode;
+			const curveNodesMap = /* @__PURE__ */ new Map();
+			for (const nodeID in rawCurveNodes) {
+				const rawCurveNode = rawCurveNodes[nodeID];
+				if (rawCurveNode.attrName.match(/S|R|T|DeformPercent/) !== null) {
+					const curveNode = {
+						id: rawCurveNode.id,
+						attr: rawCurveNode.attrName,
+						curves: {}
+					};
+					curveNodesMap.set(curveNode.id, curveNode);
+				}
+			}
+			return curveNodesMap;
+		}
+		parseAnimationCurves(curveNodesMap) {
+			const rawCurves = fbxTree.Objects.AnimationCurve;
+			for (const nodeID in rawCurves) {
+				const animationCurve = {
+					id: rawCurves[nodeID].id,
+					times: rawCurves[nodeID].KeyTime.a.map(convertFBXTimeToSeconds),
+					values: rawCurves[nodeID].KeyValueFloat.a
+				};
+				const relationships = connections.get(animationCurve.id);
+				if (relationships !== void 0) {
+					const animationCurveID = relationships.parents[0].ID;
+					const animationCurveRelationship = relationships.parents[0].relationship;
+					if (animationCurveRelationship.match(/X/)) curveNodesMap.get(animationCurveID).curves["x"] = animationCurve;
+					else if (animationCurveRelationship.match(/Y/)) curveNodesMap.get(animationCurveID).curves["y"] = animationCurve;
+					else if (animationCurveRelationship.match(/Z/)) curveNodesMap.get(animationCurveID).curves["z"] = animationCurve;
+					else if (animationCurveRelationship.match(/DeformPercent/) && curveNodesMap.has(animationCurveID)) curveNodesMap.get(animationCurveID).curves["morph"] = animationCurve;
+				}
+			}
+		}
+		parseAnimationLayers(curveNodesMap) {
+			const rawLayers = fbxTree.Objects.AnimationLayer;
+			const layersMap = /* @__PURE__ */ new Map();
+			for (const nodeID in rawLayers) {
+				const layerCurveNodes = [];
+				const connection = connections.get(parseInt(nodeID));
+				if (connection !== void 0) {
+					connection.children.forEach(function(child, i) {
+						if (curveNodesMap.has(child.ID)) {
+							const curveNode = curveNodesMap.get(child.ID);
+							if (curveNode.curves.x !== void 0 || curveNode.curves.y !== void 0 || curveNode.curves.z !== void 0) {
+								if (layerCurveNodes[i] === void 0) {
+									const filteredParents = connections.get(child.ID).parents.filter(function(parent) {
+										return parent.relationship !== void 0;
+									});
+									if (filteredParents.length === 0) return;
+									const modelID = filteredParents[0].ID;
+									if (modelID !== void 0) {
+										const rawModel = fbxTree.Objects.Model[modelID.toString()];
+										if (rawModel === void 0) {
+											console.warn("THREE.FBXLoader: Encountered a unused curve.", child);
+											return;
+										}
+										const node = {
+											modelName: rawModel.attrName ? PropertyBinding.sanitizeNodeName(rawModel.attrName) : "",
+											ID: rawModel.id,
+											initialPosition: [
+												0,
+												0,
+												0
+											],
+											initialRotation: [
+												0,
+												0,
+												0
+											],
+											initialScale: [
+												1,
+												1,
+												1
+											]
+										};
+										sceneGraph.traverse(function(child) {
+											if (child.ID === rawModel.id) {
+												node.transform = child.matrix;
+												if (child.userData.transformData) {
+													node.eulerOrder = child.userData.transformData.eulerOrder;
+													if (child.userData.transformData.rotation) node.initialRotation = child.userData.transformData.rotation;
+												}
+											}
+										});
+										if (!node.transform) node.transform = new Matrix4();
+										if ("PreRotation" in rawModel) node.preRotation = rawModel.PreRotation.value;
+										if ("PostRotation" in rawModel) node.postRotation = rawModel.PostRotation.value;
+										layerCurveNodes[i] = node;
+									}
+								}
+								if (layerCurveNodes[i]) layerCurveNodes[i][curveNode.attr] = curveNode;
+							} else if (curveNode.curves.morph !== void 0) {
+								if (layerCurveNodes[i] === void 0) {
+									const filteredParents = connections.get(child.ID).parents.filter(function(parent) {
+										return parent.relationship !== void 0;
+									});
+									if (filteredParents.length === 0) return;
+									const deformerID = filteredParents[0].ID;
+									const morpherID = connections.get(deformerID).parents[0].ID;
+									const geoID = connections.get(morpherID).parents[0].ID;
+									const modelID = connections.get(geoID).parents[0].ID;
+									const rawModel = fbxTree.Objects.Model[modelID];
+									const node = {
+										modelName: rawModel.attrName ? PropertyBinding.sanitizeNodeName(rawModel.attrName) : "",
+										morphName: fbxTree.Objects.Deformer[deformerID].attrName
+									};
+									layerCurveNodes[i] = node;
+								}
+								layerCurveNodes[i][curveNode.attr] = curveNode;
+							}
+						}
+					});
+					layersMap.set(parseInt(nodeID), layerCurveNodes);
+				}
+			}
+			return layersMap;
+		}
+		parseAnimStacks(layersMap) {
+			const rawStacks = fbxTree.Objects.AnimationStack;
+			const rawClips = {};
+			for (const nodeID in rawStacks) {
+				const children = connections.get(parseInt(nodeID)).children;
+				if (children.length > 1) console.warn("THREE.FBXLoader: Encountered an animation stack with multiple layers, this is currently not supported. Ignoring subsequent layers.");
+				const layer = layersMap.get(children[0].ID);
+				const rawStack = rawStacks[nodeID];
+				rawClips[nodeID] = {
+					name: rawStack.attrName,
+					layer,
+					localStart: rawStack.LocalStart !== void 0 ? convertFBXTimeToSeconds(Number(rawStack.LocalStart.value)) : 0,
+					localStop: rawStack.LocalStop !== void 0 ? convertFBXTimeToSeconds(Number(rawStack.LocalStop.value)) : 0
+				};
+			}
+			return rawClips;
+		}
+		addClip(rawClip) {
+			let tracks = [];
+			const scope = this;
+			rawClip.layer.forEach(function(rawTracks) {
+				tracks = tracks.concat(scope.generateTracks(rawTracks));
+			});
+			if (this.trimAnimationClips === true && rawClip.localStop > rawClip.localStart) tracks = this.trimTracks(tracks, rawClip.localStart, rawClip.localStop);
+			return new AnimationClip(rawClip.name, -1, tracks);
+		}
+		trimTracks(tracks, startTime, endTime) {
+			const start = Math.fround(startTime);
+			const end = Math.fround(endTime);
+			const trimmedTracks = [];
+			for (let i = 0; i < tracks.length; i++) {
+				const track = tracks[i];
+				const stride = track.getValueSize();
+				const times = [];
+				const values = [];
+				for (let j = 0; j < track.times.length; j++) {
+					const time = track.times[j];
+					if (time < start || time > end) continue;
+					times.push(time - start);
+					for (let k = 0; k < stride; k++) values.push(track.values[j * stride + k]);
+				}
+				if (times.length === 0) continue;
+				track.times = new Float32Array(times);
+				track.values = new Float32Array(values);
+				trimmedTracks.push(track);
+			}
+			return trimmedTracks;
+		}
+		generateTracks(rawTracks) {
+			const tracks = [];
+			let initialPosition = new Vector3();
+			let initialScale = new Vector3();
+			if (rawTracks.transform) rawTracks.transform.decompose(initialPosition, new Quaternion(), initialScale);
+			initialPosition = initialPosition.toArray();
+			initialScale = initialScale.toArray();
+			if (rawTracks.T !== void 0 && Object.keys(rawTracks.T.curves).length > 0) {
+				const positionTrack = this.generateVectorTrack(rawTracks.modelName, rawTracks.T.curves, initialPosition, "position");
+				if (positionTrack !== void 0) tracks.push(positionTrack);
+			}
+			if (rawTracks.R !== void 0 && Object.keys(rawTracks.R.curves).length > 0) {
+				const rotationTrack = this.generateRotationTrack(rawTracks.modelName, rawTracks.R.curves, rawTracks.preRotation, rawTracks.postRotation, rawTracks.eulerOrder, rawTracks.initialRotation);
+				if (rotationTrack !== void 0) tracks.push(rotationTrack);
+			}
+			if (rawTracks.S !== void 0 && Object.keys(rawTracks.S.curves).length > 0) {
+				const scaleTrack = this.generateVectorTrack(rawTracks.modelName, rawTracks.S.curves, initialScale, "scale");
+				if (scaleTrack !== void 0) tracks.push(scaleTrack);
+			}
+			if (rawTracks.DeformPercent !== void 0) {
+				const morphTrack = this.generateMorphTrack(rawTracks);
+				if (morphTrack !== void 0) tracks.push(morphTrack);
+			}
+			return tracks;
+		}
+		generateVectorTrack(modelName, curves, initialValue, type) {
+			const times = this.getTimesForAllAxes(curves);
+			const values = this.getKeyframeTrackValues(times, curves, initialValue);
+			return new VectorKeyframeTrack(modelName + "." + type, times, values);
+		}
+		generateRotationTrack(modelName, curves, preRotation, postRotation, eulerOrder, initialRotation) {
+			let times;
+			let values;
+			if (curves.x !== void 0 || curves.y !== void 0 || curves.z !== void 0) {
+				const mergedTimes = this.getTimesForAllAxes(curves);
+				if (mergedTimes.length > 0) {
+					const initialRot = initialRotation || [
+						0,
+						0,
+						0
+					];
+					const syncX = this.synchronizeCurve(curves.x, mergedTimes, initialRot[0]);
+					const syncY = this.synchronizeCurve(curves.y, mergedTimes, initialRot[1]);
+					const syncZ = this.synchronizeCurve(curves.z, mergedTimes, initialRot[2]);
+					const result = this.interpolateRotations(syncX, syncY, syncZ, eulerOrder);
+					times = result[0];
+					values = result[1];
+				}
+			}
+			const defaultEulerOrder = getEulerOrder(0);
+			if (preRotation !== void 0) {
+				preRotation = preRotation.map(MathUtils.degToRad);
+				preRotation.push(defaultEulerOrder);
+				preRotation = new Euler().fromArray(preRotation);
+				preRotation = new Quaternion().setFromEuler(preRotation);
+			}
+			if (postRotation !== void 0) {
+				postRotation = postRotation.map(MathUtils.degToRad);
+				postRotation.push(defaultEulerOrder);
+				postRotation = new Euler().fromArray(postRotation);
+				postRotation = new Quaternion().setFromEuler(postRotation).invert();
+			}
+			const quaternion = new Quaternion();
+			const euler = new Euler();
+			const quaternionValues = [];
+			if (!values || !times) return void 0;
+			for (let i = 0; i < values.length; i += 3) {
+				euler.set(values[i], values[i + 1], values[i + 2], eulerOrder);
+				quaternion.setFromEuler(euler);
+				if (preRotation !== void 0) quaternion.premultiply(preRotation);
+				if (postRotation !== void 0) quaternion.multiply(postRotation);
+				if (i > 2) {
+					if (new Quaternion().fromArray(quaternionValues, (i - 3) / 3 * 4).dot(quaternion) < 0) quaternion.set(-quaternion.x, -quaternion.y, -quaternion.z, -quaternion.w);
+				}
+				quaternion.toArray(quaternionValues, i / 3 * 4);
+			}
+			return new QuaternionKeyframeTrack(modelName + ".quaternion", times, quaternionValues);
+		}
+		generateMorphTrack(rawTracks) {
+			const curves = rawTracks.DeformPercent.curves.morph;
+			const values = curves.values.map(function(val) {
+				return val / 100;
+			});
+			const morphNum = sceneGraph.getObjectByName(rawTracks.modelName).morphTargetDictionary[rawTracks.morphName];
+			return new NumberKeyframeTrack(rawTracks.modelName + ".morphTargetInfluences[" + morphNum + "]", curves.times, values);
+		}
+		getTimesForAllAxes(curves) {
+			let times = [];
+			if (curves.x !== void 0) times = times.concat(curves.x.times);
+			if (curves.y !== void 0) times = times.concat(curves.y.times);
+			if (curves.z !== void 0) times = times.concat(curves.z.times);
+			times = times.sort(function(a, b) {
+				return a - b;
+			});
+			if (times.length > 1) {
+				let targetIndex = 1;
+				let lastValue = times[0];
+				for (let i = 1; i < times.length; i++) {
+					const currentValue = times[i];
+					if (currentValue !== lastValue) {
+						times[targetIndex] = currentValue;
+						lastValue = currentValue;
+						targetIndex++;
+					}
+				}
+				times = times.slice(0, targetIndex);
+			}
+			return times;
+		}
+		getKeyframeTrackValues(times, curves, initialValue) {
+			const prevValue = initialValue;
+			const values = [];
+			let xIndex = -1;
+			let yIndex = -1;
+			let zIndex = -1;
+			times.forEach(function(time) {
+				if (curves.x) xIndex = curves.x.times.indexOf(time);
+				if (curves.y) yIndex = curves.y.times.indexOf(time);
+				if (curves.z) zIndex = curves.z.times.indexOf(time);
+				if (xIndex !== -1) {
+					const xValue = curves.x.values[xIndex];
+					values.push(xValue);
+					prevValue[0] = xValue;
+				} else values.push(prevValue[0]);
+				if (yIndex !== -1) {
+					const yValue = curves.y.values[yIndex];
+					values.push(yValue);
+					prevValue[1] = yValue;
+				} else values.push(prevValue[1]);
+				if (zIndex !== -1) {
+					const zValue = curves.z.values[zIndex];
+					values.push(zValue);
+					prevValue[2] = zValue;
+				} else values.push(prevValue[2]);
+			});
+			return values;
+		}
+		synchronizeCurve(curve, targetTimes, initialValue) {
+			if (curve === void 0) return {
+				times: targetTimes,
+				values: targetTimes.map(() => initialValue)
+			};
+			if (curve.times.length === targetTimes.length) return curve;
+			const values = [];
+			for (let i = 0; i < targetTimes.length; i++) values.push(this.sampleCurveValue(curve, targetTimes[i], initialValue));
+			return {
+				times: targetTimes,
+				values
+			};
+		}
+		sampleCurveValue(curve, time, initialValue) {
+			const times = curve.times;
+			const values = curve.values;
+			if (time <= times[0]) return values[0];
+			if (time >= times[times.length - 1]) return values[values.length - 1];
+			for (let i = 0; i < times.length - 1; i++) if (time >= times[i] && time <= times[i + 1]) {
+				if (times[i] === time) return values[i];
+				const alpha = (time - times[i]) / (times[i + 1] - times[i]);
+				return values[i] * (1 - alpha) + values[i + 1] * alpha;
+			}
+			return initialValue;
+		}
+		interpolateRotations(curvex, curvey, curvez, eulerOrder) {
+			const times = [];
+			const values = [];
+			times.push(curvex.times[0]);
+			values.push(MathUtils.degToRad(curvex.values[0]));
+			values.push(MathUtils.degToRad(curvey.values[0]));
+			values.push(MathUtils.degToRad(curvez.values[0]));
+			for (let i = 1; i < curvex.values.length; i++) {
+				const initialValue = [
+					curvex.values[i - 1],
+					curvey.values[i - 1],
+					curvez.values[i - 1]
+				];
+				if (isNaN(initialValue[0]) || isNaN(initialValue[1]) || isNaN(initialValue[2])) continue;
+				const initialValueRad = initialValue.map(MathUtils.degToRad);
+				const currentValue = [
+					curvex.values[i],
+					curvey.values[i],
+					curvez.values[i]
+				];
+				if (isNaN(currentValue[0]) || isNaN(currentValue[1]) || isNaN(currentValue[2])) continue;
+				const currentValueRad = currentValue.map(MathUtils.degToRad);
+				const valuesSpan = [
+					currentValue[0] - initialValue[0],
+					currentValue[1] - initialValue[1],
+					currentValue[2] - initialValue[2]
+				];
+				const absoluteSpan = [
+					Math.abs(valuesSpan[0]),
+					Math.abs(valuesSpan[1]),
+					Math.abs(valuesSpan[2])
+				];
+				if (absoluteSpan[0] >= 180 || absoluteSpan[1] >= 180 || absoluteSpan[2] >= 180) {
+					const numSubIntervals = Math.max(...absoluteSpan) / 180;
+					const E1 = new Euler(...initialValueRad, eulerOrder);
+					const E2 = new Euler(...currentValueRad, eulerOrder);
+					const Q1 = new Quaternion().setFromEuler(E1);
+					const Q2 = new Quaternion().setFromEuler(E2);
+					if (Q1.dot(Q2) < 0) Q2.set(-Q2.x, -Q2.y, -Q2.z, -Q2.w);
+					const initialTime = curvex.times[i - 1];
+					const timeSpan = curvex.times[i] - initialTime;
+					const Q = new Quaternion();
+					const E = new Euler();
+					for (let t = 0; t < 1; t += 1 / numSubIntervals) {
+						Q.copy(Q1.clone().slerp(Q2.clone(), t));
+						times.push(initialTime + t * timeSpan);
+						E.setFromQuaternion(Q, eulerOrder);
+						values.push(E.x);
+						values.push(E.y);
+						values.push(E.z);
+					}
+				} else {
+					times.push(curvex.times[i]);
+					values.push(MathUtils.degToRad(curvex.values[i]));
+					values.push(MathUtils.degToRad(curvey.values[i]));
+					values.push(MathUtils.degToRad(curvez.values[i]));
+				}
+			}
+			return [times, values];
+		}
+	};
+	var TextParser = class {
+		getPrevNode() {
+			return this.nodeStack[this.currentIndent - 2];
+		}
+		getCurrentNode() {
+			return this.nodeStack[this.currentIndent - 1];
+		}
+		getCurrentProp() {
+			return this.currentProp;
+		}
+		pushStack(node) {
+			this.nodeStack.push(node);
+			this.currentIndent += 1;
+		}
+		popStack() {
+			this.nodeStack.pop();
+			this.currentIndent -= 1;
+		}
+		setCurrentProp(val, name) {
+			this.currentProp = val;
+			this.currentPropName = name;
+		}
+		parse(text) {
+			this.currentIndent = 0;
+			this.allNodes = new FBXTree();
+			this.nodeStack = [];
+			this.currentProp = [];
+			this.currentPropName = "";
+			const scope = this;
+			const split = text.split(/[\r\n]+/);
+			split.forEach(function(line, i) {
+				const matchComment = line.match(/^[\s\t]*;/);
+				const matchEmpty = line.match(/^[\s\t]*$/);
+				if (matchComment || matchEmpty) return;
+				const matchBeginning = line.match("^\\t{" + scope.currentIndent + "}(\\w+):(.*){", "");
+				const matchProperty = line.match("^\\t{" + scope.currentIndent + "}(\\w+):[\\s\\t\\r\\n](.*)");
+				const matchEnd = line.match("^\\t{" + (scope.currentIndent - 1) + "}}");
+				if (matchBeginning) scope.parseNodeBegin(line, matchBeginning);
+				else if (matchProperty) scope.parseNodeProperty(line, matchProperty, split[++i]);
+				else if (matchEnd) scope.popStack();
+				else if (line.match(/^[^\s\t}]/)) scope.parseNodePropertyContinued(line);
+			});
+			return this.allNodes;
+		}
+		parseNodeBegin(line, property) {
+			const nodeName = property[1].trim().replace(/^"/, "").replace(/"$/, "");
+			const nodeAttrs = property[2].split(",").map(function(attr) {
+				return attr.trim().replace(/^"/, "").replace(/"$/, "");
+			});
+			const node = { name: nodeName };
+			const attrs = this.parseNodeAttr(nodeAttrs);
+			const currentNode = this.getCurrentNode();
+			if (this.currentIndent === 0) this.allNodes.add(nodeName, node);
+			else if (nodeName in currentNode) {
+				if (nodeName === "PoseNode") currentNode.PoseNode.push(node);
+				else if (currentNode[nodeName].id !== void 0) {
+					currentNode[nodeName] = {};
+					currentNode[nodeName][currentNode[nodeName].id] = currentNode[nodeName];
+				}
+				if (attrs.id !== "") currentNode[nodeName][attrs.id] = node;
+			} else if (typeof attrs.id === "number") {
+				currentNode[nodeName] = {};
+				currentNode[nodeName][attrs.id] = node;
+			} else if (nodeName !== "Properties70") {
+				if (nodeName === "PoseNode") currentNode[nodeName] = [node];
+				else currentNode[nodeName] = node;
+			}
+			if (typeof attrs.id === "number") node.id = attrs.id;
+			if (attrs.name !== "") node.attrName = attrs.name;
+			if (attrs.type !== "") node.attrType = attrs.type;
+			this.pushStack(node);
+		}
+		parseNodeAttr(attrs) {
+			let id = attrs[0];
+			if (attrs[0] !== "") {
+				id = parseInt(attrs[0]);
+				if (isNaN(id)) id = attrs[0];
+			}
+			let name = "", type = "";
+			if (attrs.length > 1) {
+				name = attrs[1].replace(/^(\w+)::/, "");
+				type = attrs[2];
+			}
+			return {
+				id,
+				name,
+				type
+			};
+		}
+		parseNodeProperty(line, property, contentLine) {
+			let propName = property[1].replace(/^"/, "").replace(/"$/, "").trim();
+			let propValue = property[2].replace(/^"/, "").replace(/"$/, "").trim();
+			if (propName === "Content" && propValue === ",") propValue = contentLine.replace(/"/g, "").replace(/,$/, "").trim();
+			const currentNode = this.getCurrentNode();
+			if (currentNode.name === "Properties70") {
+				this.parseNodeSpecialProperty(line, propName, propValue);
+				return;
+			}
+			if (propName === "C") {
+				const connProps = propValue.split(",").slice(1);
+				const from = parseInt(connProps[0]);
+				const to = parseInt(connProps[1]);
+				let rest = propValue.split(",").slice(3);
+				rest = rest.map(function(elem) {
+					return elem.trim().replace(/^"/, "");
+				});
+				propName = "connections";
+				propValue = [from, to];
+				append(propValue, rest);
+				if (currentNode[propName] === void 0) currentNode[propName] = [];
+			}
+			if (propName === "Node") currentNode.id = propValue;
+			if (propName in currentNode && Array.isArray(currentNode[propName])) currentNode[propName].push(propValue);
+			else if (propName !== "a") currentNode[propName] = propValue;
+			else currentNode.a = propValue;
+			this.setCurrentProp(currentNode, propName);
+			if (propName === "a" && propValue.slice(-1) !== ",") currentNode.a = parseNumberArray(propValue);
+		}
+		parseNodePropertyContinued(line) {
+			const currentNode = this.getCurrentNode();
+			currentNode.a += line;
+			if (line.slice(-1) !== ",") currentNode.a = parseNumberArray(currentNode.a);
+		}
+		parseNodeSpecialProperty(line, propName, propValue) {
+			const props = propValue.split("\",").map(function(prop) {
+				return prop.trim().replace(/^\"/, "").replace(/\s/, "_");
+			});
+			const innerPropName = props[0];
+			const innerPropType1 = props[1];
+			const innerPropType2 = props[2];
+			const innerPropFlag = props[3];
+			let innerPropValue = props[4];
+			switch (innerPropType1) {
+				case "int":
+				case "enum":
+				case "bool":
+				case "ULongLong":
+				case "double":
+				case "Number":
+				case "FieldOfView":
+					innerPropValue = parseFloat(innerPropValue);
+					break;
+				case "Color":
+				case "ColorRGB":
+				case "Vector3D":
+				case "Lcl_Translation":
+				case "Lcl_Rotation":
+				case "Lcl_Scaling": innerPropValue = parseNumberArray(innerPropValue);
+			}
+			this.getPrevNode()[innerPropName] = {
+				"type": innerPropType1,
+				"type2": innerPropType2,
+				"flag": innerPropFlag,
+				"value": innerPropValue
+			};
+			this.setCurrentProp(this.getPrevNode(), innerPropName);
+		}
+	};
+	var BinaryParser = class {
+		parse(buffer) {
+			const reader = new BinaryReader(buffer);
+			reader.skip(23);
+			const version = reader.getUint32();
+			if (version < 6400) throw new Error("THREE.FBXLoader: FBX version not supported, FileVersion: " + version);
+			const allNodes = new FBXTree();
+			while (!this.endOfContent(reader)) {
+				const node = this.parseNode(reader, version);
+				if (node !== null) allNodes.add(node.name, node);
+			}
+			return allNodes;
+		}
+		endOfContent(reader) {
+			if (reader.size() % 16 === 0) return (reader.getOffset() + 160 + 16 & -16) >= reader.size();
+			else return reader.getOffset() + 160 + 16 >= reader.size();
+		}
+		parseNode(reader, version) {
+			const node = {};
+			const endOffset = version >= 7500 ? reader.getUint64() : reader.getUint32();
+			const numProperties = version >= 7500 ? reader.getUint64() : reader.getUint32();
+			version >= 7500 ? reader.getUint64() : reader.getUint32();
+			const nameLen = reader.getUint8();
+			const name = reader.getString(nameLen);
+			if (endOffset === 0) return null;
+			const propertyList = [];
+			for (let i = 0; i < numProperties; i++) propertyList.push(this.parseProperty(reader));
+			const id = propertyList.length > 0 ? propertyList[0] : "";
+			const attrName = propertyList.length > 1 ? propertyList[1] : "";
+			const attrType = propertyList.length > 2 ? propertyList[2] : "";
+			node.singleProperty = numProperties === 1 && reader.getOffset() === endOffset ? true : false;
+			while (endOffset > reader.getOffset()) {
+				const subNode = this.parseNode(reader, version);
+				if (subNode !== null) this.parseSubNode(name, node, subNode);
+			}
+			node.propertyList = propertyList;
+			if (typeof id === "number") node.id = id;
+			if (attrName !== "") node.attrName = attrName;
+			if (attrType !== "") node.attrType = attrType;
+			if (name !== "") node.name = name;
+			return node;
+		}
+		parseSubNode(name, node, subNode) {
+			if (subNode.singleProperty === true) {
+				const value = subNode.propertyList[0];
+				if (Array.isArray(value)) {
+					node[subNode.name] = subNode;
+					subNode.a = value;
+				} else node[subNode.name] = value;
+			} else if (name === "Connections" && subNode.name === "C") {
+				const array = [];
+				subNode.propertyList.forEach(function(property, i) {
+					if (i !== 0) array.push(property);
+				});
+				if (node.connections === void 0) node.connections = [];
+				node.connections.push(array);
+			} else if (subNode.name === "Properties70") Object.keys(subNode).forEach(function(key) {
+				node[key] = subNode[key];
+			});
+			else if (name === "Properties70" && subNode.name === "P") {
+				let innerPropName = subNode.propertyList[0];
+				let innerPropType1 = subNode.propertyList[1];
+				const innerPropType2 = subNode.propertyList[2];
+				const innerPropFlag = subNode.propertyList[3];
+				let innerPropValue;
+				if (innerPropName.indexOf("Lcl ") === 0) innerPropName = innerPropName.replace("Lcl ", "Lcl_");
+				if (innerPropType1.indexOf("Lcl ") === 0) innerPropType1 = innerPropType1.replace("Lcl ", "Lcl_");
+				if (innerPropType1 === "Color" || innerPropType1 === "ColorRGB" || innerPropType1 === "Vector" || innerPropType1 === "Vector3D" || innerPropType1.indexOf("Lcl_") === 0) innerPropValue = [
+					subNode.propertyList[4],
+					subNode.propertyList[5],
+					subNode.propertyList[6]
+				];
+				else innerPropValue = subNode.propertyList[4];
+				node[innerPropName] = {
+					"type": innerPropType1,
+					"type2": innerPropType2,
+					"flag": innerPropFlag,
+					"value": innerPropValue
+				};
+			} else if (node[subNode.name] === void 0) {
+				if (typeof subNode.id === "number") {
+					node[subNode.name] = {};
+					node[subNode.name][subNode.id] = subNode;
+				} else node[subNode.name] = subNode;
+			} else if (subNode.name === "PoseNode") {
+				if (!Array.isArray(node[subNode.name])) node[subNode.name] = [node[subNode.name]];
+				node[subNode.name].push(subNode);
+			} else if (node[subNode.name][subNode.id] === void 0) node[subNode.name][subNode.id] = subNode;
+		}
+		parseProperty(reader) {
+			const type = reader.getString(1);
+			let length;
+			switch (type) {
+				case "C": return reader.getBoolean();
+				case "D": return reader.getFloat64();
+				case "F": return reader.getFloat32();
+				case "I": return reader.getInt32();
+				case "L": return reader.getInt64();
+				case "R":
+					length = reader.getUint32();
+					return reader.getArrayBuffer(length);
+				case "S":
+					length = reader.getUint32();
+					return reader.getString(length);
+				case "Y": return reader.getInt16();
+				case "b":
+				case "c":
+				case "d":
+				case "f":
+				case "i":
+				case "l":
+					const arrayLength = reader.getUint32();
+					const encoding = reader.getUint32();
+					const compressedLength = reader.getUint32();
+					if (encoding === 0) switch (type) {
+						case "b":
+						case "c": return reader.getBooleanArray(arrayLength);
+						case "d": return reader.getFloat64Array(arrayLength);
+						case "f": return reader.getFloat32Array(arrayLength);
+						case "i": return reader.getInt32Array(arrayLength);
+						case "l": return reader.getInt64Array(arrayLength);
+					}
+					const reader2 = new BinaryReader(unzlibSync(new Uint8Array(reader.getArrayBuffer(compressedLength))).buffer);
+					switch (type) {
+						case "b":
+						case "c": return reader2.getBooleanArray(arrayLength);
+						case "d": return reader2.getFloat64Array(arrayLength);
+						case "f": return reader2.getFloat32Array(arrayLength);
+						case "i": return reader2.getInt32Array(arrayLength);
+						case "l": return reader2.getInt64Array(arrayLength);
+					}
+					break;
+				default: throw new Error("THREE.FBXLoader: Unknown property type " + type);
+			}
+		}
+	};
+	var BinaryReader = class {
+		constructor(buffer, littleEndian) {
+			this.dv = new DataView(buffer);
+			this.offset = 0;
+			this.littleEndian = littleEndian !== void 0 ? littleEndian : true;
+			this._textDecoder = new TextDecoder();
+		}
+		getOffset() {
+			return this.offset;
+		}
+		size() {
+			return this.dv.buffer.byteLength;
+		}
+		skip(length) {
+			this.offset += length;
+		}
+		getBoolean() {
+			return (this.getUint8() & 1) === 1;
+		}
+		getBooleanArray(size) {
+			const a = [];
+			for (let i = 0; i < size; i++) a.push(this.getBoolean());
+			return a;
+		}
+		getUint8() {
+			const value = this.dv.getUint8(this.offset);
+			this.offset += 1;
+			return value;
+		}
+		getInt16() {
+			const value = this.dv.getInt16(this.offset, this.littleEndian);
+			this.offset += 2;
+			return value;
+		}
+		getInt32() {
+			const value = this.dv.getInt32(this.offset, this.littleEndian);
+			this.offset += 4;
+			return value;
+		}
+		getInt32Array(size) {
+			const a = [];
+			for (let i = 0; i < size; i++) a.push(this.getInt32());
+			return a;
+		}
+		getUint32() {
+			const value = this.dv.getUint32(this.offset, this.littleEndian);
+			this.offset += 4;
+			return value;
+		}
+		getInt64() {
+			let low, high;
+			if (this.littleEndian) {
+				low = this.getUint32();
+				high = this.getUint32();
+			} else {
+				high = this.getUint32();
+				low = this.getUint32();
+			}
+			if (high & 2147483648) {
+				high = ~high & 4294967295;
+				low = ~low & 4294967295;
+				if (low === 4294967295) high = high + 1 & 4294967295;
+				low = low + 1 & 4294967295;
+				return -(high * 4294967296 + low);
+			}
+			return high * 4294967296 + low;
+		}
+		getInt64Array(size) {
+			const a = [];
+			for (let i = 0; i < size; i++) a.push(this.getInt64());
+			return a;
+		}
+		getUint64() {
+			let low, high;
+			if (this.littleEndian) {
+				low = this.getUint32();
+				high = this.getUint32();
+			} else {
+				high = this.getUint32();
+				low = this.getUint32();
+			}
+			return high * 4294967296 + low;
+		}
+		getFloat32() {
+			const value = this.dv.getFloat32(this.offset, this.littleEndian);
+			this.offset += 4;
+			return value;
+		}
+		getFloat32Array(size) {
+			const a = [];
+			for (let i = 0; i < size; i++) a.push(this.getFloat32());
+			return a;
+		}
+		getFloat64() {
+			const value = this.dv.getFloat64(this.offset, this.littleEndian);
+			this.offset += 8;
+			return value;
+		}
+		getFloat64Array(size) {
+			const a = [];
+			for (let i = 0; i < size; i++) a.push(this.getFloat64());
+			return a;
+		}
+		getArrayBuffer(size) {
+			const value = this.dv.buffer.slice(this.offset, this.offset + size);
+			this.offset += size;
+			return value;
+		}
+		getString(size) {
+			const start = this.offset;
+			let a = new Uint8Array(this.dv.buffer, start, size);
+			this.skip(size);
+			const nullByte = a.indexOf(0);
+			if (nullByte >= 0) a = new Uint8Array(this.dv.buffer, start, nullByte);
+			return this._textDecoder.decode(a);
+		}
+	};
+	var FBXTree = class {
+		add(key, val) {
+			this[key] = val;
+		}
+	};
+	function isFbxFormatBinary(buffer) {
+		return buffer.byteLength >= 21 && "Kaydara FBX Binary  \0" === convertArrayBufferToString(buffer, 0, 21);
+	}
+	function isFbxFormatASCII(text) {
+		const CORRECT = [
+			"K",
+			"a",
+			"y",
+			"d",
+			"a",
+			"r",
+			"a",
+			"\\",
+			"F",
+			"B",
+			"X",
+			"\\",
+			"B",
+			"i",
+			"n",
+			"a",
+			"r",
+			"y",
+			"\\",
+			"\\"
+		];
+		let cursor = 0;
+		function read(offset) {
+			const result = text[offset - 1];
+			text = text.slice(cursor + offset);
+			cursor++;
+			return result;
+		}
+		for (let i = 0; i < CORRECT.length; ++i) if (read(1) === CORRECT[i]) return false;
+		return true;
+	}
+	function getFbxVersion(text) {
+		const match = text.match(/FBXVersion: (\d+)/);
+		if (match) return parseInt(match[1]);
+		throw new Error("THREE.FBXLoader: Cannot find the version number for the file given.");
+	}
+	function convertFBXTimeToSeconds(time) {
+		return time / 46186158e3;
+	}
+	const dataArray = [];
+	function getData(polygonVertexIndex, polygonIndex, vertexIndex, infoObject) {
+		let index;
+		switch (infoObject.mappingType) {
+			case "ByPolygonVertex":
+				index = polygonVertexIndex;
+				break;
+			case "ByPolygon":
+				index = polygonIndex;
+				break;
+			case "ByVertice":
+				index = vertexIndex;
+				break;
+			case "AllSame":
+				index = infoObject.indices[0];
+				break;
+			default: console.warn("THREE.FBXLoader: unknown attribute mapping type " + infoObject.mappingType);
+		}
+		if (infoObject.referenceType === "IndexToDirect") index = infoObject.indices[index];
+		const from = index * infoObject.dataSize;
+		const to = from + infoObject.dataSize;
+		return slice(dataArray, infoObject.buffer, from, to);
+	}
+	const tempEuler = new Euler();
+	const tempVec = new Vector3();
+	function generateTransform(transformData) {
+		const lTranslationM = new Matrix4();
+		const lPreRotationM = new Matrix4();
+		const lRotationM = new Matrix4();
+		const lPostRotationM = new Matrix4();
+		const lScalingM = new Matrix4();
+		const lScalingPivotM = new Matrix4();
+		const lScalingOffsetM = new Matrix4();
+		const lRotationOffsetM = new Matrix4();
+		const lRotationPivotM = new Matrix4();
+		const lParentGX = new Matrix4();
+		const lParentLX = new Matrix4();
+		const lGlobalT = new Matrix4();
+		const inheritType = transformData.inheritType ? transformData.inheritType : 0;
+		if (transformData.translation) lTranslationM.setPosition(tempVec.fromArray(transformData.translation));
+		const defaultEulerOrder = getEulerOrder(0);
+		if (transformData.preRotation) {
+			const array = transformData.preRotation.map(MathUtils.degToRad);
+			array.push(defaultEulerOrder);
+			lPreRotationM.makeRotationFromEuler(tempEuler.fromArray(array));
+		}
+		if (transformData.rotation) {
+			const array = transformData.rotation.map(MathUtils.degToRad);
+			array.push(transformData.eulerOrder || defaultEulerOrder);
+			lRotationM.makeRotationFromEuler(tempEuler.fromArray(array));
+		}
+		if (transformData.postRotation) {
+			const array = transformData.postRotation.map(MathUtils.degToRad);
+			array.push(defaultEulerOrder);
+			lPostRotationM.makeRotationFromEuler(tempEuler.fromArray(array));
+			lPostRotationM.invert();
+		}
+		if (transformData.scale) lScalingM.scale(tempVec.fromArray(transformData.scale));
+		if (transformData.scalingOffset) lScalingOffsetM.setPosition(tempVec.fromArray(transformData.scalingOffset));
+		if (transformData.scalingPivot) lScalingPivotM.setPosition(tempVec.fromArray(transformData.scalingPivot));
+		if (transformData.rotationOffset) lRotationOffsetM.setPosition(tempVec.fromArray(transformData.rotationOffset));
+		if (transformData.rotationPivot) lRotationPivotM.setPosition(tempVec.fromArray(transformData.rotationPivot));
+		if (transformData.parentMatrixWorld) {
+			lParentLX.copy(transformData.parentMatrix);
+			lParentGX.copy(transformData.parentMatrixWorld);
+		}
+		const lLRM = lPreRotationM.clone().multiply(lRotationM).multiply(lPostRotationM);
+		const lParentGRM = new Matrix4();
+		lParentGRM.extractRotation(lParentGX);
+		const lParentTM = new Matrix4();
+		lParentTM.copyPosition(lParentGX);
+		const lParentGRSM = lParentTM.clone().invert().multiply(lParentGX);
+		const lParentGSM = lParentGRM.clone().invert().multiply(lParentGRSM);
+		const lLSM = lScalingM;
+		const lGlobalRS = new Matrix4();
+		if (inheritType === 0) lGlobalRS.copy(lParentGRM).multiply(lLRM).multiply(lParentGSM).multiply(lLSM);
+		else if (inheritType === 1) lGlobalRS.copy(lParentGRM).multiply(lParentGSM).multiply(lLRM).multiply(lLSM);
+		else {
+			const lParentLSM_inv = new Matrix4().scale(new Vector3().setFromMatrixScale(lParentLX)).clone().invert();
+			const lParentGSM_noLocal = lParentGSM.clone().multiply(lParentLSM_inv);
+			lGlobalRS.copy(lParentGRM).multiply(lLRM).multiply(lParentGSM_noLocal).multiply(lLSM);
+		}
+		const lRotationPivotM_inv = lRotationPivotM.clone().invert();
+		const lScalingPivotM_inv = lScalingPivotM.clone().invert();
+		let lTransform = lTranslationM.clone().multiply(lRotationOffsetM).multiply(lRotationPivotM).multiply(lPreRotationM).multiply(lRotationM).multiply(lPostRotationM).multiply(lRotationPivotM_inv).multiply(lScalingOffsetM).multiply(lScalingPivotM).multiply(lScalingM).multiply(lScalingPivotM_inv);
+		const lLocalTWithAllPivotAndOffsetInfo = new Matrix4().copyPosition(lTransform);
+		const lGlobalTranslation = lParentGX.clone().multiply(lLocalTWithAllPivotAndOffsetInfo);
+		lGlobalT.copyPosition(lGlobalTranslation);
+		lTransform = lGlobalT.clone().multiply(lGlobalRS);
+		lTransform.premultiply(lParentGX.invert());
+		return lTransform;
+	}
+	function getEulerOrder(order) {
+		order = order || 0;
+		const enums = [
+			"ZYX",
+			"YZX",
+			"XZY",
+			"ZXY",
+			"YXZ",
+			"XYZ"
+		];
+		if (order === 6) {
+			console.warn("THREE.FBXLoader: unsupported Euler Order: Spherical XYZ. Animations and rotations may be incorrect.");
+			return enums[0];
+		}
+		return enums[order];
+	}
+	function parseNumberArray(value) {
+		return value.split(",").map(function(val) {
+			return parseFloat(val);
+		});
+	}
+	function convertArrayBufferToString(buffer, from, to) {
+		if (from === void 0) from = 0;
+		if (to === void 0) to = buffer.byteLength;
+		return new TextDecoder().decode(new Uint8Array(buffer, from, to));
+	}
+	function append(a, b) {
+		for (let i = 0, j = a.length, l = b.length; i < l; i++, j++) a[j] = b[i];
+	}
+	function slice(a, b, from, to) {
+		for (let i = from, j = 0; i < to; i++, j++) a[j] = b[i];
+		return a;
+	}
 	// node_modules/@pixiv/three-vrm/lib/three-vrm.module.js
 	/*!
 	* @pixiv/three-vrm v3.5.5
@@ -43643,6 +49344,130 @@ void main() {
 	* @pixiv/three-vrm-springbone is distributed under MIT License
 	* https://github.com/pixiv/three-vrm/blob/release/LICENSE
 	*/
+	// node_modules/vrm-mixamo-retarget/dist/index.esm.js
+	/**
+	* A map from Mixamo rig name to VRM Humanoid bone name
+	*/
+	const mixamoVRMRigMap = {
+		mixamorigHips: "hips",
+		mixamorigSpine: "spine",
+		mixamorigSpine1: "chest",
+		mixamorigSpine2: "upperChest",
+		mixamorigNeck: "neck",
+		mixamorigHead: "head",
+		mixamorigLeftShoulder: "leftShoulder",
+		mixamorigLeftArm: "leftUpperArm",
+		mixamorigLeftForeArm: "leftLowerArm",
+		mixamorigLeftHand: "leftHand",
+		mixamorigLeftHandThumb1: "leftThumbMetacarpal",
+		mixamorigLeftHandThumb2: "leftThumbProximal",
+		mixamorigLeftHandThumb3: "leftThumbDistal",
+		mixamorigLeftHandIndex1: "leftIndexProximal",
+		mixamorigLeftHandIndex2: "leftIndexIntermediate",
+		mixamorigLeftHandIndex3: "leftIndexDistal",
+		mixamorigLeftHandMiddle1: "leftMiddleProximal",
+		mixamorigLeftHandMiddle2: "leftMiddleIntermediate",
+		mixamorigLeftHandMiddle3: "leftMiddleDistal",
+		mixamorigLeftHandRing1: "leftRingProximal",
+		mixamorigLeftHandRing2: "leftRingIntermediate",
+		mixamorigLeftHandRing3: "leftRingDistal",
+		mixamorigLeftHandPinky1: "leftLittleProximal",
+		mixamorigLeftHandPinky2: "leftLittleIntermediate",
+		mixamorigLeftHandPinky3: "leftLittleDistal",
+		mixamorigRightShoulder: "rightShoulder",
+		mixamorigRightArm: "rightUpperArm",
+		mixamorigRightForeArm: "rightLowerArm",
+		mixamorigRightHand: "rightHand",
+		mixamorigRightHandPinky1: "rightLittleProximal",
+		mixamorigRightHandPinky2: "rightLittleIntermediate",
+		mixamorigRightHandPinky3: "rightLittleDistal",
+		mixamorigRightHandRing1: "rightRingProximal",
+		mixamorigRightHandRing2: "rightRingIntermediate",
+		mixamorigRightHandRing3: "rightRingDistal",
+		mixamorigRightHandMiddle1: "rightMiddleProximal",
+		mixamorigRightHandMiddle2: "rightMiddleIntermediate",
+		mixamorigRightHandMiddle3: "rightMiddleDistal",
+		mixamorigRightHandIndex1: "rightIndexProximal",
+		mixamorigRightHandIndex2: "rightIndexIntermediate",
+		mixamorigRightHandIndex3: "rightIndexDistal",
+		mixamorigRightHandThumb1: "rightThumbMetacarpal",
+		mixamorigRightHandThumb2: "rightThumbProximal",
+		mixamorigRightHandThumb3: "rightThumbDistal",
+		mixamorigLeftUpLeg: "leftUpperLeg",
+		mixamorigLeftLeg: "leftLowerLeg",
+		mixamorigLeftFoot: "leftFoot",
+		mixamorigLeftToeBase: "leftToes",
+		mixamorigRightUpLeg: "rightUpperLeg",
+		mixamorigRightLeg: "rightLowerLeg",
+		mixamorigRightFoot: "rightFoot",
+		mixamorigRightToeBase: "rightToes"
+	};
+	/**
+	* Retarget Mixamo animation from FBX object for three-vrm use.
+	*
+	* @param fbxAsset A loaded FBX object containing Mixamo animation data
+	* @param vrm A target VRM
+	* @param options Optional configuration for retargeting
+	* @returns THREE.AnimationClip | null The converted AnimationClip or null if failed
+	*/
+	const retargetAnimation = (fbxAsset, vrm, options = {}) => {
+		const { customBoneMap = {}, logWarnings = true, animationClipName = "mixamo.com" } = options;
+		const boneMap = {
+			...mixamoVRMRigMap,
+			...customBoneMap
+		};
+		try {
+			const clip = AnimationClip.findByName(fbxAsset.animations, animationClipName);
+			if (!clip) {
+				if (logWarnings) console.warn(`Animation clip "${animationClipName}" not found in FBX asset`);
+				return null;
+			}
+			const tracks = [];
+			const restRotationInverse = new Quaternion();
+			const parentRestWorldRotation = new Quaternion();
+			const _quatA = new Quaternion();
+			const _vec3 = new Vector3();
+			const motionHipsHeight = fbxAsset.getObjectByName("mixamorigHips")?.position.y;
+			const vrmHipsY = vrm.humanoid?.getNormalizedBoneNode("hips")?.getWorldPosition(_vec3).y;
+			const vrmRootY = vrm.scene.getWorldPosition(_vec3).y;
+			if (!vrmHipsY || !motionHipsHeight) {
+				if (logWarnings) console.warn("Failed to calculate hips height scaling - animation may not be properly scaled");
+				return null;
+			}
+			const hipsPositionScale = Math.abs(vrmHipsY - vrmRootY) / motionHipsHeight;
+			clip.tracks.forEach((track) => {
+				const trackSplitted = track.name.split(".");
+				const mixamoRigName = trackSplitted[0];
+				const vrmBoneName = boneMap[mixamoRigName];
+				const vrmNodeName = vrm.humanoid?.getNormalizedBoneNode(vrmBoneName)?.name;
+				const mixamoRigNode = fbxAsset.getObjectByName(mixamoRigName);
+				if (vrmNodeName != null) {
+					const propertyName = trackSplitted[1];
+					mixamoRigNode?.getWorldQuaternion(restRotationInverse).invert();
+					mixamoRigNode?.parent?.getWorldQuaternion(parentRestWorldRotation);
+					if (track instanceof QuaternionKeyframeTrack) {
+						for (let i = 0; i < track.values.length; i += 4) {
+							const flatQuaternion = track.values.slice(i, i + 4);
+							_quatA.fromArray(flatQuaternion);
+							_quatA.premultiply(parentRestWorldRotation).multiply(restRotationInverse);
+							_quatA.toArray(flatQuaternion);
+							flatQuaternion.forEach((v, index) => {
+								track.values[index + i] = v;
+							});
+						}
+						tracks.push(new QuaternionKeyframeTrack(`${vrmNodeName}.${propertyName}`, track.times, track.values.map((v, i) => vrm.meta?.metaVersion === "0" && i % 2 === 0 ? -v : v)));
+					} else if (track instanceof VectorKeyframeTrack) {
+						const value = track.values.map((v, i) => (vrm.meta?.metaVersion === "0" && i % 3 !== 1 ? -v : v) * hipsPositionScale);
+						tracks.push(new VectorKeyframeTrack(`${vrmNodeName}.${propertyName}`, track.times, value));
+					}
+				} else if (logWarnings && vrmBoneName) console.warn(`VRM bone "${vrmBoneName}" not found in humanoid for Mixamo bone "${mixamoRigName}"`);
+			});
+			return new AnimationClip("vrmAnimation", clip.duration, tracks);
+		} catch (error) {
+			if (logWarnings) console.error("Failed to retarget animation:", error);
+			return null;
+		}
+	};
 	// prototype/vrm/stage-src.js
 	const { damp, clamp } = MathUtils;
 	const CANDIDATES = {
@@ -43674,6 +49499,116 @@ void main() {
 		],
 		blink: ["blink", "Blink"]
 	};
+	const REST = {
+		leftUpperArm: [
+			.12,
+			.05,
+			1.25
+		],
+		rightUpperArm: [
+			.12,
+			-.05,
+			-1.25
+		],
+		leftLowerArm: [
+			0,
+			-.22,
+			.1
+		],
+		rightLowerArm: [
+			0,
+			.22,
+			-.1
+		],
+		leftHand: [
+			0,
+			0,
+			0
+		],
+		rightHand: [
+			0,
+			0,
+			0
+		]
+	};
+	const POSES = {
+		thinking: {
+			pitch: .28,
+			bones: {
+				rightUpperArm: [
+					.6,
+					.5,
+					-.95
+				],
+				rightLowerArm: [
+					0,
+					1.75,
+					0
+				],
+				rightHand: [
+					.35,
+					.1,
+					.45
+				]
+			}
+		},
+		reading: {
+			pitch: .2,
+			bones: {
+				leftUpperArm: [
+					.4,
+					-.4,
+					1
+				],
+				leftLowerArm: [
+					0,
+					-1.45,
+					0
+				],
+				leftHand: [
+					.2,
+					0,
+					.3
+				],
+				rightUpperArm: [
+					.4,
+					.4,
+					-1
+				],
+				rightLowerArm: [
+					0,
+					1.45,
+					0
+				],
+				rightHand: [
+					.2,
+					0,
+					-.3
+				]
+			}
+		},
+		listening: {
+			pitch: .05,
+			bones: {}
+		},
+		confused: { bones: {
+			leftUpperArm: [
+				.35,
+				-.2,
+				1.1
+			],
+			leftLowerArm: [
+				0,
+				-1,
+				.4
+			],
+			leftHand: [
+				.3,
+				0,
+				.3
+			]
+		} }
+	};
 	function mount(container, opts = {}) {
 		const props = Object.assign({
 			emotion: "idle",
@@ -43684,7 +49619,7 @@ void main() {
 		}, opts.props);
 		let disposed = false;
 		let frame = 0;
-		let renderer, vrm, observer;
+		let renderer, vrm, observer, mixer;
 		let nodStart = -1;
 		let pointerX = 0, pointerY = 0;
 		let blinkAt = 2 + Math.random() * 3;
@@ -43699,6 +49634,9 @@ void main() {
 			blink: 0
 		};
 		const pins = {};
+		const poseBones = {};
+		const probe = {};
+		window.__vrmProbe = probe;
 		let resolved = {};
 		const scene = new Scene();
 		const camera = new PerspectiveCamera(30, 1, .01, 100);
@@ -43768,12 +49706,22 @@ void main() {
 			const head = vrm.humanoid?.getNormalizedBoneNode("head");
 			if (head) {
 				head.rotation.y = damp(head.rotation.y, -lookX * .3 + saccadeX, speed, dt);
-				head.rotation.x = damp(head.rotation.x, lookY * .2 + saccadeY + nod + (mood === "reading" ? .15 : 0), speed, dt);
+				head.rotation.x = damp(head.rotation.x, lookY * .2 + saccadeY + nod + (POSES[mood]?.pitch ?? 0), speed, dt);
+			}
+			const pose = POSES[mood]?.bones || {};
+			for (const name of Object.keys(REST)) {
+				const bone = poseBones[name];
+				if (!bone) continue;
+				const target = probe[name] || pose[name] || REST[name];
+				bone.rotation.x = damp(bone.rotation.x, target[0], speed, dt);
+				bone.rotation.y = damp(bone.rotation.y, target[1], speed, dt);
+				bone.rotation.z = damp(bone.rotation.z, target[2], speed, dt);
 			}
 			if (vrm.lookAt) {
 				vrm.lookAt.yaw = damp(vrm.lookAt.yaw, lookX * 10 + saccadeX * 35, 6, dt);
 				vrm.lookAt.pitch = damp(vrm.lookAt.pitch, -lookY * 8 + saccadeY * 35, 6, dt);
 			}
+			mixer?.update(dt);
 			vrm.update(dt);
 			renderer.render(scene, camera);
 			frame = requestAnimationFrame(tick);
@@ -43787,6 +49735,7 @@ void main() {
 		};
 		const ctl = {
 			ready: false,
+			idlePlaying: false,
 			setProps(p) {
 				Object.assign(props, p || {});
 			},
@@ -43817,6 +49766,7 @@ void main() {
 			window.removeEventListener("pointermove", pointer);
 			document.removeEventListener("visibilitychange", visibility);
 			observer?.disconnect();
+			mixer?.stopAllAction();
 			if (vrm) VRMUtils.deepDispose(vrm.scene);
 			if (renderer) {
 				renderer.domElement.removeEventListener("webglcontextlost", lost);
@@ -43859,14 +49809,43 @@ void main() {
 					obj.frustumCulled = false;
 				});
 				const humanoid = vrm.humanoid;
-				if (humanoid) {
-					const bone = (n) => humanoid.getNormalizedBoneNode(n);
-					bone("leftUpperArm")?.rotation.set(.12, .05, 1.25);
-					bone("rightUpperArm")?.rotation.set(.12, -.05, -1.25);
-					bone("leftLowerArm")?.rotation.set(0, -.22, .1);
-					bone("rightLowerArm")?.rotation.set(0, .22, -.1);
+				if (humanoid) for (const name of Object.keys(REST)) {
+					const bone = humanoid.getNormalizedBoneNode(name);
+					if (bone) {
+						poseBones[name] = bone;
+						bone.rotation.set(...REST[name]);
+					}
 				}
 				if (vrm.lookAt) vrm.lookAt.autoUpdate = false;
+				try {
+					const animBuf = await opts.getAnimBuffer?.();
+					if (animBuf && !disposed) {
+						const fbx = new FBXLoader().parse(animBuf, "");
+						const clip = retargetAnimation(fbx, vrm, { logWarnings: false });
+						if (clip) {
+							const drop = [
+								"head",
+								"neck",
+								"leftShoulder",
+								"rightShoulder",
+								...Object.keys(REST)
+							].map((n) => vrm.humanoid?.getNormalizedBoneNode(n)?.name).filter(Boolean);
+							clip.tracks = clip.tracks.filter((t) => !drop.some((n) => t.name.startsWith(`${n}.`)));
+							for (const track of clip.tracks) if (track.name.endsWith(".position")) {
+								const x = track.values[0], z = track.values[2];
+								for (let i = 0; i < track.values.length; i += 3) {
+									track.values[i] = (track.values[i] - x) * .25;
+									track.values[i + 2] = (track.values[i + 2] - z) * .25;
+								}
+							}
+							if (clip.tracks.length) {
+								mixer = new AnimationMixer(vrm.scene);
+								mixer.clipAction(clip).play();
+								ctl.idlePlaying = true;
+							}
+						}
+					}
+				} catch {}
 				const names = ctl.expressions();
 				resolved = Object.fromEntries(Object.keys(CANDIDATES).map((key) => [key, CANDIDATES[key].find((c) => names.includes(c)) || null]));
 				ctl.ready = true;

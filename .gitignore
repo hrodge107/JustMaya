@@ -49,7 +49,10 @@ backend/data-verify/
 # Staged real PDF fixtures (seeded locally, never committed)
 backend/tests/fixtures/
 
-# Prototype binaries: sample .vrm models and the generated base64 payload
-# (regen via prototype/vrm/pack-model.cjs — the stage falls back without it)
+# Prototype binaries: sample .vrm models, Mixamo clips, and the generated
+# base64 payloads (regen via pack-model.cjs / pack-anim.cjs — the stage
+# falls back without them)
 prototype/*.vrm
 prototype/vrm/model.js
+prototype/vrm/anim-*.js
+prototype/vrm/anims/

@@ -5,7 +5,9 @@
 //   ./node_modules/.bin/rolldown prototype/vrm/stage-src.js -f iife -n MitaVRM -o prototype/vrm/stage.js -p browser
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js'
 import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm'
+import { retargetAnimation } from 'vrm-mixamo-retarget'
 
 const { damp, clamp } = THREE.MathUtils
 
@@ -22,6 +24,50 @@ const CANDIDATES = {
   blink: ['blink', 'Blink'],
 }
 
+// Resting stance (adapted from ai-smash's VRMCanvas; Z signs flipped because
+// rotateVRM0 turns VRM0 models to face the camera — the reference's unrotated
+// axes would raise the arms here). Without an idle clip a VRM0 model renders
+// in bind pose — the T-pose.
+const REST = {
+  leftUpperArm: [0.12, 0.05, 1.25],
+  rightUpperArm: [0.12, -0.05, -1.25],
+  leftLowerArm: [0, -0.22, 0.1],
+  rightLowerArm: [0, 0.22, -0.1],
+  leftHand: [0, 0, 0],
+  rightHand: [0, 0, 0],
+}
+// Per-emotion overrides on top of REST: bones -> euler [x,y,z], plus `pitch`
+// added to the head's look-down target. Values tuned visually via probe.cjs.
+const POSES = {
+  thinking: {
+    pitch: 0.28, // look down — chin meets the raised right hand
+    bones: {
+      rightUpperArm: [0.6, 0.5, -0.95],
+      rightLowerArm: [0, 1.75, 0],
+      rightHand: [0.35, 0.1, 0.45],
+    },
+  },
+  reading: {
+    pitch: 0.2,
+    bones: {
+      leftUpperArm: [0.4, -0.4, 1.0],
+      leftLowerArm: [0, -1.45, 0],
+      leftHand: [0.2, 0, 0.3],
+      rightUpperArm: [0.4, 0.4, -1.0],
+      rightLowerArm: [0, 1.45, 0],
+      rightHand: [0.2, 0, -0.3],
+    },
+  },
+  listening: { pitch: 0.05, bones: {} },
+  confused: {
+    bones: {
+      leftUpperArm: [0.35, -0.2, 1.1],
+      leftLowerArm: [0, -1.0, 0.4],
+      leftHand: [0.3, 0, 0.3],
+    },
+  },
+}
+
 export function mount(container, opts = {}) {
   const props = Object.assign(
     {
@@ -36,7 +82,7 @@ export function mount(container, opts = {}) {
 
   let disposed = false
   let frame = 0
-  let renderer, vrm, observer
+  let renderer, vrm, observer, mixer
   let nodStart = -1
   let pointerX = 0, pointerY = 0
   let blinkAt = 2 + Math.random() * 3
@@ -44,6 +90,9 @@ export function mount(container, opts = {}) {
   let elapsed = 0, last = 0
   const weights = { happy: 0, relaxed: 0, sad: 0, surprised: 0, aa: 0, blink: 0 }
   const pins = {} // raw expression pins driven by the lab sliders: name -> 0..1
+  const poseBones = {} // resolved normalized bone nodes: name -> Object3D
+  const probe = {} // dev-only live overrides: boneName -> [x,y,z]
+  window.__vrmProbe = probe
   let resolved = {} // logical key -> registered expression name on this model
 
   const scene = new THREE.Scene()
@@ -124,15 +173,27 @@ export function mount(container, opts = {}) {
       head.rotation.y = damp(head.rotation.y, -lookX * 0.3 + saccadeX, speed, dt)
       head.rotation.x = damp(
         head.rotation.x,
-        lookY * 0.2 + saccadeY + nod + (mood === 'reading' ? 0.15 : 0),
+        lookY * 0.2 + saccadeY + nod + (POSES[mood]?.pitch ?? 0),
         speed,
         dt,
       )
+    }
+    // Upper-body pose: every managed bone damps toward its emotion override
+    // (or the resting stance); __vrmProbe wins for dev iteration.
+    const pose = POSES[mood]?.bones || {}
+    for (const name of Object.keys(REST)) {
+      const bone = poseBones[name]
+      if (!bone) continue
+      const target = probe[name] || pose[name] || REST[name]
+      bone.rotation.x = damp(bone.rotation.x, target[0], speed, dt)
+      bone.rotation.y = damp(bone.rotation.y, target[1], speed, dt)
+      bone.rotation.z = damp(bone.rotation.z, target[2], speed, dt)
     }
     if (vrm.lookAt) {
       vrm.lookAt.yaw = damp(vrm.lookAt.yaw, lookX * 10 + saccadeX * 35, 6, dt)
       vrm.lookAt.pitch = damp(vrm.lookAt.pitch, -lookY * 8 + saccadeY * 35, 6, dt)
     }
+    mixer?.update(dt) // idle clip writes hips/spine/legs; arms+head stay procedural
     vrm.update(dt)
     renderer.render(scene, camera)
     frame = requestAnimationFrame(tick)
@@ -147,6 +208,7 @@ export function mount(container, opts = {}) {
 
   const ctl = {
     ready: false,
+    idlePlaying: false,
     setProps(p) {
       Object.assign(props, p || {})
     },
@@ -178,6 +240,7 @@ export function mount(container, opts = {}) {
     window.removeEventListener('pointermove', pointer)
     document.removeEventListener('visibilitychange', visibility)
     observer?.disconnect()
+    mixer?.stopAllAction()
     if (vrm) VRMUtils.deepDispose(vrm.scene)
     if (renderer) {
       renderer.domElement.removeEventListener('webglcontextlost', lost)
@@ -216,19 +279,49 @@ export function mount(container, opts = {}) {
       scene.add(vrm.scene)
       // Morph-driven meshes must not be culled against their bind-pose bounds.
       vrm.scene.traverse((obj) => { obj.frustumCulled = false })
-      // Resting arm stance (adapted from ai-smash's VRMCanvas; Z signs flipped
-      // because rotateVRM0 turns the model to face the camera — the reference's
-      // unrotated axes would raise the arms here): without an idle clip a VRM0
-      // model renders in bind pose — the T-pose.
+      // Resting arm stance — see REST for the rationale (without an idle clip a
+      // VRM0 model renders in bind pose: the T-pose). Bones resolve once here
+      // and are damped toward pose targets each frame.
       const humanoid = vrm.humanoid
       if (humanoid) {
-        const bone = (n) => humanoid.getNormalizedBoneNode(n)
-        bone('leftUpperArm')?.rotation.set(0.12, 0.05, 1.25)
-        bone('rightUpperArm')?.rotation.set(0.12, -0.05, -1.25)
-        bone('leftLowerArm')?.rotation.set(0, -0.22, 0.1)
-        bone('rightLowerArm')?.rotation.set(0, 0.22, -0.1)
+        for (const name of Object.keys(REST)) {
+          const bone = humanoid.getNormalizedBoneNode(name)
+          if (bone) {
+            poseBones[name] = bone
+            bone.rotation.set(...REST[name])
+          }
+        }
       }
       if (vrm.lookAt) vrm.lookAt.autoUpdate = false
+      // Optional Mixamo idle clip (same path as the shipped adapter): the
+      // retargeted clip drives hips/spine/legs only — head, neck, shoulders,
+      // arms and hands are filtered out so the pose table, gaze and nod stay
+      // fully procedural and can't be fought by the animation.
+      try {
+        const animBuf = await opts.getAnimBuffer?.()
+        if (animBuf && !disposed) {
+          const fbx = new FBXLoader().parse(animBuf, '')
+          const clip = retargetAnimation(fbx, vrm, { logWarnings: false })
+          if (clip) {
+            const drop = ['head', 'neck', 'leftShoulder', 'rightShoulder', ...Object.keys(REST)]
+              .map((n) => vrm.humanoid?.getNormalizedBoneNode(n)?.name)
+              .filter(Boolean)
+            clip.tracks = clip.tracks.filter((t) => !drop.some((n) => t.name.startsWith(`${n}.`)))
+            for (const track of clip.tracks) if (track.name.endsWith('.position')) {
+              const x = track.values[0], z = track.values[2]
+              for (let i = 0; i < track.values.length; i += 3) {
+                track.values[i] = (track.values[i] - x) * 0.25
+                track.values[i + 2] = (track.values[i + 2] - z) * 0.25
+              }
+            }
+            if (clip.tracks.length) {
+              mixer = new THREE.AnimationMixer(vrm.scene)
+              mixer.clipAction(clip).play()
+              ctl.idlePlaying = true
+            }
+          }
+        }
+      } catch { /* optional idle animation */ }
       const names = ctl.expressions()
       resolved = Object.fromEntries(
         Object.keys(CANDIDATES).map((key) => [
