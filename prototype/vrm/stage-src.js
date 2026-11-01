@@ -194,10 +194,13 @@ export function mount(container, opts = {}) {
       : 0
     const head = vrm.humanoid?.getNormalizedBoneNode('head')
     if (head) {
-      head.rotation.y = damp(head.rotation.y, lookX * 0.3 + saccadeX, speed, dt)
+      // Normalized-bone forward is -Z (verified via probe-gaze.cjs on this VRM0
+      // rig): +rotation.y turns the nose screen-LEFT, +rotation.x tips it UP.
+      // So cursor directions negate, and "look down" poses are negative x.
+      head.rotation.y = damp(head.rotation.y, -lookX * 0.3 + saccadeX, speed, dt)
       head.rotation.x = damp(
         head.rotation.x,
-        lookY * 0.2 + saccadeY + nod + (POSES[mood]?.pitch ?? 0),
+        -lookY * 0.2 + saccadeY - nod - (POSES[mood]?.pitch ?? 0),
         speed,
         dt,
       )
@@ -214,9 +217,15 @@ export function mount(container, opts = {}) {
       bone.rotation.z = damp(bone.rotation.z, target[2], speed, dt)
     }
     if (vrm.lookAt) {
-      vrm.lookAt.yaw = damp(vrm.lookAt.yaw, lookX * 10 + saccadeX * 35, 6, dt)
-      vrm.lookAt.pitch = damp(vrm.lookAt.pitch, lookY * 8 + saccadeY * 35, 6, dt)
+      // Same -Z convention: positive yaw/pitch steer the pupils left/up.
+      vrm.lookAt.yaw = damp(vrm.lookAt.yaw, -lookX * 10 + saccadeX * 35, 6, dt)
+      vrm.lookAt.pitch = damp(vrm.lookAt.pitch, -lookY * 8 + saccadeY * 35, 6, dt)
     }
+    // Live gaze trace — surfaced in the lab readout and via __vrmCtl.look.
+    const L = ctl.look
+    L.x = lookX; L.y = lookY
+    if (head) { L.headX = head.rotation.x; L.headY = head.rotation.y }
+    if (vrm.lookAt) { L.eyeYaw = vrm.lookAt.yaw; L.eyePitch = vrm.lookAt.pitch }
     mixer?.update(dt) // idle clip writes hips/spine/legs; arms+head stay procedural
     vrm.update(dt)
     renderer.render(scene, camera)
@@ -233,6 +242,8 @@ export function mount(container, opts = {}) {
   const ctl = {
     ready: false,
     idlePlaying: false,
+    // live gaze trace for debugging: {x,y} target + applied head/lookAt values
+    look: { x: 0, y: 0, headX: 0, headY: 0, eyeYaw: 0, eyePitch: 0 },
     setProps(p) {
       Object.assign(props, p || {})
     },
@@ -257,6 +268,7 @@ export function mount(container, opts = {}) {
       cleanup()
     },
   }
+  window.__vrmCtl = ctl // dev/test hook (setProps, nod, look trace)
 
   const cleanup = () => {
     disposed = true

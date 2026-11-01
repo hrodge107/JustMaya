@@ -108,12 +108,15 @@ export default function VRMCanvas(props: Props) {
       mixer?.update(dt)
       const head = vrm.humanoid.getNormalizedBoneNode('head')
       if (head) {
-        head.rotation.y = THREE.MathUtils.damp(head.rotation.y, lookX * .3 + saccadeX, 5, dt)
-        head.rotation.x = THREE.MathUtils.damp(head.rotation.x, lookY * .2 + saccadeY + nod + (mood === 'reading' ? .15 : 0), 5, dt)
+        // Normalized-bone forward is -Z (verified on a VRM0 rig via the
+        // prototype probe): +rotation.y turns the nose screen-left, +rotation.x
+        // tips it up — so cursor directions and look-down poses are negative.
+        head.rotation.y = THREE.MathUtils.damp(head.rotation.y, -lookX * .3 + saccadeX, 5, dt)
+        head.rotation.x = THREE.MathUtils.damp(head.rotation.x, -lookY * .2 + saccadeY - nod - (mood === 'reading' ? .15 : 0), 5, dt)
       }
       if (vrm.lookAt) {
-        vrm.lookAt.yaw = THREE.MathUtils.damp(vrm.lookAt.yaw, lookX * 10 + saccadeX * 35, 6, dt)
-        vrm.lookAt.pitch = THREE.MathUtils.damp(vrm.lookAt.pitch, lookY * 8 + saccadeY * 35, 6, dt)
+        vrm.lookAt.yaw = THREE.MathUtils.damp(vrm.lookAt.yaw, -lookX * 10 + saccadeX * 35, 6, dt)
+        vrm.lookAt.pitch = THREE.MathUtils.damp(vrm.lookAt.pitch, -lookY * 8 + saccadeY * 35, 6, dt)
       }
       vrm.update(dt)
       renderer.render(scene, camera)

@@ -49732,8 +49732,8 @@ void main() {
 			const nod = !props.reduced && nodStart >= 0 && elapsed - nodStart < .45 ? Math.sin((elapsed - nodStart) / .45 * Math.PI) * .2 : 0;
 			const head = vrm.humanoid?.getNormalizedBoneNode("head");
 			if (head) {
-				head.rotation.y = damp(head.rotation.y, lookX * .3 + saccadeX, speed, dt);
-				head.rotation.x = damp(head.rotation.x, lookY * .2 + saccadeY + nod + (POSES[mood]?.pitch ?? 0), speed, dt);
+				head.rotation.y = damp(head.rotation.y, -lookX * .3 + saccadeX, speed, dt);
+				head.rotation.x = damp(head.rotation.x, -lookY * .2 + saccadeY - nod - (POSES[mood]?.pitch ?? 0), speed, dt);
 			}
 			const pose = POSES[mood]?.bones || {};
 			for (const name of Object.keys(REST)) {
@@ -49745,8 +49745,19 @@ void main() {
 				bone.rotation.z = damp(bone.rotation.z, target[2], speed, dt);
 			}
 			if (vrm.lookAt) {
-				vrm.lookAt.yaw = damp(vrm.lookAt.yaw, lookX * 10 + saccadeX * 35, 6, dt);
-				vrm.lookAt.pitch = damp(vrm.lookAt.pitch, lookY * 8 + saccadeY * 35, 6, dt);
+				vrm.lookAt.yaw = damp(vrm.lookAt.yaw, -lookX * 10 + saccadeX * 35, 6, dt);
+				vrm.lookAt.pitch = damp(vrm.lookAt.pitch, -lookY * 8 + saccadeY * 35, 6, dt);
+			}
+			const L = ctl.look;
+			L.x = lookX;
+			L.y = lookY;
+			if (head) {
+				L.headX = head.rotation.x;
+				L.headY = head.rotation.y;
+			}
+			if (vrm.lookAt) {
+				L.eyeYaw = vrm.lookAt.yaw;
+				L.eyePitch = vrm.lookAt.pitch;
 			}
 			mixer?.update(dt);
 			vrm.update(dt);
@@ -49763,6 +49774,14 @@ void main() {
 		const ctl = {
 			ready: false,
 			idlePlaying: false,
+			look: {
+				x: 0,
+				y: 0,
+				headX: 0,
+				headY: 0,
+				eyeYaw: 0,
+				eyePitch: 0
+			},
 			setProps(p) {
 				Object.assign(props, p || {});
 			},
@@ -49787,6 +49806,7 @@ void main() {
 				cleanup();
 			}
 		};
+		window.__vrmCtl = ctl;
 		const cleanup = () => {
 			disposed = true;
 			cancelAnimationFrame(frame);

@@ -1455,6 +1455,7 @@ function syncLab() {
   labRead.textContent = 'mode=' + mode + ' state=' + maya.dataset.state
     + (maya.hasAttribute('data-speaking') ? ' speaking' : '')
     + ' gaze=' + (vrmProps().enablePointerTracking ? 'pointer' : 'off')
+    + (vrm ? ' look=' + vrm.look.x.toFixed(2) + ',' + vrm.look.y.toFixed(2) : '')
     + (pins.length ? ' pins=' + pins.join(',') : '');
 }
 
