@@ -64,7 +64,7 @@ export function PictureNotesDialog({ dialogRef, title, view, notes, selected, fr
       {fromGallery && <button type="button" className="vn-quiet vn-picture-back" onClick={onBack}>Back to Gallery</button>}
       <PictureNoteImage card={selected.card} className="vn-picture-detail-image" />
       <h3>Description</h3><p>{selected.card.description}</p>
-      <h3>PDF citations</h3><ul>{[...new Set(selected.card.sourceRefs.map(ref => `${ref.pageStart}:${ref.pageEnd}`))].map(range => {
+      <h3>Source citations</h3><ul>{[...new Set(selected.card.sourceRefs.map(ref => `${ref.pageStart}:${ref.pageEnd}`))].map(range => {
         const [start, end] = range.split(':')
         return <li key={range}><span>Page {start}{start !== end ? `–${end}` : ''}</span></li>
       })}</ul>

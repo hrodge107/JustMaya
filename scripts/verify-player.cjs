@@ -203,7 +203,7 @@ async function main() {
     await picture.go()
     const cardButton = picture.page.getByRole('button', { name: 'Ziggurat', exact: true })
     await cardButton.focus(); await picture.page.keyboard.press('Enter')
-    assert.equal(await picture.page.getByRole('heading', { name: 'PDF citations' }).isVisible(), true)
+    assert.equal(await picture.page.getByRole('heading', { name: 'Source citations' }).isVisible(), true)
     assert.equal(await picture.page.getByText('Page 2', { exact: true }).isVisible(), true)
     assert.equal(await picture.page.getByText('AI-generated illustration', { exact: false }).count() > 0, true)
     await picture.page.keyboard.press('Escape')

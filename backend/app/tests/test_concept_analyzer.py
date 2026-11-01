@@ -149,6 +149,17 @@ async def test_survey_rejects_out_of_window_evidence():
 
 
 @pytest.mark.anyio
+async def test_photo_detail_never_fetches_web_supplements(tmp_path, monkeypatch):
+    async def forbidden(*args, **kwargs):
+        pytest.fail("Photo OCR gaps must not trigger web supplementation")
+    monkeypatch.setattr("app.services.concept_analyzer.fetch_summary", forbidden)
+    doc = _doc("thin photo").model_copy(update={"source_kind": "photos"})
+    result = await detail_analysis(doc, _locked(), _survey_inventory(pages=1), {1},
+        FakeMeter([_detail_payload()]), "job", settings=_settings(), data_dir=tmp_path)
+    assert result.supplements == []
+
+
+@pytest.mark.anyio
 async def test_detail_runs_full_schema_on_scope_only():
     doc = _doc("intro", "heat transfer basics", "heat examples", "printing press")
     meter = FakeMeter([_detail_payload(page=2)])

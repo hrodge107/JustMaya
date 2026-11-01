@@ -6,14 +6,43 @@ from datetime import datetime, timezone
 import pymupdf
 from fastapi import APIRouter, Form, Request, UploadFile
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 
 from app.config import Settings
 from app.errors import error_body
 from app.models.document import UploadResponse
-from app.storage.documents import save_document_file
+from app.storage.documents import create_photo_document, save_document_file
 from app.storage.jobs import enqueue
+from app.services.photo_extractor import normalize_photo
+from app.services.pdf_extractor import ExtractionError
 
 router = APIRouter()
+
+
+@router.post("/api/documents/photos", status_code=201)
+async def upload_photos(request: Request, files: list[UploadFile]) -> UploadResponse:
+    settings: Settings = request.app.state.settings
+    try:
+        if not 1 <= len(files) <= settings.photo_max_count:
+            raise UploadRejection("PHOTO_COUNT", f"Select 1–{settings.photo_max_count} photos for one lesson.")
+        photos = []
+        total = 0
+        for file in files:
+            data = await file.read(min(settings.photo_max_bytes, settings.photo_total_bytes - total) + 1)
+            total += len(data)
+            if len(data) > settings.photo_max_bytes or total > settings.photo_total_bytes:
+                raise UploadRejection("FILE_TOO_LARGE", "Use photos up to 10 MiB each and 20 MiB combined.")
+            normalized = await run_in_threadpool(normalize_photo, data, settings)
+            name = (file.filename or "photo").replace("\\", "/").split("/")[-1][:200]
+            photos.append((name, normalized))
+    except (UploadRejection, ExtractionError) as exc:
+        return JSONResponse(status_code=422, content=error_body(exc.code, exc.message))
+    finally:
+        for file in files:
+            await file.close()
+
+    document_id, job_id = await run_in_threadpool(create_photo_document, request.app.state.data_dir, photos, total)
+    return UploadResponse(document_id=document_id, job_id=job_id, status="queued")
 
 
 class UploadRejection(Exception):

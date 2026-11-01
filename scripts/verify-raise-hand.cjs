@@ -166,7 +166,7 @@ async function coreFlow(browser) {
   assert.ok(STRIP_LABEL.includes(stripLabel), 'resume strip label comes from the label pool')
   assert.equal(await input(f.page).inputValue(), '', 'closing beat lands an empty editable input')
   assert.equal(await f.page.evaluate(() => document.activeElement === document.querySelector('.vn-ask-input')), true, 'fresh input takes focus')
-  assert.equal(await f.page.locator('.vn-source-note').textContent(), 'Partly supported by retrieved PDF passages.')
+  assert.equal(await f.page.locator('.vn-source-note').textContent(), 'Partly supported by retrieved source passages.')
   await f.page.getByRole('button', { name: 'Sources', exact: true }).click()
   assert.deepEqual(await f.page.locator('.vn-source-badge').allTextContents(), ['Page 2–3'])
   assert.equal(await f.page.locator('.vn-ask-new').count(), 1, 'New question control appears once a flow turn anchors the thread')

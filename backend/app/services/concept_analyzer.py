@@ -289,7 +289,7 @@ async def detail_analysis(document: ExtractedDocument, locked: Roadmap,
         _check_window([*part.concepts, *part.learning_objectives, *part.prerequisite_edges],
                       allowed_pages, document.document_id, window.section_id)
         mapped.append(part)
-        if data_dir is not None:
+        if data_dir is not None and document.source_kind != "photos":
             thin = sum(len(text.strip()) for _, text in window.pages) < thin_floor * len(window.pages)
             insufficient = thin or any(concept.evidence_gaps for concept in part.concepts)
             if insufficient:

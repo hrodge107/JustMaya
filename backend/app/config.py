@@ -26,6 +26,16 @@ class Settings(BaseSettings):
 
     max_upload_bytes: int = 20 * 1024 * 1024
     max_upload_pages: int = 100
+    photo_max_count: int = 5
+    photo_max_bytes: int = 10 * 1024 * 1024
+    photo_total_bytes: int = 20 * 1024 * 1024
+    photo_max_pixels: int = 40_000_000
+    photo_long_edge: int = 2048
+    photo_normalized_bytes: int = 3 * 1024 * 1024
+    photo_input_tokens: int = 8_000
+    photo_output_tokens: int = 48_000
+    photo_extract_budget: int = 300_000
+    photo_job_budget: int = 900_000
 
     chroma_dir: Path = DEFAULT_DATA_DIR / "chroma"
     # ponytail: 180 BPE tokens stays well under MiniLM-L6's 256-word-piece

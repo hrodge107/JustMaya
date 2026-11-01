@@ -51,6 +51,8 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
   const [askText, setAskText] = useState('')
   const [uploadErr, setUploadErr] = useState('')
   const [uploadBusy, setUploadBusy] = useState(false)
+  const [photos, setPhotos] = useState<File[]>([])
+  const [photoWarnings, setPhotoWarnings] = useState<string[]>([])
   const [docs, setDocs] = useState<LearnDoc[] | null>(null)
   const [learnErr, setLearnErr] = useState('')
   const [shelf, setShelf] = useState<ShelfRecord[] | null>(null)
@@ -74,6 +76,7 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
   const menuDlg = useRef<HTMLDialogElement>(null)
   const aboutDlg = useRef<HTMLDialogElement>(null)
   const filePick = useRef<HTMLInputElement>(null)
+  const photoPick = useRef<HTMLInputElement>(null)
   const askInput = useRef<HTMLInputElement>(null)
   const menuTrigger = useRef<HTMLButtonElement>(null)
   const [dragOver, setDragOver] = useState(false)
@@ -204,6 +207,7 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
     const token = ++jobGen.current
     setReadyCard(null)
     setReadyErr('')
+    setPhotoWarnings([])
     engine.beginRead()
     setChip({ visible: true, name: docName, stage: 'preparing', pct: 0, error: '', jobId })
     let stepShown = -1
@@ -214,6 +218,7 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
       try { job = await api.job(jobId) }
       catch { await sleep(4000); continue }
       if (token !== jobGen.current) return
+      setPhotoWarnings(job.warnings ?? [])
       const stage = job.stage ?? ''
       if (STAGE_STEP[stage] !== undefined && stepShown !== STAGE_STEP[stage]) {
         stepShown = STAGE_STEP[stage]
@@ -251,6 +256,7 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
     const token = ++jobGen.current
     setReadyCard(null)
     setReadyErr('')
+    setPhotoWarnings([])
     engine.beginRead()
     setChip({ visible: true, name: MOCK_DOC, stage: 'preparing', pct: 0, error: '', jobId: '' })
     for (const s of MOCK_STAGES) {
@@ -331,6 +337,38 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
       setUploadBusy(false)
       if (filePick.current) filePick.current.value = ''
     }
+  }
+
+  function addPhotos(files: File[]) {
+    if (uploading.current) return
+    const next = [...photos, ...files]
+    if (next.length > 5) { setUploadErr('Choose up to 5 photos for one lesson.'); return }
+    if (next.some(file => file.size > 10 * 1024 * 1024) || next.reduce((size, file) => size + file.size, 0) > 20 * 1024 * 1024) {
+      setUploadErr('Use photos up to 10 MiB each and 20 MiB combined.'); return
+    }
+    if (next.some(file => !/\.(jpe?g|png|webp)$/i.test(file.name))) {
+      setUploadErr('Use JPEG, PNG, or static WebP photos.'); return
+    }
+    setUploadErr('')
+    setPhotos(next)
+  }
+
+  async function uploadPhotos() {
+    if (uploading.current || photos.length === 0) return
+    uploading.current = true
+    setUploadBusy(true)
+    setUploadErr('')
+    try {
+      const { job_id } = await api.uploadPhotos(photos)
+      pendingPdf.current = null
+      uploadDlg.current?.close()
+      setJobParam(job_id)
+      const name = photos.length === 1 ? photos[0].name : `${photos[0].name} (+${photos.length - 1} photos)`
+      setPhotos([])
+      void drive(job_id, name)
+    } catch (err) {
+      setUploadErr(err instanceof Error ? err.message : 'Upload failed. Try again.')
+    } finally { uploading.current = false; setUploadBusy(false) }
   }
 
   // ---- Learn: documents -> roadmaps -> rows; Play creates a real session --
@@ -502,11 +540,13 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
           <div className="up-track" aria-hidden="true"><i className="up-fill" style={{ width: '100%' }} /></div>
           <div className="up-foot"><span>{playingId === 'ready-card' ? 'Starting…' : 'Episode ready. Tap to play'}</span><span aria-hidden="true">▸</span></div>
           {readyErr !== '' && <p className="up-err" role="alert">{readyErr}</p>}
+          {photoWarnings.map(warning => <p className="photo-warning" key={warning}>{warning}</p>)}
         </div>
       : <div className="upload-chip" role="status" data-error={chip.error ? '' : undefined}>
         <span className="up-name">{chip.error ? 'Read stalled' : `Reading ${chip.name}`}</span>
         <div className="up-track"><i className="up-fill" style={{ width: `${chip.pct}%` }} /></div>
         <div className="up-foot"><span>{chip.stage}</span><span>{Math.round(chip.pct)}%</span></div>
+        {photoWarnings.map(warning => <p className="photo-warning" key={warning}>{warning}</p>)}
         {chip.error !== '' && <>
           <p className="up-err">{chip.error}</p>
           <div className="up-actions">
@@ -520,7 +560,7 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
       onClick={e => { if (e.target === e.currentTarget) e.currentTarget.close() }}>
       <div className="modal">
         <h2 id="upTitle">Upload a document</h2>
-        <p className="sub">PDF works best: a chapter, a paper, lecture notes. I'll plan a lesson from it.</p>
+        <p className="sub">Upload a PDF or up to 5 photos of readable notes or pages. I'll plan one lesson from them.</p>
         <label className={`dropzone${dragOver ? ' drag-over' : ''}`} htmlFor="filePick" tabIndex={0} role="button"
           onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); filePick.current?.click() } }}
           onDragOver={e => { e.preventDefault(); setDragOver(true) }}
@@ -531,6 +571,20 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
         </label>
         <input ref={filePick} id="filePick" type="file" accept="application/pdf,.pdf" hidden
           onChange={e => { const f = e.target.files?.[0]; if (f) void uploadFile(f) }} />
+        <div className="photo-upload">
+          <button type="button" className="vn-quiet" disabled={uploadBusy || photos.length >= 5} onClick={() => photoPick.current?.click()}>Add photos</button>
+          <input ref={photoPick} id="photoPick" type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" multiple hidden
+            onChange={e => { addPhotos(Array.from(e.target.files ?? [])); e.target.value = '' }} />
+          <p className="sub">JPEG, PNG, or static WebP. 10 MiB each, 20 MiB total. Selection order becomes page order.</p>
+          {photos.length > 0 && <>
+            <ol className="photo-list" aria-label="Selected photo pages">
+              {photos.map((photo, index) => <li key={`${index}-${photo.name}`}><span>{photo.name}</span>
+                <button type="button" className="vn-quiet" disabled={uploadBusy} aria-label={`Remove photo ${index + 1}`} onClick={() => setPhotos(items => items.filter((_, i) => i !== index))}>Remove</button>
+              </li>)}
+            </ol>
+            <button type="button" className="vn-button" disabled={uploadBusy} onClick={() => void uploadPhotos()}>{uploadBusy ? 'Uploading…' : 'Create lesson from photos'}</button>
+          </>}
+        </div>
         <div className="or">or</div>
         <button type="button" id="sampleBtn" className="vn-button" style={{ width: '100%' }} disabled={uploadBusy}
           onClick={useSample}>Use the sample chapter</button>

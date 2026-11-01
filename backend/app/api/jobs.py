@@ -7,6 +7,7 @@ from app.models.document import JobStatusResponse
 from app.pipeline.runner import run_job
 from app.services.token_budget import job_usage
 from app.storage.jobs import ELIGIBLE_RUN, can_run, connect_db, get_job
+from app.storage.documents import photo_warnings
 
 router = APIRouter()
 
@@ -26,6 +27,7 @@ async def get_job_status(job_id: str, request: Request) -> JobStatusResponse:
         )
     job["token_usage"] = job_usage(data_dir, job_id)
     job["can_run"] = can_run(data_dir, job)
+    job["warnings"] = photo_warnings(data_dir / "storage", job["document_id"])
     return JobStatusResponse(**job)
 
 
@@ -60,4 +62,5 @@ async def run_job_endpoint(job_id: str, request: Request) -> JobStatusResponse:
     job = result["job"]
     job["token_usage"] = job_usage(data_dir, job_id)
     job["can_run"] = can_run(data_dir, job)
+    job["warnings"] = photo_warnings(data_dir / "storage", job["document_id"])
     return JobStatusResponse(**job)

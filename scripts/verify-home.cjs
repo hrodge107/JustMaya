@@ -64,6 +64,12 @@ async function stub(page, { failAt = null, resumeJob = null } = {}) {
       jobs.set('job-1', makeJob('queued', failAt))
       return json({ job_id: 'job-1', document_id: DOC_ID }, 201)
     }
+    if (path === '/api/documents/photos' && req.method() === 'POST') {
+      const filenames = [...(req.postData() ?? '').matchAll(/filename="([^"]+)"/g)].map(match => match[1])
+      calls.push({ photos: filenames })
+      jobs.set('job-1', makeJob('queued', failAt))
+      return json({ job_id: 'job-1', document_id: DOC_ID }, 201)
+    }
     const jobMatch = /^\/api\/jobs\/([^/]+)(\/run)?$/.exec(path)
     if (jobMatch) {
       const j = jobs.get(jobMatch[1])
@@ -75,6 +81,7 @@ async function stub(page, { failAt = null, resumeJob = null } = {}) {
         return json({ ...jobRow(j), job_id: jobMatch[1] })
       }
       const row = { ...jobRow(j), job_id: jobMatch[1] }
+      if (calls.some(call => call.photos)) row.warnings = ['Photo 2 (second.png) had uncertain text omitted.']
       if (j.state === j.failAt) j.state = 'failed'
       else j.state = NEXT[j.state] ?? j.state
       return json(row)
@@ -398,6 +405,7 @@ async function run() {
   })
 
   // ---------- job failure + retry ----------
+  await ctx.close()
   const ctxFail = await browser.newContext({ viewport: { width: 1280, height: 800 } })
   const pageFail = await ctxFail.newPage()
   pageFail.on('pageerror', e => errors.push(`pageerror(fail): ${e.message}`))
@@ -427,6 +435,7 @@ async function run() {
   })
 
   // ---------- sample chapter: client-side mock pipeline ----------
+  await ctxFail.close()
   const ctxMock = await browser.newContext({ viewport: { width: 1280, height: 800 } })
   const pageMock = await ctxMock.newPage()
   pageMock.on('pageerror', e => errors.push(`pageerror(mock): ${e.message}`))
@@ -460,6 +469,7 @@ async function run() {
   })
 
   // ---------- ?job= resume ----------
+  await ctxMock.close()
   const ctxResume = await browser.newContext({ viewport: { width: 1280, height: 800 } })
   const pageResume = await ctxResume.newPage()
   pageResume.on('pageerror', e => errors.push(`pageerror(resume): ${e.message}`))
@@ -482,6 +492,7 @@ async function run() {
   })
 
   // ---------- degraded storage: IndexedDB deleted before the app boots ----------
+  await ctxResume.close()
   const ctxDegraded = await browser.newContext({ viewport: { width: 1280, height: 800 } })
   await ctxDegraded.addInitScript(() => {
     try { Object.defineProperty(window, 'indexedDB', { configurable: true, get: () => undefined }) } catch { /* older engines keep the global */ }
@@ -515,6 +526,7 @@ async function run() {
   })
 
   // ---------- shelf independence: section renders when the document API is down ----------
+  await ctxDegraded.close()
   const ctxNoApi = await browser.newContext({ viewport: { width: 1280, height: 800 } })
   const pageNoApi = await ctxNoApi.newPage()
   pageNoApi.on('pageerror', e => errors.push(`pageerror(noapi): ${e.message}`))
@@ -536,6 +548,7 @@ async function run() {
   })
 
   // ---------- shelf reflow: narrow + medium dialog widths ----------
+  await ctxNoApi.close()
   for (const width of [390, 800]) {
     const ctxW = await browser.newContext({ viewport: { width, height: 800 } })
     const pageW = await ctxW.newPage()
@@ -557,9 +570,55 @@ async function run() {
       const rowOverflow = await pageW.locator('.shelf .ep').evaluate(el => el.scrollWidth - el.clientWidth)
       assert.ok(rowOverflow <= 1, `shelf row overflows at ${width}px: ${rowOverflow}`)
     })
+    await ctxW.close()
   }
 
+  const photoContext = await browser.newContext({ viewport: { width: 390, height: 844 } })
+  const photoPage = await photoContext.newPage()
+  photoPage.on('pageerror', e => errors.push(`pageerror(photos): ${e.message}`))
+  const photoCalls = await stub(photoPage)
+  await photoPage.goto(`${base}/`)
+  await track('Photos: sequential pages, limits, removal, keyboard and mobile reflow', async () => {
+    await photoPage.getByRole('button', { name: 'Upload', exact: true }).click()
+    const file = name => ({ name, mimeType: 'image/png', buffer: Buffer.from('stub image') })
+    await photoPage.setInputFiles('#photoPick', file('first.png'))
+    await photoPage.setInputFiles('#photoPick', file('second.png'))
+    await photoPage.setInputFiles('#photoPick', file('remove.png'))
+    await photoPage.getByRole('button', { name: 'Remove photo 3', exact: true }).click()
+    assert.deepEqual(await photoPage.locator('.photo-list li span').allTextContents(), ['first.png', 'second.png'])
+    await photoPage.setInputFiles('#photoPick', ['3.png', '4.png', '5.png', '6.png'].map(file))
+    assert.match(await photoPage.locator('#uploadDlg .form-error').innerText(), /up to 5/)
+    await photoPage.setInputFiles('#photoPick', { name: 'large.png', mimeType: 'image/png', buffer: Buffer.alloc(10 * 1024 * 1024 + 1) })
+    assert.match(await photoPage.locator('#uploadDlg .form-error').innerText(), /10 MiB/)
+    await photoPage.setInputFiles('#photoPick', file('unsupported.heic'))
+    assert.match(await photoPage.locator('#uploadDlg .form-error').innerText(), /JPEG/)
+    assert.equal(photoCalls.filter(call => call.path === '/api/documents/photos').length, 0, 'no automatic photo submission')
+    await photoPage.getByRole('button', { name: 'Add photos', exact: true }).focus()
+    assert.equal(await photoPage.locator(':focus').innerText(), 'Add photos')
+    const overflow = await photoPage.locator('#uploadDlg .modal').evaluate(el => el.scrollWidth - el.clientWidth)
+    assert.ok(overflow <= 1, `photo modal overflow: ${overflow}`)
+    for (const width of [390, 800, 1280]) {
+      await photoPage.setViewportSize({ width, height: 844 })
+      assert.ok(await photoPage.locator('#uploadDlg .modal').evaluate(el => el.scrollWidth - el.clientWidth) <= 1)
+      await photoPage.screenshot({ path: `${process.env.TEMP || '/tmp'}/mita-photo-upload-${width}.png` })
+    }
+  })
+  await track('Photos: submit ordered pages, retain warnings and cache episode without PDF', async () => {
+    await photoPage.getByRole('button', { name: 'Create lesson from photos', exact: true }).click()
+    await photoPage.locator('.upload-chip.ready').waitFor({ timeout: 60000 })
+    assert.deepEqual(photoCalls.find(call => call.photos)?.photos, ['first.png', 'second.png'])
+    assert.match(await photoPage.locator('.upload-chip.ready .photo-warning').innerText(), /Photo 2/)
+    const rows = await waitForShelf(photoPage)
+    assert.equal(rows.length, 1)
+    assert.equal(rows[0].pdfSize, null)
+    assert.equal(rows[0].episodeId, EP_ID)
+    await photoPage.reload()
+    await photoPage.getByRole('button', { name: 'Learn', exact: true }).click()
+    await photoPage.locator('.shelf .ep-title', { hasText: EP_TITLE }).waitFor()
+  })
+
   // ---------- mobile layout ----------
+  await photoContext.close()
   const ctxMobile = await browser.newContext({ viewport: { width: 420, height: 800 } })
   const pageMobile = await ctxMobile.newPage()
   pageMobile.on('pageerror', e => errors.push(`pageerror(mobile): ${e.message}`))
@@ -578,6 +637,7 @@ async function run() {
   })
 
   // ---------- reduced motion ----------
+  await ctxMobile.close()
   const ctxReduce = await browser.newContext({ viewport: { width: 1280, height: 800 }, reducedMotion: 'reduce' })
   const pageReduce = await ctxReduce.newPage()
   pageReduce.on('pageerror', e => errors.push(`pageerror(reduce): ${e.message}`))
@@ -592,6 +652,7 @@ async function run() {
 
   // ---------- dark color-scheme: the index.css global h1/h2 goes near-white;
   // shared chrome pins every modal heading to ink ----------
+  await ctxReduce.close()
   const ctxDark = await browser.newContext({ viewport: { width: 1280, height: 800 }, colorScheme: 'dark' })
   const pageDark = await ctxDark.newPage()
   pageDark.on('pageerror', e => errors.push(`pageerror(dark): ${e.message}`))
@@ -604,7 +665,7 @@ async function run() {
     await pageDark.getByRole('button', { name: 'Upload', exact: true }).click()
     await pageDark.locator('#uploadDlg[open]').waitFor()
     assert.equal(await h2color('#uploadDlg h2'), ink, 'upload heading')
-    await pageDark.locator('#uploadDlg .vn-quiet').click()
+    await pageDark.locator('#uploadDlg .row-end .vn-quiet').click()
     await pageDark.getByRole('button', { name: 'Learn', exact: true }).click()
     await pageDark.locator('#learnDlg[open]').waitFor()
     assert.equal(await h2color('#learnDlg h2'), ink, 'learn heading')

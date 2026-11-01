@@ -22,6 +22,7 @@ from app.services.episode_generator import generate_episode
 from app.services.episode_validator import validate_and_publish
 from app.services.model_provider import GenerationProvider, MetaProvider
 from app.services.pdf_extractor import extract_document
+from app.services.photo_extractor import extract_photos
 from app.services.rag_indexer import index_document
 from app.services.token_budget import MeteredProvider
 from app.storage.artifacts import ArtifactStore
@@ -39,6 +40,7 @@ class StageServices:
     `dataclasses.replace` yields per-test overrides."""
 
     extract_document: Callable = extract_document
+    extract_photos: Callable = extract_photos
     index_document: Callable = index_document
     survey_document: Callable = survey_document
     plan_curriculum: Callable = plan_curriculum

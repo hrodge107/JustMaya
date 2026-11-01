@@ -736,7 +736,7 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
           {inQuestion && lastTurn && onFinalBeat && (
             <span className="vn-sources">
               {lastTurn.groundingStatus && lastTurn.groundingStatus !== 'supported' && (
-                <span className="vn-source-note">{lastTurn.groundingStatus === 'partial' ? 'Partly supported by retrieved PDF passages.' : 'Not verified by retrieved PDF passages.'}</span>
+                <span className="vn-source-note">{lastTurn.groundingStatus === 'partial' ? 'Partly supported by retrieved source passages.' : 'Not verified by retrieved source passages.'}</span>
               )}
               {lastTurn.sourceRefs.length > 0 && <>
                 <button type="button" className="vn-sources-toggle" aria-expanded={sourcesFor === turnId} onClick={event => { event.stopPropagation(); setSourcesFor(open => open === turnId ? null : turnId) }}>Sources</button>

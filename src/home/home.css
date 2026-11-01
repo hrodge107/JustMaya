@@ -191,3 +191,11 @@ body:has(.home) { margin: 0; overflow: hidden; background: #23233a; color-scheme
 }
 
 :root[data-motion='reduce'] .home * { transition: none !important; animation: none !important; }
+.home .photo-upload { margin-top: 16px; }
+.home .photo-upload .vn-button { width: 100%; }
+.home .photo-list { padding-left: 24px; list-style: decimal; }
+.home .photo-list li { padding-block: 4px; }
+.home .photo-list li::marker { font-weight: 800; }
+.home .photo-list li span { display: inline-block; max-width: 100%; overflow-wrap: anywhere; vertical-align: middle; margin-right: 8px; }
+.home .photo-upload .vn-quiet, .home .photo-upload .vn-button { min-height: 44px; }
+.home .photo-warning { margin: 8px 0 0; font-size: .85rem; overflow-wrap: anywhere; }
