@@ -8,23 +8,29 @@
     <link rel="stylesheet" href="./player.bundle.css" />
     <style>
         body { margin: 0; background: #23233a; }
-        /* SEKAI-style framing: the mascot figure fills the stage height and
-           the canvas keeps its aspect, so the character stands head-to-toe
-           against the dialogue box instead of floating mid-stage. */
+        /* SEKAI-style framing: the mascot looms over the dialogue box — canvas
+           is ~1.5× stage height, top-anchored, so the head sits just under the
+           header while the waist-down runs behind the paper box (dialogue is
+           z-index 5, paper is opaque). Same rule at every size because it is
+           height-driven: narrow stages crop the canvas sides evenly instead. */
+        .vn-stage { overflow: hidden; }
         .vn-stage > .mascot-live2d {
             align-self: stretch;
             display: flex;
             justify-content: center;
+            align-items: flex-start;
             min-height: 0;
+            overflow: hidden;
         }
+        /* !important: PIXI autoDensity writes inline canvas width/height —
+           the 150%/auto must override it to upsize the stage. */
         .mascot-live2d canvas {
             display: block;
-            height: 100%;
-            width: auto;
+            flex: none;
+            height: 140% !important;
+            width: auto !important;
+            transform: translateY(2%);
         }
-        /* Dialogue overlays the scene bottom like the SEKAI layout — the
-           character's feet tuck behind the paper box rather than stopping
-           above it. */
         .player .vn-dialogue {
             margin-top: -72px;
             position: relative;
