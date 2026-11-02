@@ -57,6 +57,7 @@ class GenerationProvider(Protocol):
         max_tokens: int | None = None,
         cache_key: str | None = None,
         images: list[str] | None = None,
+        reasoning_effort: str | None = None,
     ) -> StructuredResult: ...
 
     async def generate_image(
@@ -172,12 +173,15 @@ class MetaProvider:
         max_tokens: int | None = None,
         cache_key: str | None = None,
         images: list[str] | None = None,
+        reasoning_effort: str | None = None,
     ) -> StructuredResult:
         if _has_recursion(schema):
             raise ModelProviderError(
                 "SCHEMA_UNSUPPORTED", "Recursive JSON schemas are not supported by the endpoint"
             )
         payload = self._payload(system, user, max_tokens, cache_key)
+        if reasoning_effort is not None:
+            payload["reasoning_effort"] = reasoning_effort
         if images:
             payload["messages"][1]["content"] = [
                 {"type": "text", "text": user},

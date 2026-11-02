@@ -235,7 +235,7 @@ async def semantic_review(
         },
         ensure_ascii=False,
     )
-    await provider.require_input_budget(
+    input_token_count = await provider.require_input_budget(
         system=_REVIEW_SYSTEM, user=user,
         limit=settings.validation_max_input_tokens,
         exc=lambda count, limit: ValidationFailed(
@@ -251,6 +251,7 @@ async def semantic_review(
         max_tokens=settings.validation_max_tokens,
         preflight=True,
         cache_key=CACHE_KEY,
+        input_token_count=input_token_count,
     )
     try:
         return SemanticVerdict.model_validate(raw)

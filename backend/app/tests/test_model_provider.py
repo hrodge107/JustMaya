@@ -46,6 +46,19 @@ SCHEMA = {
 
 
 @pytest.mark.anyio
+async def test_structured_reasoning_is_only_sent_when_explicit():
+    payloads = []
+    def handler(request):
+        payloads.append(json.loads(request.content))
+        return _resp(_ok_body('{"title":"Heat","score":1,"tags":[]}'))
+    provider = _provider(handler)
+    await provider.generate_structured(system="s", user="u", schema=SCHEMA, reasoning_effort="low")
+    await provider.generate_structured(system="s", user="u", schema=SCHEMA)
+    assert payloads[0]["reasoning_effort"] == "low"
+    assert "reasoning_effort" not in payloads[1]
+
+
+@pytest.mark.anyio
 async def test_generate_text_returns_content_and_usage():
     seen = {}
 

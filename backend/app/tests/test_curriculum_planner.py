@@ -117,7 +117,7 @@ async def test_objective_dependencies_completed_once_in_inventory_order_for_all_
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("invalid", ["concept", "objective", "omission", "duplicate_concept", "duplicate_objective", "empty_dependency", "unknown_dependency", "user_order"])
+@pytest.mark.parametrize("invalid", ["concept", "objective", "omission", "duplicate_omission", "duplicate_concept", "duplicate_objective", "empty_dependency", "unknown_dependency", "user_order"])
 async def test_completion_rejects_invalid_generated_data(invalid):
     source = inventory()
     meter = FakeMeter()
@@ -128,6 +128,8 @@ async def test_completion_rejects_invalid_generated_data(invalid):
         episode["objective_ids"] = ["unknown"]
     elif invalid == "omission":
         meter.response["omissions"] = [{"concept_id": "unknown", "reason": "Unknown"}]
+    elif invalid == "duplicate_omission":
+        meter.response["omissions"] = [{"concept_id": "c", "reason": "Omitted"}] * 2
     elif invalid == "duplicate_concept":
         episode["concepts"] *= 2
     elif invalid == "duplicate_objective":

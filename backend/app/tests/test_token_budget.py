@@ -70,6 +70,34 @@ class StubProvider:
         return self.count
 
 
+@pytest.mark.anyio
+async def test_precomputed_count_reuses_count_but_still_enforces_budget(data_dir):
+    raw = StubProvider(count=7)
+    meter = MeteredProvider(raw, _settings(token_stage_budget=20), data_dir)
+    count = await meter.require_input_budget(system="s", user="u", limit=100,
+        exc=lambda count, limit: ValueError("too large"))
+    await meter.generate_structured(job_id="j1", stage="analyze", system="s", user="u",
+        schema={}, max_tokens=5, preflight=True, input_token_count=count, reasoning_effort="low")
+    assert sum("count" in c for c in raw.calls) == 1
+    assert raw.calls[-1]["reasoning_effort"] == "low"
+    assert len(_rows(data_dir)) == 1
+    with pytest.raises(TokenBudgetError):
+        await meter.generate_structured(job_id="j1", stage="analyze", system="s", user="u",
+            schema={}, max_tokens=5, preflight=True, input_token_count=count)
+    assert len(raw.calls) == 2
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("count", [-1, True, 1.5])
+async def test_invalid_precomputed_count_fails_before_call(data_dir, count):
+    raw = StubProvider()
+    meter = MeteredProvider(raw, _settings(), data_dir)
+    with pytest.raises(ValueError, match="nonnegative integer"):
+        await meter.generate_structured(job_id="j1", stage="analyze", system="s", user="u",
+            schema={}, input_token_count=count)
+    assert not raw.calls
+
+
 def test_record_usage_writes_row(data_dir):
     record_usage(
         data_dir,

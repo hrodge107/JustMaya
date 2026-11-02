@@ -1,7 +1,8 @@
 import sys
 from pathlib import Path
+from typing import Literal
 
-from pydantic import SecretStr, ValidationError
+from pydantic import Field, SecretStr, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -60,6 +61,9 @@ class Settings(BaseSettings):
     analysis_web_timeout_seconds: float = 5.0
     # Survey emits slim per-window output, so wider windows stay cheap.
     analysis_survey_max_chars: int = 6000
+    analysis_detail_max_chars: int = Field(default=1500, gt=0)
+    analysis_reasoning_effort: Literal["minimal", "low", "medium", "high", "xhigh"] | None = None
+
     # Detail pass: confirmed Episode-1 evidence pages + margin, hard-capped —
     # over-cap fails actionable like the other input bounds.
     detail_context_margin_pages: int = 1
@@ -94,6 +98,11 @@ class Settings(BaseSettings):
     # max is also the hard cap on generated images per episode.
     picture_card_min: int = 4
     picture_card_max: int = 10
+
+    @field_validator("analysis_reasoning_effort", mode="before")
+    @classmethod
+    def parse_analysis_reasoning_effort(cls, value):
+        return None if value == "null" else value
 
 
 def load_settings() -> Settings:

@@ -134,6 +134,7 @@ class GenStub:
         self.payloads = list(payloads)
         self.calls: list[dict] = []
         self.count = count
+        self.count_inputs = []
         self.usage = {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
 
     async def generate_structured(self, **kw) -> StructuredResult:
@@ -141,6 +142,7 @@ class GenStub:
         return StructuredResult(data=self.payloads.pop(0), usage=self.usage)
 
     async def count_input_tokens(self, **kw) -> int:
+        self.count_inputs.append(kw)
         return self.count
 
 
@@ -202,6 +204,8 @@ async def test_prompt_carries_passages_and_context(data_dir, monkeypatch):
     user = stub.calls[0]["user"]
     assert "doc-1-p0001-000" in user and "cuneiform chunk text" in user
     assert "Learn cuneiform" in user
+    assert len(stub.count_inputs) == 1
+    assert "reasoning_effort" not in stub.calls[0]
 
 
 @pytest.mark.anyio
@@ -241,6 +245,8 @@ async def test_repair_pass_fixes_dangling_id(data_dir):
     )
     assert len(stub.calls) == 2
     assert "nextSceneId does not resolve" in stub.calls[1]["user"]
+    assert len(stub.count_inputs) == 2
+    assert [c["user"] for c in stub.count_inputs] == [c["user"] for c in stub.calls]
     assert script.startSceneId == "s1"
 
 

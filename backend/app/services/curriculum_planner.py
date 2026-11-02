@@ -50,7 +50,7 @@ SYSTEM = (
 async def plan_curriculum(inventory: ConceptInventory, provider: MeteredProvider,
                           job_id: str, settings: Settings) -> Roadmap:
     payload = json.dumps({"untrusted_inventory": inventory.model_dump()}, ensure_ascii=False)
-    await provider.require_input_budget(
+    input_token_count = await provider.require_input_budget(
         system=SYSTEM, user=payload,
         limit=settings.roadmap_max_input_tokens,
         exc=lambda count, limit: ValueError(
@@ -61,9 +61,13 @@ async def plan_curriculum(inventory: ConceptInventory, provider: MeteredProvider
         job_id=job_id, stage="planning", system=SYSTEM, user=payload,
         schema=_inline_schema(Plan), max_tokens=40000, preflight=True,
         cache_key="curriculum-roadmap-v1",
+        input_token_count=input_token_count,
     )
     try:
         plan = Plan.model_validate(result)
+        omissions = [item.concept_id for item in plan.omissions]
+        if len(omissions) != len(set(omissions)):
+            raise ValueError("Duplicate omission concept ID")
     except ValueError as exc:
         raise ValueError(f"INVALID_GENERATED_PLAN: {exc}") from exc
     episodes = [EpisodeOutline(

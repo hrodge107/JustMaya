@@ -162,6 +162,7 @@ async def survey_document(document: ExtractedDocument, provider: MeteredProvider
                             ensure_ascii=False),
             schema=schema, max_tokens=max_tokens, preflight=True,
             cache_key="concept-survey-v1",
+            reasoning_effort=settings.analysis_reasoning_effort,
         )
         part = SurveyIngredients.model_validate(output)
         allowed_pages = {page for page, _ in window.pages}
@@ -235,7 +236,7 @@ async def detail_analysis(document: ExtractedDocument, locked: Roadmap,
                           survey: ConceptInventory, scope_pages: set[int],
                           provider: MeteredProvider, job_id: str,
                           *, settings: Settings, data_dir: Path | None = None,
-                          max_chars: int = 1500, max_tokens: int = 20000) -> ConceptInventory:
+                          max_chars: int | None = None, max_tokens: int = 20000) -> ConceptInventory:
     """Full-depth analysis of the confirmed Episode-1 scope, enriching the
     locked concept/objective IDs so reviewed ordering survives verbatim."""
     first = locked.episodes[0]
@@ -247,7 +248,8 @@ async def detail_analysis(document: ExtractedDocument, locked: Roadmap,
     scoped = document.model_copy(update={
         "pages": [page for page in document.pages if page.page_number in scope_pages],
     })
-    windows, _ = analysis_windows(scoped, max_chars=max_chars)
+    window_chars = settings.analysis_detail_max_chars if max_chars is None else max_chars
+    windows, _ = analysis_windows(scoped, max_chars=window_chars)
     schema = _inline_schema(Ingredients)
     outline = {
         "locked_concepts": [
@@ -276,6 +278,7 @@ async def detail_analysis(document: ExtractedDocument, locked: Roadmap,
                             ensure_ascii=False),
             schema=schema, max_tokens=max_tokens, preflight=True,
             cache_key="scope-detail-v1",
+            reasoning_effort=settings.analysis_reasoning_effort,
         )
         part = Ingredients.model_validate(output)
         allowed_pages = {page for page, _ in window.pages}

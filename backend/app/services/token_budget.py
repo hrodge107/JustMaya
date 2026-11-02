@@ -194,8 +194,12 @@ class MeteredProvider:
         preflight: bool = False,
         cache_key: str | None = None,
         images: list[str] | None = None,
+        reasoning_effort: str | None = None,
+        input_token_count: int | None = None,
     ) -> dict[str, Any]:
         extra = {}
+        if reasoning_effort is not None:
+            extra["reasoning_effort"] = reasoning_effort
         if images:
             extra["images"] = images
             estimate = await self._provider.count_input_tokens(system=system, user=user, images=images)
@@ -203,7 +207,7 @@ class MeteredProvider:
                 raise ModelProviderError("PHOTO_INPUT_TOO_LARGE", "Photo exceeds the image token limit. Crop the page and try again.")
             check_budget(self._data_dir, self._settings, job_id, stage, estimate + (max_tokens or 0))
         else:
-            await self._gate(job_id, stage, system, user, max_tokens, preflight)
+            await self._gate(job_id, stage, system, user, max_tokens, preflight, input_token_count)
         try:
             result = await self._provider.generate_structured(
                 system=system, user=user, schema=schema, max_tokens=max_tokens,
@@ -238,9 +242,13 @@ class MeteredProvider:
         user: str,
         max_tokens: int | None,
         preflight: bool,
+        input_token_count: int | None = None,
     ) -> None:
-        estimate = 0
-        if preflight:
+        if input_token_count is not None:
+            if type(input_token_count) is not int or input_token_count < 0:
+                raise ValueError("input_token_count must be a nonnegative integer")
+        estimate = input_token_count or 0
+        if preflight and input_token_count is None:
             try:
                 estimate = await self._provider.count_input_tokens(
                     system=system, user=user
