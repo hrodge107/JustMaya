@@ -61,8 +61,8 @@ class Settings(BaseSettings):
     analysis_web_timeout_seconds: float = 5.0
     # Survey emits slim per-window output, so wider windows stay cheap.
     analysis_survey_max_chars: int = 6000
-    analysis_detail_max_chars: int = Field(default=1500, gt=0)
-    analysis_reasoning_effort: Literal["minimal", "low", "medium", "high", "xhigh"] | None = None
+    analysis_detail_max_chars: int = Field(default=6000, gt=0)
+    analysis_reasoning_effort: Literal["minimal", "low", "medium", "high", "xhigh"] | None = "low"
 
     # Detail pass: confirmed Episode-1 evidence pages + margin, hard-capped —
     # over-cap fails actionable like the other input bounds.

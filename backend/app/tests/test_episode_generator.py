@@ -234,6 +234,25 @@ async def test_input_bound_refuses_before_call(data_dir):
 
 
 @pytest.mark.anyio
+async def test_changed_repair_input_is_bounded_before_second_generation(data_dir):
+    settings = _settings(generation_max_input_tokens=500)
+    bad = _script_payload()
+    bad["scenes"][0]["nextSceneId"] = "ghost"
+
+    class GrowingInput(GenStub):
+        async def count_input_tokens(self, **kw):
+            self.count_inputs.append(kw)
+            return 100 if len(self.count_inputs) == 1 else 501
+
+    stub = GrowingInput([bad, _script_payload()])
+    with pytest.raises(GenerationError, match="GENERATION_INPUT_TOO_LARGE"):
+        await generate_episode(_roadmap(_lesson_context()), _lesson_context(), [],
+            {"doc-1-p0001-000": (1, 1)}, _metered(stub, data_dir, settings), "j1", settings)
+    assert len(stub.calls) == 1
+    assert len(stub.count_inputs) == 2
+
+
+@pytest.mark.anyio
 async def test_repair_pass_fixes_dangling_id(data_dir):
     settings = _settings()
     bad = _script_payload()

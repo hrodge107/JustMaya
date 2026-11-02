@@ -13,7 +13,7 @@ from app.services.token_budget import MeteredProvider
 
 
 class PlannedEpisode(BaseModel):
-    title: str
+    title: str = Field(min_length=1)
     objective_ids: list[str]
     concepts: list[OrderedConcept]
     dialogue_words: int = Field(ge=0)
