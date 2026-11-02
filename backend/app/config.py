@@ -94,6 +94,13 @@ class Settings(BaseSettings):
     # B03 tutor: short answers; reasoning burns budget before content.
     tutor_max_tokens: int = 8_000
 
+    # Lobby mascot chat: shorter turns than the tutor; per-IP window limits
+    # unauthenticated spend (token budgets cap the total under job "mascot").
+    mascot_max_tokens: int = 4_000
+    mascot_rate_limit_per_minute: int = 12
+
+    speech_model_dir: Path = DEFAULT_DATA_DIR / "speech"
+
     # Episode picture cards: target range fed to the nomination prompt; the
     # max is also the hard cap on generated images per episode.
     picture_card_min: int = 4

@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef } from 'react'
 
-export default function useReadingAdvance(turnId: string, delay: number, ready: boolean, paused: boolean, readingReset: number, onAdvance: () => void) {
+export default function useReadingAdvance(turnId: string, delay: number, ready: boolean, paused: boolean, readingReset: number, onAdvance: () => void, blocked = false) {
   const advance = useRef(onAdvance)
   const clock = useRef({ key: '', remaining: delay })
   useLayoutEffect(() => { advance.current = onAdvance })
@@ -21,10 +21,10 @@ export default function useReadingAdvance(turnId: string, delay: number, ready: 
       stop()
       if (document.hidden) return
       started = performance.now()
-      timer = window.setTimeout(() => { stop(); advance.current() }, current.remaining)
+      timer = window.setTimeout(() => { stop(); if (!blocked) advance.current() }, current.remaining)
     }
     syncVisibility()
     document.addEventListener('visibilitychange', syncVisibility)
     return () => { stop(); document.removeEventListener('visibilitychange', syncVisibility) }
-  }, [turnId, delay, ready, paused, readingReset])
+  }, [turnId, delay, ready, paused, readingReset, blocked])
 }

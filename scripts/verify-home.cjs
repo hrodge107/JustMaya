@@ -94,6 +94,10 @@ async function stub(page, { failAt = null, resumeJob = null } = {}) {
     if (path === `/api/episodes/${EP_ID}` && req.method() === 'GET') return json(episode)
     if (path === `/api/episodes/${EP_ID}/sessions` && req.method() === 'POST') return json(sessionRow, 201)
     if (path === `/api/sessions/${SESSION_ID}` && req.method() === 'GET') return json(sessionRow)
+    if (path === '/api/mascot/chat' && req.method() === 'POST') {
+      const q = JSON.parse(req.postData() ?? '{}')
+      return json({ interaction: { interactionId: 'm1', kind: 'mascot', userMessage: q.question ?? '', answer: 'Stub mascot lesson answer.', lines: ['Stub mascot lesson answer.'], createdAt: '2026-11-02T00:00:00Z', requestId: q.request_id ?? '' } })
+    }
     return err(404, 'NOT_FOUND', `Unstubbed ${req.method()} ${path}`)
   })
   return calls
@@ -217,7 +221,7 @@ async function run() {
     await page.locator('.ask-overlay').waitFor({ state: 'detached' })
     await advanceTo(page, async () => (await page.locator('.dlg-name').innerText()) === 'You', { label: 'You echo' })
     assert.match(await dlgText(page), /what is this app/)
-    await advanceTo(page, async () => /Meet Mita|document|visual-novel|lesson/i.test(await dlgText(page)), { label: 'Mita answer' })
+    await advanceTo(page, async () => /Stub mascot lesson answer/.test(await dlgText(page)), { label: 'Mita answer' })
     assert.equal(await page.locator('.ask-overlay').count(), 0, 'no second compose strip')
   })
 
@@ -398,7 +402,7 @@ async function run() {
     const mh = await page.locator('#menuDlg .vn-menu-heading h2').evaluate(el => getComputedStyle(el).color)
     assert.equal(mh, 'rgb(48, 48, 76)', 'menu heading is ink, not white')
     assert.equal(await page.locator('#menuDlg .vn-motion').first().evaluate(el => getComputedStyle(el).fontWeight), '850', 'menu rows keep the player vn-motion weight')
-    const row = page.locator('.vn-motion[role="switch"]')
+    const row = page.getByRole('switch', { name: 'Reduce motion' })
     await row.click()
     assert.equal(await page.evaluate(() => document.documentElement.dataset.motion), 'reduce')
     await page.locator('.vn-motion-reset').waitFor()
@@ -482,7 +486,9 @@ async function run() {
 
   // ---------- ?job= resume ----------
   await ctxMock.close()
-  const ctxResume = await browser.newContext({ viewport: { width: 1280, height: 800 } })
+  // This checks job restoration, not GPU startup: the fixture completes in a
+  // few polls, before a cold VRM can appear on software-rendered CI machines.
+  const ctxResume = await browser.newContext({ viewport: { width: 1280, height: 800 }, reducedMotion: 'reduce' })
   const pageResume = await ctxResume.newPage()
   pageResume.on('pageerror', e => errors.push(`pageerror(resume): ${e.message}`))
   await stub(pageResume, { resumeJob: 'generate' })
@@ -549,7 +555,16 @@ async function run() {
     if (route.request().method() === 'GET') return route.fulfill({ status: 500, json: { error: { code: 'DOWN', message: 'documents down' } } })
     return route.continue()
   })
+  await pageNoApi.route('**/api/mascot/chat', route => route.fulfill({ status: 503, json: { error: { code: 'UPSTREAM_TIMEOUT', message: 'mascot down', retryable: true } } }))
   await pageNoApi.goto(`${base}/`)
+  await track('Talk: mascot endpoint down degrades to the local router', async () => {
+    await pageNoApi.getByRole('button', { name: 'Talk', exact: true }).click()
+    await pageNoApi.locator('.ask-overlay').waitFor()
+    await pageNoApi.locator('.vn-ask-input').fill('what is this app')
+    await pageNoApi.locator('.vn-ask-send').click()
+    await pageNoApi.locator('.ask-overlay').waitFor({ state: 'detached' })
+    await advanceTo(pageNoApi, async () => /playable visual-novel|study tool in a costume/.test(await dlgText(pageNoApi)), { label: 'degraded app answer' })
+  })
   await track('shelf: section still renders when the backend list fails', async () => {
     await putRawShelf(pageNoApi, { documentId: 'doc-local', docName: 'local.pdf', episodeId: EP_ID, episodeTitle: EP_TITLE, episode, pdf: null, savedAt: Date.now() })
     await pageNoApi.reload()

@@ -1,8 +1,8 @@
-// Homepage copy: the ambient script Mita loops through, the Talk intent
-// router (app questions only — lesson questions belong to raise-hand inside
+// Homepage copy: the ambient script Mita loops through, the Talk degraded
+// path (app questions only — lesson questions belong to raise-hand inside
 // an episode), the upload narration pools, and the completion turns. All of
-// it is local, deterministic text; the upload flow drives real pipeline
-// progress but Mita's narration never claims more than the job reports.
+// it is local, deterministic text; Talk answers normally come from
+// /api/mascot/chat and this router only speaks when the endpoint can't.
 import type { Emotion } from '../learnerApi'
 
 export type HomeEmotion = Emotion | 'reading'
@@ -240,13 +240,18 @@ export const PLAY_NO_MITA: Turn[] = [
   { t: 'All good. It stays in the top-right card, or in Learn, until you want it.', e: 'idle' },
 ]
 
-/* Talk routing. Intent-first: each bucket owns its answers; misses escalate
-   through a fallback chain. Answers are local app knowledge, not model calls. */
+/* Talk routing, degraded path. When the mascot endpoint is reachable it
+   answers every question in Mita's voice; this intent router only speaks
+   when the call fails. Intent-first: each bucket owns its answers; misses
+   open with the topic menu. Answers are local app knowledge, not model calls. */
 export const INTENTS: { re: RegExp; lines: string[] }[] = [
   { re: /\b(hi|hello|hey|howdy|yo|good (morning|afternoon|evening)|sup)\b/i, lines: [
     'Hey! Good to see you. What can I clear up?',
     "Hi hi. Ask away, I'm in a chatty mood anyway.",
     'Hello! Fair warning: I answer app questions at length.'] },
+  { re: /what (can|could|do|does) (you|u|we|i|this|the app|meet ?mita) (do|ask)|what do you do|capabilit|how are you|how'?s it going|what'?s up|are you (an? )?(ai|bot|robot|real|human|alive)/i, lines: [
+    "Lobby me: app questions, directions, small talk. Episode me: scenes and checkpoints. Raise-hand me: the actual tutor. We share a name and a dress code.",
+    'I narrate lessons, read whatever you upload, and answer questions about this place. For lesson questions, raise your hand inside an episode — that me has read the whole document.'] },
   { re: /what (is|'s) (this|meet ?mita|the app)|about (this|the) app|what does (this|it|the app) do|what is meet mita|what is meetmita/i, lines: [
     'Meet Mita turns a document into a playable visual-novel lesson. You upload a PDF, it plans a roadmap, generates an episode, and quizzes you inside the story.',
     "It's a study tool in a costume. PDF goes in, a little interactive lesson comes out: scenes, checkpoints, a tutor you can raise your hand for."] },
@@ -291,9 +296,9 @@ export const INTENTS: { re: RegExp; lines: string[] }[] = [
     "Flattered, but I'm more stage directions than person. The useful kind, hopefully."] },
 ]
 export const FALLBACKS = [
-  "Hmm, I didn't quite catch that. Try rephrasing?",
-  'Let me try differently. Are you asking about uploads, episodes, checkpoints, or the tutor?',
+  'Are you asking about uploads, episodes, checkpoints, or the tutor? One word is enough.',
   "Still not landing. The About row in Menu covers the whole thing in a paragraph.",
+  "Hmm, that one's past me. Try 'what is this app' — or About, under Menu.",
 ]
 export const TALK_END: Turn[] = [
   { t: "Okay, I'll keep the seat warm.", e: 'happy' },

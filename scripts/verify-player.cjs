@@ -325,7 +325,7 @@ async function main() {
     let boundary = await revealBoundary(revealing.page)
     assert.ok(boundary?.markerVisible, 'Auto-follow should keep the active reveal boundary in the reading region')
     await revealTarget.hover()
-    await revealing.page.mouse.wheel(0, -500)
+    await revealing.page.mouse.wheel(0, -await revealTarget.evaluate(target => target.scrollHeight))
     await revealing.page.waitForFunction(() => document.querySelector('.vn-dialogue-scroll-area')?.scrollTop === 0)
     await revealing.page.waitForTimeout(500)
     assert.equal(await revealTarget.evaluate(target => target.scrollTop), 0, 'Auto-follow should pause while the learner rereads earlier text')

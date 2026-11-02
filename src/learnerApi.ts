@@ -26,6 +26,10 @@ export type Position = { sceneId: string; dialogueIndex: number; mode: 'playing'
 export type TutorInteraction = { interactionId: string; kind: 'raise_hand' | 'discussion'; userMessage: string; answer: string; lines?: string[]; sourceRefs: SourceRef[]; createdAt: string; groundingStatus: 'supported' | 'partial' | 'unsupported' | null; requestId: string | null; flow?: TutorFlow | null; position?: Position | null }
 export type QuestionBody = { question: string; request_id: string; expected_version: number; help_mode?: HelpMode; reply_to_interaction_id?: string | null; reflection?: string | null }
 export type QuestionResponse = { interaction: TutorInteraction; session: Session }
+// Lobby Talk: the session-free sibling of the tutor interaction envelope.
+export type MascotInteraction = { interactionId: string; kind: 'mascot'; userMessage: string; answer: string; lines: string[]; createdAt: string; requestId: string }
+export type MascotChatBody = { question: string; request_id: string }
+export type MascotChatResponse = { interaction: MascotInteraction }
 export type RewindBody = { request_id: string; expected_version: number; scene_id: string; dialogue_index: number }
 export type Session = { sessionId: string; episodeId: string; mode: SessionMode; sceneId: string; dialogueIndex: number; version: number; status: 'active' | 'completed' | 'abandoned'; updatedAt: string; checkpoint?: Checkpoint | null; resumeSnapshot?: { sceneId: string; dialogueIndex: number; mode: SessionMode } | null; interactions?: TutorInteraction[]; learningNotes?: string[]; tutorThreadId?: string | null; quizAttempts: { questionId: string; selectedOptionId: string; correct: boolean; attemptNumber: number; timestamp: string; feedback?: string | null }[] }
 
@@ -46,6 +50,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 const id = (value: string) => encodeURIComponent(value)
 export const api = {
+  speech: async (text: string, signal: AbortSignal): Promise<Blob> => {
+    const response = await fetch('/api/speech', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }), signal, cache: 'no-store' })
+    if (!response.ok) throw new ApiError('Voice is unavailable. Continue reading or retry.', response.status)
+    const audio = await response.blob()
+    if (!audio.size || audio.size > 4 * 1024 * 1024 || !audio.type.startsWith('audio/')) throw new Error('Invalid voice audio')
+    return audio
+  },
   uploadPhotos: (files: File[]) => { const body = new FormData(); files.forEach(file => body.append('files', file)); return request<{ job_id: string; document_id: string }>('/api/documents/photos', { method: 'POST', body }) },
   upload: (file: File) => { const body = new FormData(); body.append('file', file); return request<{ job_id: string; document_id: string }>('/api/documents', { method: 'POST', body }) },
   documents: () => request<{ documents: { document_id: string; filename: string; page_count: number; created_at: string }[] }>('/api/documents'),
@@ -60,6 +71,7 @@ export const api = {
   answer: (session: string, body: AnswerRequest) => request<Session>(`/api/sessions/${id(session)}/answers`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   raiseHand: (session: string, body: { request_id: string; expected_version: number }) => request<Session>(`/api/sessions/${id(session)}/raise-hand`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   askQuestion: (session: string, body: QuestionBody) => request<QuestionResponse>(`/api/sessions/${id(session)}/questions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  mascotChat: (body: MascotChatBody, signal?: AbortSignal) => request<MascotChatResponse>('/api/mascot/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal }),
   resume: (session: string, body: { request_id: string; expected_version: number }) => request<Session>(`/api/sessions/${id(session)}/resume`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   rewind: (session: string, body: RewindBody) => request<Session>(`/api/sessions/${id(session)}/rewind`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
 }

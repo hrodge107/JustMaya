@@ -4,6 +4,8 @@ import { putShelf, listShelf, removeShelf, clearShelf, type ShelfRecord } from '
 import MascotStage from '../player/MascotStage'
 import MotionToggle from '../player/MotionToggle'
 import HomeDialogue from './dialogueEngine'
+import { VoiceToggle } from '../speech/Speech'
+import { useSpeech } from '../speech/useSpeech'
 import { readDoneTurns, readFailTurn } from './script'
 import './home.css'
 
@@ -43,8 +45,9 @@ function clearJobParam() {
 }
 
 export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
+  const speech = useSpeech()
   const engineRef = useRef<HomeDialogue | null>(null)
-  if (!engineRef.current) engineRef.current = new HomeDialogue()
+  if (!engineRef.current) engineRef.current = new HomeDialogue(speech.controller)
   const engine = engineRef.current
   const snap = useSyncExternalStore(engine.subscribe, engine.getSnap)
   const [chip, setChip] = useState<Chip>({ visible: false, name: '', stage: '', pct: 0, error: '', jobId: '' })
@@ -103,6 +106,7 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
     const dialog = ref.current
     if (!dialog) return
     modalTokens.current.set(dialog, engine.beginModal())
+    speech.controller.setPaused(true)
     dialog.showModal()
   }
 
@@ -120,6 +124,7 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
     }
     engine.endModal(modalTokens.current.get(dialog) ?? 0)
     modalTokens.current.delete(dialog)
+    speech.controller.setPaused(!!document.querySelector('dialog[open]'))
   }
 
   // ---- Browser shelf (PoC): cache the ready episode + PDF in IndexedDB ----
@@ -514,7 +519,7 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
       <div className="maya-wrap">
         <MascotStage
           emotion={snap.emotion}
-          isSpeaking={snap.speaking}
+          isSpeaking={speech.enabled ? speech.status === 'playing' : snap.speaking}
           nodTrigger={0}
           customAnimationTrigger={null}
           lookTargetOffset={null}
@@ -689,6 +694,7 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
       onClick={e => { if (e.target === e.currentTarget) e.currentTarget.close() }}>
       <div className="vn-menu-heading"><h2 id="menuTitle">Menu</h2><button type="button" className="vn-quiet" onClick={e => e.currentTarget.closest('dialog')?.close()}>Close</button></div>
       <MotionToggle />
+      <VoiceToggle />
       <button type="button" className="vn-motion vn-menu-about" onClick={() => { openDialog(aboutDlg); menuDlg.current?.close() }}>
         <span>About</span><span aria-hidden="true">i</span>
       </button>

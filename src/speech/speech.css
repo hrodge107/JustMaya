@@ -1,0 +1,9 @@
+.vn-voice-status {
+  position: fixed; top: 96px; right: 12px; z-index: 15;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  max-width: min(360px, calc(100vw - 24px)); padding: 8px 12px;
+  border-radius: 12px; background: var(--paper, #f7f7fa); color: var(--ink, #30304c);
+  font-size: .875rem; box-shadow: 0 2px 8px rgb(0 0 0 / .2);
+}
+.vn-voice-status .vn-quiet { font: inherit; font-weight: 800; cursor: pointer; border: 0; min-height: 48px; border-radius: 12px; }
+.vn-voice-status .vn-quiet:focus-visible { outline: 3px solid #185a53; outline-offset: 2px; }

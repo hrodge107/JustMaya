@@ -5,6 +5,8 @@
 // narration loop keyed to the real upload job's stage. React subscribes to
 // a snapshot; the engine never owns DOM or network state.
 import { reducedMotion } from '../motionPreference'
+import { api } from '../learnerApi'
+import type { SpeechController } from '../speech/controller'
 import { FALLBACKS, GREETING, IDLE, INTENTS, PLAY_ASK, PLAY_NO_MITA, PLAY_NO_YOU, PLAY_YES_MITA, PLAY_YES_YOU, READ_STEPS, TALK_END, TALK_INTRO, pick, type HomeEmotion, type Turn } from './script'
 
 export const ADVANCE_MS = 10000
@@ -40,6 +42,11 @@ export default class HomeDialogue {
   private misses = 0
   private idleBag: Turn[] = []
   private rotStop: (() => void) | null = null
+  private voiceTurn = 0
+  private get voiceId() { return `home:${this.voiceTurn}` }
+
+  constructor(speech: SpeechController) { this.speech = speech }
+  private speech: SpeechController
 
   subscribe = (listener: () => void) => {
     this.listeners.add(listener)
@@ -59,20 +66,22 @@ export default class HomeDialogue {
     this.sayResolve?.()
     this.holdRelease?.()
     this.rotStop?.()
+    this.speech.release(this.voiceId)
   }
 
   // The dialogue surface click: while typing, finish the line and release any
   // pending hold so the next beat starts; while holding, advance.
   activate() {
     if (this.typing) { this.finishType(); this.holdRelease?.(); return }
+    this.speech.skip()
     this.holdRelease?.()
   }
 
   async start() {
     const t = this.seq
     this.set({ mode: 'greet' })
-    for (const line of GREETING) {
-      await this.say(line)
+    for (const [i, line] of GREETING.entries()) {
+      await this.say(line, undefined, 'Mita', GREETING.slice(i + 1, i + 4).map(turn => turn.t))
       if (t !== this.seq) return
       if (!await this.hold(ADVANCE_MS, t)) return
     }
@@ -124,15 +133,41 @@ export default class HomeDialogue {
     await wait(reducedMotion() ? 120 : 500)
     if (t !== this.seq) return
     this.set({ emotion: 'thinking' })
-    await wait(reducedMotion() ? 120 : 650)
+    const lines = await this.askMascot(question)
     if (t !== this.seq) return
-    const answer = this.route(question)
     this.set({ mode: 'idle' })
-    await this.say(answer, answer.fallback ? 'confused' : 'talking')
+    if (lines) {
+      // Model answer: each returned line is its own spoken beat.
+      for (const [i, line] of lines.entries()) {
+        await this.say({ t: line }, undefined, 'Mita', lines.slice(i + 1, i + 4))
+        if (t !== this.seq) return
+        if (i < lines.length - 1 && !await this.hold(1600, t)) return
+      }
+    } else {
+      // Degraded path: mascot chat unreachable or timed out — the local
+      // intent router still answers app questions offline.
+      const answer = this.route(question)
+      await this.say(answer, answer.fallback ? 'confused' : 'talking')
+    }
     if (t !== this.seq) return
     if (!await this.hold(ADVANCE_MS, t)) return
     this.set({ emotion: 'idle' })
     void this.ambient(this.seq)
+  }
+
+  // Talk is LLM-first: /api/mascot/chat answers in Mita's voice. Any failure
+  // (offline, 404/429/503, slow upstream) returns null and drops to INTENTS.
+  private async askMascot(question: string): Promise<string[] | null> {
+    try {
+      const { interaction } = await api.mascotChat(
+        { question, request_id: crypto.randomUUID() },
+        AbortSignal.timeout(20000),
+      )
+      const lines = interaction.lines?.map(line => line.trim()).filter(Boolean)
+      return lines?.length ? lines : null
+    } catch {
+      return null
+    }
   }
 
   async askNothing() {
@@ -168,6 +203,13 @@ export default class HomeDialogue {
   endModal(token: number) {
     if (!token || token !== this.seq) return
     this.set({ mode: 'idle', emotion: 'idle' })
+    if (this.speech.getSnapshot().enabled) {
+      // Keep the displayed line when enabling voice in Menu; replacing it
+      // here would waste its in-flight synthesis and speak a different line.
+      this.speech.setTurn(this.voiceId, this.snap.speaker === 'Mita' ? this.snap.line : '')
+      void this.hold(ADVANCE_MS, token).then(current => { if (current) void this.ambient(token) })
+      return
+    }
     void this.ambient(this.seq)
   }
 
@@ -193,7 +235,7 @@ export default class HomeDialogue {
       while (!stopped && t === this.seq) {
         await this.say(next(), 'reading')
         if (stopped || t !== this.seq) return
-        await wait(reducedMotion() ? 150 : 700 + Math.random() * 600)
+        if (!await this.hold(reducedMotion() ? 150 : 700 + Math.random() * 600, t)) return
       }
     })()
   }
@@ -205,7 +247,7 @@ export default class HomeDialogue {
     this.rotStop?.()
     const t = this.seq
     for (const [i, turn] of turns.entries()) {
-      await this.say(turn)
+      await this.say(turn, undefined, 'Mita', turns.slice(i + 1, i + 4).map(line => line.t))
       if (t !== this.seq) return
       if (!await this.hold(i < turns.length - 1 ? 1500 + Math.random() * 600 : 2000, t)) return
     }
@@ -231,6 +273,7 @@ export default class HomeDialogue {
     await wait(reducedMotion() ? 100 : 420)
     if (t !== this.seq) return
     await this.say(pick(PLAY_YES_MITA))
+    await this.speech.waitForDone(this.voiceId)
     if (t !== this.seq) return
     this.set({ emotion: 'idle', mode: 'idle' })
     void this.ambient(t)
@@ -274,13 +317,15 @@ export default class HomeDialogue {
     resolve?.()
   }
 
-  private say(line: Turn | string, emotion?: HomeEmotion, speaker: 'Mita' | 'You' = 'Mita'): Promise<number> {
+  private say(line: Turn | string, emotion?: HomeEmotion, speaker: 'Mita' | 'You' = 'Mita', next: string[] = []): Promise<number> {
     const t = this.seq
     const text = typeof line === 'string' ? line : line.t
     const mood = emotion ?? (typeof line === 'string' ? 'talking' : line.e ?? 'talking')
     this.fullText = text
     this.finishType()
     this.set({ speaker, emotion: mood, cue: false, line: text })
+    this.voiceTurn++
+    this.speech.setTurn(this.voiceId, speaker === 'Mita' ? text : '', next)
     return new Promise(res => {
       if (reducedMotion()) {
         this.set({ text, typing: false, speaking: false })
@@ -312,12 +357,34 @@ export default class HomeDialogue {
     const h = ++this.holdSeq
     this.set({ cue: true })
     return new Promise(res => {
+      let finished = false
+      let remaining = ms
+      let started: number | null = null
+      let timeout: ReturnType<typeof setTimeout> | undefined
+      const stopClock = () => {
+        clearTimeout(timeout)
+        if (started !== null) remaining = Math.max(0, remaining - (performance.now() - started))
+        started = null
+      }
       const done = () => {
+        if (finished) return
+        finished = true
+        stopClock()
+        unsubscribe()
         if (h === this.holdSeq) { this.set({ cue: false }); this.holdRelease = null }
         res(t === this.seq)
       }
-      const timeout = setTimeout(done, ms)
-      this.holdRelease = () => { clearTimeout(timeout); done() }
+      const sync = () => {
+        stopClock()
+        if (t !== this.seq || h !== this.holdSeq) { done(); return }
+        if (this.speech.getSnapshot().paused) return
+        if (remaining <= 0) { if (!this.speech.isWaiting(this.voiceId)) done(); return }
+        started = performance.now()
+        timeout = setTimeout(() => { stopClock(); sync() }, remaining)
+      }
+      const unsubscribe = this.speech.subscribe(sync)
+      this.holdRelease = done
+      sync()
     })
   }
 }

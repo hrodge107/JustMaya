@@ -2,6 +2,8 @@ import '@fontsource-variable/nunito'
 import { useEffect, useState } from 'react'
 import Home from './home/Home'
 import VisualNovelPlayer from './player/VisualNovelPlayer'
+import { SpeechProvider, VoiceStatus } from './speech/Speech'
+import { useSpeechController } from './speech/useSpeech'
 
 // Session deep links: ?session=<id> resumes a lesson directly. Playing an
 // episode from Learn writes the same param, so a reload returns to the
@@ -16,19 +18,29 @@ function setSessionParam(id: string, push: boolean) {
 }
 
 export default function App() {
+  return <SpeechProvider><StudyApp /></SpeechProvider>
+}
+
+function StudyApp() {
+  const speech = useSpeechController()
   const [sessionId, setSessionId] = useState<string | null>(sessionParam)
 
   useEffect(() => {
-    const onPop = () => setSessionId(sessionParam())
+    const onPop = () => { speech.skip(); setSessionId(sessionParam()) }
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
-  }, [])
+  }, [speech])
 
   function leavePlayer() {
+    speech.skip()
     setSessionParam('', true)
     setSessionId(null)
   }
 
-  if (sessionId) return <VisualNovelPlayer key={sessionId} sessionId={sessionId} onExit={leavePlayer} />
-  return <Home onPlay={session => { setSessionParam(session, true); setSessionId(session) }} />
+  return <>
+    {sessionId
+      ? <VisualNovelPlayer key={sessionId} sessionId={sessionId} onExit={leavePlayer} />
+      : <Home onPlay={session => { speech.skip(); setSessionParam(session, true); setSessionId(session) }} />}
+    <VoiceStatus />
+  </>
 }

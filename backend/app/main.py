@@ -12,9 +12,12 @@ from app.api.jobs import router as jobs_router
 from app.api.curriculum import router as curriculum_router
 from app.api.episodes import router as episodes_router
 from app.api.inspection import router as inspection_router
+from app.api.mascot import router as mascot_router
+from app.api.speech import router as speech_router
 from app.api.sessions import router as sessions_router
 from app.config import load_settings
 from app.errors import error_body
+from app.services.speech import SpeechService
 from app.storage.database import init_db
 from app.storage.documents import init_storage
 
@@ -30,7 +33,11 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         init_db(base)
         init_storage(base)
         app.state.data_dir = base
-        yield
+        app.state.speech = SpeechService(settings.speech_model_dir)
+        try:
+            yield
+        finally:
+            await app.state.speech.close()
 
     app = FastAPI(title="Meet Mita", lifespan=lifespan)
     app.state.settings = settings
@@ -40,6 +47,8 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     app.include_router(episodes_router)
     app.include_router(inspection_router)
     app.include_router(sessions_router)
+    app.include_router(mascot_router)
+    app.include_router(speech_router)
 
     @app.exception_handler(HTTPException)
     async def http_error(request: Request, exc: HTTPException) -> JSONResponse:

@@ -9,6 +9,8 @@ import RecallCheckpoint from './RecallCheckpoint'
 import { GalleryButton, PictureCardView, PictureNotesDialog, type EncounteredPictureNote, type PictureNoteView } from './PictureCardView'
 import { BACK_TO_LESSON, STRIP_LABEL, closingCue, drawCue } from './tutorCues'
 import useReadingAdvance from './useReadingAdvance'
+import { VoiceToggle } from '../speech/Speech'
+import { useSpeech } from '../speech/useSpeech'
 import './player.css'
 
 const REVEAL_MS = 18
@@ -148,6 +150,7 @@ function DialogueText({ id, text, revealed, onRevealed, onRevealProgress }: { id
 }
 
 export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: string; onExit(): void }) {
+  const speech = useSpeech()
   const [session, setSession] = useState<Session | null>(null)
   const [episode, setEpisode] = useState<Episode | null>(null)
   const [loadError, setLoadError] = useState<{ message: string; notFound: boolean } | null>(null)
@@ -302,6 +305,26 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
   const revealed = reduced || revealedLine === turnId || restoredTurn === turnId
   const dialogueError = answerError || advanceError
   const readingDelay = Math.max(3000, text.trim().split(/\s+/u).filter(Boolean).length * 300)
+  const voiceId = `player:${sessionId}:${turnId}`
+  const speechText = awaiting || !session || !scene ? '' : text
+  const upcoming: string[] = []
+  if (inQuestion && !awaiting && lastTurn) upcoming.push(...beats.slice(beatIndex + 1, beatIndex + 4))
+  else if (mode === 'playing' && scene) {
+    for (const nextScene of order.slice(order.indexOf(scene))) {
+      if (nextScene.kind === 'checkpoint') break
+      const lines = nextScene === scene ? nextScene.dialogue.slice((session?.dialogueIndex ?? 0) + 1) : nextScene.dialogue
+      upcoming.push(...lines.slice(0, 3 - upcoming.length).map(item => item.text))
+      if (upcoming.length === 3) break
+    }
+  }
+  const upcomingKey = JSON.stringify(upcoming)
+  useLayoutEffect(() => {
+    speech.controller.setTurn(voiceId, speechText, JSON.parse(upcomingKey))
+  }, [speech.controller, voiceId, speechText, upcomingKey])
+  useLayoutEffect(() => {
+    speech.controller.setPaused(menuOpen || backlogOpen || pictureView !== null)
+  }, [speech.controller, menuOpen, backlogOpen, pictureView])
+  useEffect(() => () => speech.controller.release(voiceId), [speech.controller, voiceId])
 
   useLayoutEffect(() => {
     followLatestRef.current = true
@@ -435,6 +458,7 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
 
   async function raiseHand() {
     if (!session || advancing.current || reloadRequired.current) return
+    speech.controller.skip()
     advancing.current = true
     raiseRequest.current ??= { request_id: crypto.randomUUID(), expected_version: session.version }
     setPending(true); setAdvanceError('')
@@ -505,6 +529,7 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
 
   async function jumpTo(entry: BacklogEntry) {
     if (!session || !entry.anchor || advancing.current || reloadRequired.current) return
+    speech.controller.skip()
     advancing.current = true
     const body = {
       request_id: crypto.randomUUID(),
@@ -533,6 +558,7 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
 
   async function resumeLesson() {
     if (!session || !inQuestion || awaiting || advancing.current || reloadRequired.current) return
+    speech.controller.skip()
     advancing.current = true
     const hadAnswers = tutorTurns.length > 0
     resumeRequest.current ??= { request_id: crypto.randomUUID(), expected_version: session.version }
@@ -571,6 +597,7 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
     if (!session || !(mode === 'playing' && line || mode === 'checkpoint' && session.checkpoint?.checkpointCompleted)) return
     if (mode === 'playing' && line && !revealed) { markRevealed(line.lineId); return }
     if (advancing.current) return
+    speech.controller.skip()
     advancing.current = true
     if (reloadRequired.current) {
       setPending(true); setAdvanceError('')
@@ -598,6 +625,7 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
 
   async function submitAnswer(optionId: string) {
     if (!session || !scene?.question || mode !== 'checkpoint' || advancing.current || session.checkpoint?.checkpointCompleted || reloadRequired.current || eliminated.has(optionId)) return
+    speech.controller.skip()
     advancing.current = true
     answerRequest.current ??= { questionId: scene.question.questionId, optionId, request_id: crypto.randomUUID(), expected_version: session.version }
     setSubmittedOptionId(answerRequest.current.optionId)
@@ -619,19 +647,20 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
     } finally { advancing.current = false; if (alive.current) setPending(false) }
   }
 
-  useReadingAdvance(turnId, readingDelay, !!checkpoint?.checkpointCompleted && revealed && !pending && !dialogueError && !needsReload, menuOpen, readingReset, () => { void advance() })
+  useReadingAdvance(turnId, readingDelay, !!checkpoint?.checkpointCompleted && revealed && !pending && !dialogueError && !needsReload, menuOpen || backlogOpen || pictureView !== null, readingReset, () => { void advance() }, speech.controller.isWaiting(voiceId))
 
   function activateDialogue() {
     if (pending && !(inQuestion && awaiting)) return
     if (returnBeat) {
       if (!revealed) { markRevealed(turnId); return }
+      speech.controller.skip()
       setReturnBeat(null)
       return
     }
     if (inQuestion) {
       if (!revealed) { markRevealed(turnId); return }
       if (awaiting) return
-      if (!onFinalBeat) setBeat({ id: lastTurn!.interactionId, index: beatIndex + 1 })
+      if (!onFinalBeat) { speech.controller.skip(); setBeat({ id: lastTurn!.interactionId, index: beatIndex + 1 }) }
       return
     }
     if (mode !== 'checkpoint') { void advance(); return }
@@ -647,7 +676,7 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
 
   const sceneNumber = order.indexOf(scene) + 1
   const emotion: Emotion = returnBeat ? (revealed ? 'listening' : 'talking') : inQuestion ? awaiting ? (revealed ? 'thinking' : 'listening') : lastTurn && !revealed ? 'talking' : 'listening' : mode === 'checkpoint' ? session.checkpoint?.isCorrect === true ? 'happy' : session.checkpoint?.isCorrect === false ? 'confused' : 'thinking' : mode === 'completed' ? 'happy' : line?.emotion ?? 'idle'
-  const isSpeaking = !revealed && (!!returnBeat || !!question || inQuestion && askPhase !== 'pending' || mode === 'playing' && line?.speaker === 'mascot')
+  const isSpeaking = speech.enabled ? speech.status === 'playing' : !revealed && (!!returnBeat || !!question || inQuestion && askPhase !== 'pending' || mode === 'playing' && line?.speaker === 'mascot')
   // Mita names every model-spoken turn; mascot/narrator stays as the speaker kind for animation.
   const speaker = inQuestion && awaiting ? 'You' : returnBeat || inQuestion || question || line ? 'Mita' : ''
   const canRaise = mode === 'playing' && !!line || mode === 'checkpoint'
@@ -774,6 +803,7 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
     }}>
       <div className="vn-menu-heading"><h2 id="episode-menu-title">Menu</h2><button ref={closeRef} type="button" className="vn-quiet" onClick={() => dialogRef.current?.close()}>Close</button></div>
       <MotionToggle />
+      <VoiceToggle />
       <button type="button" className="vn-motion vn-menu-backlog"
         onClick={() => { const from = menuRef.current; dialogRef.current?.close(); openBacklog(from) }}>
         <span>Backlog</span><span aria-hidden="true">^</span>
