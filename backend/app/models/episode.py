@@ -254,6 +254,8 @@ def validate_script(
             violations.append(f"{scene.sceneId}: question on a non-checkpoint scene")
         for line in scene.dialogue:
             line_ids.append(line.lineId)
+            if line.speaker != "mascot":
+                violations.append(f"{line.lineId}: speaker must be mascot")
             _check_refs(line.sourceRefs, line.webRefs, known_chunks,
                         supplied_web_urls, line.lineId, script.documentId, violations)
         question = scene.question

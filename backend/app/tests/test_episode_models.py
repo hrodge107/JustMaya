@@ -92,6 +92,13 @@ def test_valid_script_passes():
     assert validate_script(_script(_valid_scenes()), CHUNKS, OBJECTIVES, WEB_URLS) == []
 
 
+def test_narrator_speaker_flagged():
+    scenes = _valid_scenes()
+    scenes[0].dialogue.append(_line("line-n", speaker="narrator"))
+    violations = validate_script(_script(scenes), CHUNKS, OBJECTIVES, WEB_URLS)
+    assert any("line-n: speaker must be mascot" in v for v in violations)
+
+
 def test_enum_and_shape_enforced_by_schema():
     with pytest.raises(ValidationError):
         _line(emotion="angry")
