@@ -62,7 +62,10 @@ async def plan_curriculum(inventory: ConceptInventory, provider: MeteredProvider
         schema=_inline_schema(Plan), max_tokens=40000, preflight=True,
         cache_key="curriculum-roadmap-v1",
     )
-    plan = Plan.model_validate(result)
+    try:
+        plan = Plan.model_validate(result)
+    except ValueError as exc:
+        raise ValueError(f"INVALID_GENERATED_PLAN: {exc}") from exc
     episodes = [EpisodeOutline(
         episode_id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"{inventory.document_id}:episode:{index}")),
         title=item.title, objective_ids=item.objective_ids, concepts=item.concepts,
@@ -72,9 +75,11 @@ async def plan_curriculum(inventory: ConceptInventory, provider: MeteredProvider
     roadmap = Roadmap(curriculum_id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"{inventory.document_id}:curriculum")),
                       document_id=inventory.document_id, revision=1, episodes=episodes,
                       uncovered_reasons={item.concept_id: item.reason for item in plan.omissions})
-    validate_roadmap(roadmap, inventory)
-    if any(item.basis == "user" for episode in episodes for item in episode.concepts):
-        raise ValueError("Planner cannot claim a user-provided order")
+    try:
+        _complete_objective_concepts(roadmap, inventory)
+        validate_roadmap(roadmap, inventory)
+    except ValueError as exc:
+        raise ValueError(f"INVALID_GENERATED_PLAN: {exc}") from exc
     concepts = {item.id: item for item in inventory.concepts}
     edges = {(edge.source_id, edge.target_id) for edge in inventory.prerequisite_edges if edge.evidence}
     for episode in episodes:
@@ -92,3 +97,36 @@ async def plan_curriculum(inventory: ConceptInventory, provider: MeteredProvider
                 item.uncertainty.append("The claimed ordering basis could not be verified.")
             previous = item
     return roadmap
+
+
+def _complete_objective_concepts(roadmap: Roadmap, inventory: ConceptInventory) -> None:
+    concepts = {item.id: item for item in inventory.concepts}
+    objectives = {item.id: item for item in inventory.learning_objectives}
+    if not set(roadmap.uncovered_reasons) <= concepts.keys():
+        raise ValueError("Unknown omission concept ID")
+    for episode in roadmap.episodes:
+        selected = [item.concept_id for item in episode.concepts]
+        if len(selected) != len(set(selected)) or not set(selected) <= concepts.keys():
+            raise ValueError("Invalid or duplicate concept ID")
+        if len(episode.objective_ids) != len(set(episode.objective_ids)):
+            raise ValueError("Duplicate objective ID")
+        if any(item.basis == "user" for item in episode.concepts):
+            raise ValueError("Planner cannot claim a user-provided order")
+        required = set()
+        for oid in episode.objective_ids:
+            objective = objectives.get(oid)
+            if objective is None or not objective.concept_ids or not set(objective.concept_ids) <= concepts.keys():
+                raise ValueError("Invalid objective or inventory dependencies")
+            required.update(objective.concept_ids)
+        missing = required - set(selected)
+        for concept in inventory.concepts:
+            if concept.id in missing:
+                episode.concepts.append(OrderedConcept(
+                    concept_id=concept.id, basis="inferred",
+                    explanation="Added to support a selected objective.",
+                    uncertainty=["Teaching order for the added concept is inferred."],
+                ))
+        if missing:
+            episode.estimate_stale = True
+        for item in episode.concepts:
+            roadmap.uncovered_reasons.pop(item.concept_id, None)
