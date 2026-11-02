@@ -166,7 +166,7 @@ async function run() {
     assert.equal(await page.locator('.rail button .bi').count(), 3, 'Talk/Upload/Learn keep SVG icons')
     assert.equal(await page.locator('.rail button .bi:visible').count(), 3, 'icons always shown')
     assert.equal(await page.locator('#iconToggle').count(), 0, 'no display toggle')
-    await page.locator('.mascot-face').waitFor()
+    await page.locator('.mascot:visible').waitFor()
     await page.locator('.dlg-name').waitFor()
     assert.match(await dlgText(page), /\S/)
   })
@@ -187,13 +187,19 @@ async function run() {
   })
 
   await track('dialogue click completes then advances', async () => {
-    const before = await dlgText(page)
+    // Avatar preparation can outlast the initial typewriter. Start from an
+    // observed typing state rather than assuming the 11.5s wait landed in one.
     await page.locator('.dlg').click()
-    const completed = await dlgText(page)
-    assert.ok(completed.length >= before.length, 'click should reveal the full line')
+    await page.waitForFunction(() => {
+      const visible = document.querySelector('.dlg-text > [aria-hidden]')?.textContent
+      const full = document.querySelector('.dlg-text > [aria-live]')?.textContent
+      return visible && visible !== full
+    }, null, { timeout: 15000 })
+    const full = await page.locator('.dlg-text > [aria-live]').first().textContent()
     await page.locator('.dlg').click()
-    await page.waitForTimeout(600)
-    assert.notEqual(await dlgText(page), completed)
+    assert.equal(await page.locator('.dlg-text > [aria-hidden]').first().textContent(), full, 'click should reveal the full line')
+    await page.locator('.dlg').click()
+    await page.waitForFunction(full => document.querySelector('.dlg-text > [aria-live]')?.textContent !== full, full)
   })
 
   await track('Talk: overlay, You echo, single answer, ambient resumes', async () => {

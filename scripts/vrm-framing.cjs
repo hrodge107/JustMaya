@@ -111,7 +111,10 @@ async function faceLandmarks(page, tag) {
   check(`${tag}: renderer follows its pixel policy`, () => {
     if (m.softwareRenderer) assert.ok(m.bufferWidth * m.bufferHeight <= 960 * 540 + 2000,
       `software buffer=${m.bufferWidth}x${m.bufferHeight} ratio=${m.pixelRatio.toFixed(3)}`)
-    else assert.ok(m.pixelRatio <= Math.min(dpr, 2) + .001, `hardware ratio=${m.pixelRatio.toFixed(3)}, device ratio=${dpr}`)
+    else {
+      assert.ok(m.pixelRatio <= Math.min(dpr, 1) + .001, `hardware ratio=${m.pixelRatio.toFixed(3)}, device ratio=${dpr}`)
+      assert.ok(m.bufferWidth * m.bufferHeight <= 1920 * 1080, `hardware buffer=${m.bufferWidth}x${m.bufferHeight}`)
+    }
   })
   if (m.dialogTop !== null) {
     check(`${tag}: face clears the dialogue strip`, () => assert.ok(m.head.y < m.dialogTop, `head y=${m.head.y.toFixed(1)} vs dialogue top ${m.dialogTop.toFixed(1)}`))
@@ -121,7 +124,7 @@ async function faceLandmarks(page, tag) {
 async function matrix(browser) {
   const sessionId = await realSession()
   for (const vp of VIEWPORTS) {
-    const context = await browser.newContext({ viewport: { width: vp.width, height: vp.height }, reducedMotion: 'no-preference' })
+    const context = await browser.newContext({ viewport: { width: vp.width, height: vp.height }, deviceScaleFactor: 2, reducedMotion: 'no-preference' })
     const page = await context.newPage()
     page.on('pageerror', e => errors.push(`${vp.name}: ${e.message}`))
     await page.goto(`${base}/`)

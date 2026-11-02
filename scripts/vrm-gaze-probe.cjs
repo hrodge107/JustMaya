@@ -71,6 +71,8 @@ async function gaze(page, settleMs = 1200, { stable = false } = {}) {
 }
 
 async function mountCanvas(page, { idle = true, tracking = true, idleDelay = 0 } = {}) {
+  // The direct renderer harness must not orphan a second avatar from the app root.
+  await page.addInitScript(() => localStorage.setItem('meet-mita:motion', 'reduce'))
   // idle: true loads the clip, 'fail' requests it but aborts (failure path),
   // false configures no clip at all.
   if (idle === false || idle === 'fail') await page.route('**/mascot/sample-idle.fbx', route => route.abort())
@@ -239,7 +241,7 @@ async function directionMatrix(browser, idle) {
   const neutral = await gaze(page, 0, { stable: true })
   await shot('center')
   check(`${tag}: renderer pixel policy`, () => process.env.VRM_SOFTWARE_GL === '0'
-    ? assert.ok(!neutral.softwareRenderer && neutral.pixelRatio <= 2, `software=${neutral.softwareRenderer} ratio=${neutral.pixelRatio}`)
+    ? assert.ok(!neutral.softwareRenderer && neutral.pixelRatio <= 1, `software=${neutral.softwareRenderer} ratio=${neutral.pixelRatio}`)
     : assert.ok(neutral.softwareRenderer && neutral.bufferWidth * neutral.bufferHeight <= 960 * 540 + 2000,
       `software=${neutral.softwareRenderer} buffer=${neutral.bufferWidth}x${neutral.bufferHeight} ratio=${neutral.pixelRatio}`))
   const seen = {}

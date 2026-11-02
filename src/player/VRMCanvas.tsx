@@ -42,14 +42,19 @@ const EYE_CLOSE: Partial<Record<string, number>> = { thinking: 0.95 }
 const EXPR_KEYS = ['happy', 'relaxed', 'sad', 'surprised', 'aa', 'blink'] as const
 // Pointer-follow reach: <1 keeps her mostly front-facing (glance, not crane).
 const GAZE_TRACK = 0.65
-// ponytail: cap software-rendered full-screen avatars; hardware keeps native detail.
-const MAX_AVATAR_PIXELS = 960 * 540
+// ponytail: fixed budgets; add adaptive quality only after device measurements.
+const MAX_AVATAR_PIXELS = 1920 * 1080
+const MAX_SOFTWARE_PIXELS = 960 * 540
 
 // Verification seam: per-frame state snapshot for browser probes (directional
 // gaze, first-pose, lifecycle and perf checks in scripts/verify-vrm.cjs). Read
 // only — writes happen inside the render loop and never feed back into it.
 type VrmDebug = {
   ready: boolean
+  modelParsedAt: number
+  preparedAt: number
+  firstFrameAt: number
+  parallelCompile: boolean
   frames: number
   draws: number
   triangles: number
@@ -112,6 +117,10 @@ export default function VRMCanvas(props: Props) {
     if (!container) return
     const initialProps = current.current
     let disposed = false
+    let contextLost = false
+    let prepared = false
+    let firstFrameDone: (() => void) | undefined
+    const stopped = () => disposed || contextLost
     let frame = 0
     let renderer: THREE.WebGLRenderer | undefined
     let softwareRenderer = false
@@ -143,7 +152,8 @@ export default function VRMCanvas(props: Props) {
     const gazeQuat = new THREE.Quaternion()
     const gazeEuler = new THREE.Euler()
     const debug: VrmDebug = {
-      ready: false, frames: 0, draws: 0, triangles: 0,
+      ready: false, modelParsedAt: 0, preparedAt: 0, firstFrameAt: 0, parallelCompile: false,
+      frames: 0, draws: 0, triangles: 0,
       geometries: 0, textures: 0, programs: 0,
       pointerX: 0, pointerY: 0, lookX: 0, lookY: 0,
       headYaw: 0, headPitch: 0, eyeYaw: 0, eyePitch: 0,
@@ -193,8 +203,8 @@ export default function VRMCanvas(props: Props) {
       if (!renderer) return
       clearInput()
       const width = Math.max(container.clientWidth, 1), height = Math.max(container.clientHeight, 1)
-      const softwarePixelRatio = Math.sqrt(MAX_AVATAR_PIXELS / (width * height))
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, softwareRenderer ? softwarePixelRatio : 2))
+      const pixelBudget = softwareRenderer ? MAX_SOFTWARE_PIXELS : MAX_AVATAR_PIXELS
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1, Math.sqrt(pixelBudget / (width * height))))
       renderer.setSize(width, height, false); camera.aspect = width / height; camera.updateProjectionMatrix()
       debug.pixelRatio = renderer.getPixelRatio()
       debug.bufferWidth = renderer.domElement.width; debug.bufferHeight = renderer.domElement.height
@@ -237,10 +247,17 @@ export default function VRMCanvas(props: Props) {
     const clearInput = () => { pointerX = 0; pointerY = 0; tapUntil = 0; tapPending = false; tapDownAt = 0 }
     // Pointer leaving the document entirely — relatedTarget is null.
     const away = (event: PointerEvent) => { if (event.pointerType !== 'touch' && !event.relatedTarget) clearInput() }
-    const lost = (event: Event) => { event.preventDefault(); if (!disposed) current.current.onError() }
+    const lost = (event: Event) => {
+      event.preventDefault()
+      if (stopped()) return
+      contextLost = true
+      cancelAnimationFrame(frame); frame = 0
+      firstFrameDone?.()
+      current.current.onError()
+    }
     const tick = (now: number) => {
       frame = 0
-      if (disposed || document.hidden || !renderer || !vrm) return
+      if (stopped() || !prepared || document.hidden || !renderer || !vrm) return
       const wallDt = last ? Math.max((now - last) / 1000, 0) : 0
       const dt = Math.min(wallDt, .05)
       // Gaze follows elapsed time; physics, gestures, and animation keep the 50ms clamp.
@@ -325,7 +342,20 @@ export default function VRMCanvas(props: Props) {
         vrm.lookAt.pitch = THREE.MathUtils.damp(vrm.lookAt.pitch, lookY * 8 + saccadeY * 35, 6, wallDt)
       }
       vrm.update(dt)
-      renderer.render(scene, camera)
+      try { renderer.render(scene, camera) }
+      catch {
+        contextLost = true
+        firstFrameDone?.()
+        current.current.onError()
+        return
+      }
+      if (stopped()) return
+      if (!debug.ready) {
+        debug.firstFrameAt = performance.now()
+        debug.ready = true
+        setReady(true)
+        firstFrameDone?.(); firstFrameDone = undefined
+      }
       debug.frames++
       debug.pointerX = pointerX; debug.pointerY = pointerY
       debug.lookX = lookX; debug.lookY = lookY
@@ -355,12 +385,15 @@ export default function VRMCanvas(props: Props) {
     const visibility = () => {
       clearInput()
       if (document.hidden) { cancelAnimationFrame(frame); frame = 0; last = 0 }
-      else if (!frame && vrm && !disposed) frame = requestAnimationFrame(tick)
+      else if (!frame && prepared && vrm && !stopped()) frame = requestAnimationFrame(tick)
     }
     const start = async () => {
       try {
+        setReady(false)
+        setIdlePlaying(false)
         renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true })
         const gl = renderer.getContext()
+        debug.parallelCompile = !!gl.getExtension('KHR_parallel_shader_compile')
         const debugInfo = gl.getExtension('WEBGL_debug_renderer_info')
         softwareRenderer = !!debugInfo && /swiftshader|llvmpipe|software/i.test(gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL))
         debug.softwareRenderer = softwareRenderer
@@ -376,14 +409,15 @@ export default function VRMCanvas(props: Props) {
         window.addEventListener('scroll', clearInput, { passive: true, capture: true })
         document.addEventListener('visibilitychange', visibility)
         const buffer = await fetchVRM(initialProps.modelUrl)
-        if (disposed) return
+        if (stopped()) return
         const loader = new GLTFLoader()
         loader.register(parser => new VRMLoaderPlugin(parser))
         const gltf = await loader.parseAsync(buffer, new URL('.', new URL(initialProps.modelUrl, location.href)).href)
         const loaded = gltf.userData.vrm as VRM | undefined
         if (!loaded) { VRMUtils.deepDispose(gltf.scene); throw new Error('Model is not a VRM') }
-        if (disposed) { VRMUtils.deepDispose(loaded.scene); return }
+        if (stopped()) { VRMUtils.deepDispose(loaded.scene); return }
         vrm = loaded
+        debug.modelParsedAt = performance.now()
         VRMUtils.rotateVRM0(vrm)
         scene.add(vrm.scene)
         vrm.scene.updateMatrixWorld(true)
@@ -393,6 +427,14 @@ export default function VRMCanvas(props: Props) {
         // bounds (native scale), never a hand-tuned offset; applyFraming
         // re-locks it on every resize.
         const bounds = new THREE.Box3().setFromObject(vrm.scene)
+        // Culling is disabled below; sorting only needs a conservative sphere.
+        // Reuse the posed bounds instead of skinning every vertex a second time.
+        vrm.scene.traverse(obj => {
+          if ((obj as THREE.SkinnedMesh).isSkinnedMesh) {
+            const mesh = obj as THREE.SkinnedMesh
+            if (mesh.boundingBox) mesh.boundingSphere = mesh.boundingBox.getBoundingSphere(new THREE.Sphere())
+          }
+        })
         frameHeight = bounds.max.y - bounds.min.y
         crownPosition.set((bounds.min.x + bounds.max.x) / 2, bounds.max.y, (bounds.min.z + bounds.max.z) / 2)
         frameAimY = bounds.max.y - frameHeight * .26
@@ -432,9 +474,60 @@ export default function VRMCanvas(props: Props) {
         }
         if (vrm.lookAt) vrm.lookAt.autoUpdate = false
         mixer = new THREE.AnimationMixer(vrm.scene)
-        setReady(true)
-        debug.ready = true
-        if (!document.hidden) frame = requestAnimationFrame(tick)
+        vrm.update(0)
+        const textures = new Set<THREE.Texture>()
+        vrm.scene.traverse(obj => {
+          if (!(obj as THREE.Mesh).isMesh) return
+          const material = (obj as THREE.Mesh).material
+          for (const m of Array.isArray(material) ? material : [material]) {
+            for (const value of Object.values(m)) if (value?.isTexture) textures.add(value)
+            if (m instanceof THREE.ShaderMaterial) {
+              for (const uniform of Object.values(m.uniforms)) {
+                if (uniform.value?.isTexture) textures.add(uniform.value)
+              }
+            }
+          }
+        })
+        let batchStart = performance.now()
+        for (const texture of textures) {
+          if (stopped()) return
+          renderer.initTexture(texture)
+          if (performance.now() - batchStart >= 8) {
+            await new Promise<void>(resolve => setTimeout(resolve, 0))
+            if (stopped()) return
+            batchStart = performance.now()
+          }
+        }
+        await renderer.compileAsync(scene, camera)
+        if (stopped()) return
+        // First use also uploads skin/morph buffers and initializes shader uniforms.
+        // Warm one mesh at a time behind the hidden figure, including nested meshes.
+        const meshes: { mesh: THREE.Mesh; mask: number }[] = []
+        vrm.scene.traverseVisible(obj => {
+          if ((obj as THREE.Mesh).isMesh && obj.layers.test(camera.layers)) {
+            meshes.push({ mesh: obj as THREE.Mesh, mask: obj.layers.mask })
+          }
+        })
+        for (const { mesh } of meshes) mesh.layers.mask = 0
+        try {
+          for (const { mesh, mask } of meshes) {
+            if (stopped()) return
+            mesh.layers.mask = mask
+            renderer.render(scene, camera)
+            mesh.layers.mask = 0
+            await new Promise<void>(resolve => setTimeout(resolve, 0))
+            if (stopped()) return
+          }
+        } finally {
+          for (const { mesh, mask } of meshes) mesh.layers.mask = mask
+        }
+        debug.preparedAt = performance.now()
+        prepared = true
+        await new Promise<void>(resolve => {
+          firstFrameDone = resolve
+          if (!document.hidden && !frame) frame = requestAnimationFrame(tick)
+        })
+        if (stopped()) return
         // Optional idle clip: retargeted tracks drive hips/spine/legs only —
         // head, neck, shoulders, arms and hands are filtered out so the gaze
         // servo, rest stance and gestures keep their channels uncontested.
@@ -442,7 +535,7 @@ export default function VRMCanvas(props: Props) {
           const model = vrm
           try {
             const clip = await retargetAnimationFromUrl(initialProps.idleUrl, model, { logWarnings: false })
-            if (disposed) return
+            if (stopped()) return
             if (clip) {
               const drop = ['head', 'neck', 'leftShoulder', 'rightShoulder', 'leftUpperArm', 'rightUpperArm', 'leftLowerArm', 'rightLowerArm', 'leftHand', 'rightHand']
                 .map(n => model.humanoid.getNormalizedBoneNode(n as VRMHumanBoneName)?.name).filter(Boolean)
@@ -457,11 +550,12 @@ export default function VRMCanvas(props: Props) {
             }
           } catch { /* optional idle animation */ }
         }
-      } catch { if (!disposed) current.current.onError() }
+      } catch { if (!stopped()) current.current.onError() }
     }
     void start()
     return () => {
       disposed = true
+      firstFrameDone?.()
       cancelAnimationFrame(frame)
       if (window.__mitaVrm === debug) delete window.__mitaVrm
       window.removeEventListener('pointermove', track)
@@ -481,7 +575,7 @@ export default function VRMCanvas(props: Props) {
 
   return <>
     {!ready && props.fallback}
-    <figure className="mascot vrm-mascot" data-emotion={props.emotion} data-speaking={props.isSpeaking || undefined} data-nod-trigger={props.nodTrigger} data-idle-playing={idlePlaying || undefined} hidden={!ready} aria-label={`Mita, ${props.emotion}${props.isSpeaking ? ', speaking' : ''}`}>
+    <figure className="mascot vrm-mascot" data-emotion={props.emotion} data-speaking={props.isSpeaking || undefined} data-nod-trigger={props.nodTrigger} data-idle-playing={idlePlaying || undefined} style={{ visibility: ready ? 'visible' : 'hidden' }} aria-hidden={!ready} aria-label={`Mita, ${props.emotion}${props.isSpeaking ? ', speaking' : ''}`}>
       <div className="vrm-viewport" ref={host} />
     </figure>
   </>
