@@ -1,4 +1,4 @@
-export type Job = { job_id: string; document_id: string; status: string; stage: string | null; execution_state: string | null; error: string | null; can_run: boolean }
+export type Job = { job_id: string; document_id: string; status: string; stage: string | null; execution_state: string | null; error: string | null; can_run: boolean; warnings?: string[] }
 export type EpisodeOutline = { episode_id: string; title: string; objective_ids: string[]; status: 'selected' | 'planned_only'; estimated_minutes: number; warnings: string[] }
 export type Roadmap = { revision: number; confirmed: boolean; episodes: EpisodeOutline[]; objectives: { id: string; description: string }[]; concepts: { id: string; title: string; uncertainty?: string[] }[]; uncovered_concept_ids: string[]; uncovered_reasons: Record<string, string> }
 export type Emotion = 'idle' | 'talking' | 'thinking' | 'happy' | 'confused' | 'listening'
@@ -46,6 +46,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 const id = (value: string) => encodeURIComponent(value)
 export const api = {
+  uploadPhotos: (files: File[]) => { const body = new FormData(); files.forEach(file => body.append('files', file)); return request<{ job_id: string; document_id: string }>('/api/documents/photos', { method: 'POST', body }) },
   upload: (file: File) => { const body = new FormData(); body.append('file', file); return request<{ job_id: string; document_id: string }>('/api/documents', { method: 'POST', body }) },
   documents: () => request<{ documents: { document_id: string; filename: string; page_count: number; created_at: string }[] }>('/api/documents'),
   job: (job: string) => request<Job>(`/api/jobs/${id(job)}`),

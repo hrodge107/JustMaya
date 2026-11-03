@@ -25,9 +25,11 @@ def get_episode(episode_id: str, request: Request):
 
 @router.get("/api/episodes/{episode_id}/pictures/{name}")
 def get_picture(episode_id: str, name: str, request: Request):
-    root = (request.app.state.data_dir / "pictures" / episode_id).resolve()
+    base = (request.app.state.data_dir / "pictures").resolve()
+    root = (base / episode_id).resolve()
     path = (root / name).resolve()
-    if not _NAME.fullmatch(name) or path.parent != root or not path.is_file():
+    if (not re.fullmatch(r"[A-Za-z0-9_-]+", episode_id) or root.parent != base
+            or not _NAME.fullmatch(name) or path.parent != root or not path.is_file()):
         return JSONResponse(
             status_code=404, content=error_body("NOT_FOUND", "Picture not found.")
         )

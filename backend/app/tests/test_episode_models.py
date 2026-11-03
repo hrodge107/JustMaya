@@ -92,6 +92,13 @@ def test_valid_script_passes():
     assert validate_script(_script(_valid_scenes()), CHUNKS, OBJECTIVES, WEB_URLS) == []
 
 
+def test_narrator_speaker_flagged():
+    scenes = _valid_scenes()
+    scenes[0].dialogue.append(_line("line-n", speaker="narrator"))
+    violations = validate_script(_script(scenes), CHUNKS, OBJECTIVES, WEB_URLS)
+    assert any("line-n: speaker must be mascot" in v for v in violations)
+
+
 def test_enum_and_shape_enforced_by_schema():
     with pytest.raises(ValidationError):
         _line(emotion="angry")
@@ -150,6 +157,26 @@ def test_learner_view_strips_option_responses():
     assert "feedback" not in question and "correctOptionId" not in question
     persisted = script.model_dump()["scenes"][1]["question"]
     assert all("mistakeResponse" in o for o in persisted["options"])
+
+
+def test_learner_view_shuffles_options_deterministically():
+    from app.models.episode import learner_view
+    script = _script(_valid_scenes())
+    first = [o["optionId"] for o in
+             learner_view(script)["scenes"][1]["question"]["options"]]
+    repeat = [o["optionId"] for o in
+              learner_view(script)["scenes"][1]["question"]["options"]]
+    assert first == repeat and set(first) == {"a", "b", "c"}
+    # The persisted order keys option "a" first; projected positions of the
+    # keyed option must vary across episodes instead of pinning to index 0.
+    positions = {
+        next(i for i, o in enumerate(
+            learner_view(_script(_valid_scenes(), episodeId=f"ep-{n}"))
+            ["scenes"][1]["question"]["options"])
+        if o["optionId"] == "a")
+        for n in range(8)
+    }
+    assert len(positions) > 1
 
 
 def test_question_invariants_flagged():

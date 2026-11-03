@@ -1,4 +1,6 @@
-from pydantic import BaseModel
+from typing import Literal
+
+from pydantic import BaseModel, Field
 
 
 class DocumentRecord(BaseModel):
@@ -24,6 +26,7 @@ class JobStatusResponse(BaseModel):
     error: str | None = None
     execution_state: str | None = None
     can_run: bool = False
+    warnings: list[str] = Field(default_factory=list)
     token_usage: dict = {
         "prompt_tokens": 0,
         "completion_tokens": 0,
@@ -54,6 +57,7 @@ class ExtractedDocument(BaseModel):
     pages: list[DocumentPage]
     sections: list[DocumentSection] = []
     image_only_document: bool = False
+    source_kind: Literal["pdf", "photos"] = "pdf"
 
 
 class SourceRef(BaseModel):
@@ -78,3 +82,24 @@ class SourceChunk(BaseModel):
     page_start: int  # 1-based
     page_end: int  # 1-based
     section_id: str | None = None
+
+
+class PhotoOmission(BaseModel):
+    line_number: int = Field(ge=1)
+    reason: str = Field(min_length=1, max_length=300)
+
+
+class PhotoText(BaseModel):
+    status: Literal["readable", "partial", "unreadable"]
+    text: str = Field(max_length=100_000)
+    omissions: list[PhotoOmission] = Field(max_length=500)
+
+
+class PhotoPage(BaseModel):
+    filename: str
+    storage_path: str
+    result: PhotoText | None = None
+
+
+class PhotoSource(BaseModel):
+    pages: list[PhotoPage]

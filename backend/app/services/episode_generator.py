@@ -216,7 +216,7 @@ async def generate_episode(
     system = _system()
     user = _user(roadmap, lesson_context, passages, repair=repair)
 
-    await provider.require_input_budget(
+    input_token_count = await provider.require_input_budget(
         system=system, user=user,
         limit=settings.generation_max_input_tokens,
         exc=lambda count, limit: GenerationError(
@@ -225,6 +225,15 @@ async def generate_episode(
     )
 
     async def call(user_text: str) -> dict:
+        count = input_token_count
+        if user_text != user:
+            count = await provider.require_input_budget(
+                system=system, user=user_text,
+                limit=settings.generation_max_input_tokens,
+                exc=lambda count, limit: GenerationError(
+                    f"GENERATION_INPUT_TOO_LARGE: input {count} tokens exceeds {limit}"
+                ),
+            )
         return await provider.generate_structured(
             job_id=job_id,
             stage=GENERATION_STAGE,
@@ -234,6 +243,7 @@ async def generate_episode(
             max_tokens=settings.generation_max_tokens,
             preflight=True,
             cache_key=CACHE_KEY,
+            input_token_count=count,
         )
 
     script, problems, violations = _interpret(

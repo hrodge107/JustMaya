@@ -143,7 +143,7 @@ def _system() -> str:
         "scope is never a refusal: when a responsible general-knowledge "
         "answer exists, give it instead of declining. If genuinely "
         "uncertain, say so plainly rather than guessing. Do not claim to "
-        "have checked the entire PDF when only retrieved passages were "
+        "have checked the entire document when only retrieved passages were "
         "checked, and never present model knowledge as document evidence. "
         "Begin with the substance — never open with a statement about "
         "what the passages or document do or do not cover; any scope note "

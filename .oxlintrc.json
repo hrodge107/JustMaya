@@ -1,6 +1,12 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "plugins": ["react", "typescript", "oxc"],
+  "ignorePatterns": [
+    // Generated rolldown bundle (build artifact of stage-src.js) — bundled
+    // three.js internals trip react/rules-of-hooks on their useMultisampledRTT
+    // helper names. Authored source stays fully linted.
+    "prototype/vrm/stage.js"
+  ],
   "rules": {
     "react/rules-of-hooks": "error",
     "react/only-export-components": ["warn", { "allowConstantExport": true }]

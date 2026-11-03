@@ -8,6 +8,14 @@ function valid(buffer: ArrayBuffer) {
 }
 
 export async function fetchVRM(url: string): Promise<ArrayBuffer> {
+  // Development model files can change without their URL changing.
+  if (import.meta.env.DEV) {
+    const response = await fetch(url, { cache: 'no-store' })
+    if (!response.ok || Number(response.headers.get('content-length')) > MAX_BYTES) throw new Error('VRM download failed')
+    const buffer = await response.arrayBuffer()
+    if (!valid(buffer)) throw new Error('Invalid VRM file')
+    return buffer
+  }
   const cached = memory.get(url)
   if (cached) return cached.slice(0)
   let pending = inFlight.get(url)

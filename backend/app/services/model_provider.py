@@ -35,6 +35,7 @@ class ModelProviderError(Exception):
         self.code = code
         self.message = message
         self.retryable = retryable
+        self.usage: dict[str, Any] = {}
 
 
 class GenerationProvider(Protocol):
@@ -55,6 +56,8 @@ class GenerationProvider(Protocol):
         schema: dict[str, Any],
         max_tokens: int | None = None,
         cache_key: str | None = None,
+        images: list[str] | None = None,
+        reasoning_effort: str | None = None,
     ) -> StructuredResult: ...
 
     async def generate_image(
@@ -64,7 +67,9 @@ class GenerationProvider(Protocol):
         user: str = "",
     ) -> ImageResult: ...
 
-    async def count_input_tokens(self, *, system: str, user: str) -> int: ...
+    async def count_input_tokens(
+        self, *, system: str, user: str, images: list[str] | None = None,
+    ) -> int: ...
 
 
 _MAX_ATTEMPTS = 3
@@ -167,25 +172,38 @@ class MetaProvider:
         schema: dict[str, Any],
         max_tokens: int | None = None,
         cache_key: str | None = None,
+        images: list[str] | None = None,
+        reasoning_effort: str | None = None,
     ) -> StructuredResult:
         if _has_recursion(schema):
             raise ModelProviderError(
                 "SCHEMA_UNSUPPORTED", "Recursive JSON schemas are not supported by the endpoint"
             )
         payload = self._payload(system, user, max_tokens, cache_key)
+        if reasoning_effort is not None:
+            payload["reasoning_effort"] = reasoning_effort
+        if images:
+            payload["messages"][1]["content"] = [
+                {"type": "text", "text": user},
+                *[{"type": "image_url", "image_url": {"url": url}} for url in images],
+            ]
         payload["response_format"] = {
             "type": "json_schema",
             "json_schema": {"name": "response", "schema": _strictify(schema), "strict": True},
         }
         body = await self._request(self._url, payload)
-        raw = self._content(body)
         try:
-            data = json.loads(raw)
-        except (json.JSONDecodeError, TypeError) as exc:
-            raise ModelProviderError(
-                "BAD_JSON", f"Model output is not valid JSON: {raw[:200]!r}"
-            ) from exc
-        _validate(data, schema)
+            raw = self._content(body)
+            if images and body.get("choices", [{}])[0].get("finish_reason") != "stop":
+                raise ModelProviderError("PHOTO_OCR_INCOMPLETE", "Photo transcription did not finish. Retry the job.")
+            try:
+                data = json.loads(raw)
+            except (json.JSONDecodeError, TypeError) as exc:
+                raise ModelProviderError("BAD_JSON", "Model output is not valid JSON.") from exc
+            _validate(data, schema)
+        except ModelProviderError as exc:
+            exc.usage = body.get("usage", {})
+            raise
         return StructuredResult(data=data, usage=body.get("usage", {}))
 
     async def generate_image(
@@ -237,19 +255,29 @@ class MetaProvider:
             usage=body.get("usage", {}),
         )
 
-    async def count_input_tokens(self, *, system: str, user: str) -> int:
+    async def count_input_tokens(
+        self, *, system: str, user: str, images: list[str] | None = None,
+    ) -> int:
         """Server-side input-token count for a would-be request (no generation).
 
         Hits the Responses API's counting endpoint; its rendering of
         instructions+input may differ from chat-completions by a few tokens —
         budgets need magnitude, not exactness.
         """
-        body = await self._request(
-            self._count_url,
-            {"model": self._model, "instructions": system, "input": user},
-        )
+        content: Any = user
+        if images:
+            content = [{"role": "user", "content": [
+                {"type": "input_text", "text": user},
+                *[{"type": "input_image", "image_url": url} for url in images],
+            ]}]
+        body = await self._request(self._count_url, {
+            "model": self._model, "instructions": system, "input": content,
+        })
         try:
-            return int(body["input_tokens"])
+            count = int(body["input_tokens"])
+            if count < 0:
+                raise ValueError("negative token count")
+            return count
         except (KeyError, TypeError, ValueError) as exc:
             raise ModelProviderError(
                 "BAD_RESPONSE", f"Unexpected count response: {str(body)[:200]}"

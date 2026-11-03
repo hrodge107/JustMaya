@@ -1,7 +1,8 @@
 import sys
 from pathlib import Path
+from typing import Literal
 
-from pydantic import SecretStr, ValidationError
+from pydantic import Field, SecretStr, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -26,6 +27,16 @@ class Settings(BaseSettings):
 
     max_upload_bytes: int = 20 * 1024 * 1024
     max_upload_pages: int = 100
+    photo_max_count: int = 5
+    photo_max_bytes: int = 10 * 1024 * 1024
+    photo_total_bytes: int = 20 * 1024 * 1024
+    photo_max_pixels: int = 40_000_000
+    photo_long_edge: int = 2048
+    photo_normalized_bytes: int = 3 * 1024 * 1024
+    photo_input_tokens: int = 8_000
+    photo_output_tokens: int = 48_000
+    photo_extract_budget: int = 300_000
+    photo_job_budget: int = 900_000
 
     chroma_dir: Path = DEFAULT_DATA_DIR / "chroma"
     # ponytail: 180 BPE tokens stays well under MiniLM-L6's 256-word-piece
@@ -50,6 +61,9 @@ class Settings(BaseSettings):
     analysis_web_timeout_seconds: float = 5.0
     # Survey emits slim per-window output, so wider windows stay cheap.
     analysis_survey_max_chars: int = 6000
+    analysis_detail_max_chars: int = Field(default=6000, gt=0)
+    analysis_reasoning_effort: Literal["minimal", "low", "medium", "high", "xhigh"] | None = "low"
+
     # Detail pass: confirmed Episode-1 evidence pages + margin, hard-capped —
     # over-cap fails actionable like the other input bounds.
     detail_context_margin_pages: int = 1
@@ -84,6 +98,11 @@ class Settings(BaseSettings):
     # max is also the hard cap on generated images per episode.
     picture_card_min: int = 4
     picture_card_max: int = 10
+
+    @field_validator("analysis_reasoning_effort", mode="before")
+    @classmethod
+    def parse_analysis_reasoning_effort(cls, value):
+        return None if value == "null" else value
 
 
 def load_settings() -> Settings:

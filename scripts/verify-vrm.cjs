@@ -8,13 +8,127 @@ const models = [process.env.VRM_TEST_MODEL, process.env.VRM0_TEST_MODEL]
 const fbx = process.env.VRM_TEST_FBX
 if (models.some(path => !path || !fs.existsSync(path)) || !fbx || !fs.existsSync(fbx)) throw new Error('VRM_TEST_MODEL, VRM0_TEST_MODEL and VRM_TEST_FBX must point to test fixtures')
 
+async function preparationChecks(browser) {
+  for (const mode of ['compile-unmount', 'compile-hidden', 'upload-unmount', 'upload-context-loss', 'warm-unmount', 'ready-context-loss', 'no-parallel']) {
+    const context = await browser.newContext({ viewport: { width: 406, height: 738 }, deviceScaleFactor: 2, reducedMotion: 'no-preference' })
+    try {
+      await context.addInitScript(mode => {
+        localStorage.setItem('meet-mita:motion', 'reduce')
+        window.__uploads = 0; window.__draws = 0; window.__compileChecks = 0
+        window.__holdCompile = mode.startsWith('compile-')
+        for (const C of [WebGLRenderingContext, WebGL2RenderingContext]) {
+          const extension = C.prototype.getExtension
+          C.prototype.getExtension = function (name) {
+            if (name === 'KHR_parallel_shader_compile') {
+              if (mode === 'no-parallel') return null
+              if (mode.startsWith('compile-')) return { COMPLETION_STATUS_KHR: 0x91b1 }
+            }
+            return extension.call(this, name)
+          }
+          const parameter = C.prototype.getProgramParameter
+          C.prototype.getProgramParameter = function (program, name) {
+            if (name === 0x91b1) { window.__compileChecks++; if (mode.startsWith('compile-')) return !window.__holdCompile }
+            return parameter.call(this, program, name)
+          }
+          for (const name of ['texImage2D', 'texSubImage2D', 'texImage3D', 'texSubImage3D']) {
+            const original = C.prototype[name]
+            if (original) C.prototype[name] = function (...args) {
+              const result = original.apply(this, args)
+              window.__uploads++
+              if (window.__interruptUpload && window.__mitaVrm?.modelParsedAt > 0) { const interrupt = window.__interruptUpload; window.__interruptUpload = null; interrupt(this.canvas) }
+              return result
+            }
+          }
+          const draw = C.prototype.drawElements
+          C.prototype.drawElements = function (...args) {
+            window.__draws++
+            const result = draw.apply(this, args)
+            if (mode === 'warm-unmount' && window.__mitaVrm?.modelParsedAt > 0) window.__unmountVrm()
+            return result
+          }
+        }
+      }, mode)
+      const page = await context.newPage()
+      const errors = []
+      page.on('pageerror', e => errors.push(e.message))
+      await page.route('**/__fixture/avatar.vrm', route => route.fulfill({ body: fs.readFileSync(models[0]), contentType: 'model/gltf-binary' }))
+      // Avoid mounting the app's avatar: this harness owns exactly one renderer.
+      await page.route('**/api/**', route => route.fulfill({ json: { documents: [] } }))
+      await page.goto(`${base}/?vrm-preparation-test`)
+      await page.evaluate(async mode => {
+        const [{ default: React }, { default: ReactDOM }, { default: VRMCanvas }] = await Promise.all([
+          import('/node_modules/.vite/deps/react.js'), import('/node_modules/.vite/deps/react-dom_client.js'), import('/src/player/VRMCanvas.tsx'),
+        ])
+        const host = document.createElement('main'); document.body.append(host)
+        const root = ReactDOM.createRoot(host)
+        window.__unmountVrm = () => root.unmount()
+        window.__interruptUpload = mode === 'upload-unmount' ? () => root.unmount()
+          : mode === 'upload-context-loss' ? canvas => canvas.dispatchEvent(new Event('webglcontextlost', { cancelable: true })) : null
+        root.render(React.createElement(VRMCanvas, { emotion: 'idle', isSpeaking: false, nodTrigger: 0, enablePointerTracking: false, modelUrl: '/__fixture/avatar.vrm', onError: () => { window.__preparationFailed = true; root.unmount() } }))
+      }, mode)
+      if (mode.startsWith('compile-')) {
+        await page.waitForFunction(() => window.__compileChecks > 0)
+        assert.equal(await page.evaluate(() => window.__mitaVrm.ready), false)
+        await page.evaluate(() => {
+          Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange'))
+          Object.defineProperty(document, 'hidden', { configurable: true, value: false }); document.dispatchEvent(new Event('visibilitychange'))
+        })
+        const draws = await page.evaluate(() => window.__draws)
+        await page.waitForTimeout(100)
+        assert.equal(await page.evaluate(() => window.__draws), draws, 'visibility must not bypass preparation')
+        if (mode === 'compile-unmount') await page.evaluate(() => window.__unmountVrm())
+        else await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange')) })
+        await page.evaluate(() => { window.__holdCompile = false })
+        if (mode === 'compile-hidden') {
+          await page.waitForFunction(() => window.__mitaVrm?.preparedAt > 0)
+          assert.equal(await page.evaluate(() => window.__mitaVrm.ready), false, 'hidden preparation must not reveal/start animation')
+          const count = await page.evaluate(() => window.__draws)
+          await page.waitForTimeout(150)
+          assert.equal(await page.evaluate(() => window.__draws), count)
+          await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: false }); document.dispatchEvent(new Event('visibilitychange')) })
+        }
+      }
+      if (mode === 'compile-unmount' || mode === 'warm-unmount' || mode.startsWith('upload-')) {
+        await page.waitForFunction(() => !window.__mitaVrm)
+        const counts = await page.evaluate(() => [window.__uploads, window.__draws])
+        await page.waitForTimeout(200)
+        assert.deepEqual(await page.evaluate(() => [window.__uploads, window.__draws]), counts, 'cancelled preparation performs no more GPU work')
+        if (mode === 'upload-context-loss') assert.ok(await page.evaluate(() => window.__preparationFailed))
+      } else {
+        await page.waitForFunction(() => window.__mitaVrm?.ready)
+        const d = await page.evaluate(() => window.__mitaVrm)
+        assert.ok(d.modelParsedAt <= d.preparedAt && d.preparedAt <= d.firstFrameAt)
+        assert.equal(d.bufferWidth, 406); assert.equal(d.bufferHeight, 738)
+        if (mode === 'no-parallel') assert.equal(d.parallelCompile, false)
+        await page.setViewportSize({ width: 3840, height: 2160 })
+        await page.waitForFunction(() => window.__mitaVrm.bufferWidth === 960 || window.__mitaVrm.bufferWidth === 1920)
+        const resized = await page.evaluate(() => window.__mitaVrm)
+        assert.ok(resized.bufferWidth * resized.bufferHeight <= (resized.softwareRenderer ? 960 * 540 : 1920 * 1080))
+        if (mode === 'ready-context-loss') {
+          await page.evaluate(() => document.querySelector('.vrm-viewport canvas').getContext('webgl2').getExtension('WEBGL_lose_context').loseContext())
+          await page.waitForFunction(() => window.__preparationFailed && !window.__mitaVrm)
+          const draws = await page.evaluate(() => window.__draws)
+          await page.waitForTimeout(150)
+          assert.equal(await page.evaluate(() => window.__draws), draws)
+        }
+      }
+      assert.deepEqual(errors, [])
+      console.log(`PASS preparation ${mode}`)
+    } finally { await context.close() }
+  }
+}
+
 async function main() {
-  const browser = await chromium.launch({ channel: 'msedge', headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] })
+  const browser = await chromium.launch({ channel: 'msedge', headless: true, args: process.env.VRM_SOFTWARE_GL === '0' ? [] : ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] })
   try {
+    await preparationChecks(browser)
     for (const model of models) {
       const context = await browser.newContext({ viewport: { width: 1000, height: 800 }, reducedMotion: 'no-preference' })
       const page = await context.newPage()
+      // 'device' keeps the mid-session emulateMedia flip reaching the app —
+      // motion now defaults to full unless a stored choice says otherwise.
       await page.addInitScript(() => {
+        localStorage.setItem('meet-mita:motion', 'device')
         window.__vrmDraws = 0
         window.__vrmDeletes = 0
         for (const Context of [window.WebGLRenderingContext, window.WebGL2RenderingContext]) {
@@ -57,6 +171,7 @@ async function main() {
       console.log(`PASS ${model}: model, animation request, cached reload, reduced-motion cleanup`)
     }
     const interaction = await browser.newContext({ viewport: { width: 800, height: 800 }, reducedMotion: 'no-preference' })
+    await interaction.addInitScript(() => localStorage.setItem('meet-mita:motion', 'reduce'))
     const interactionPage = await interaction.newPage()
     await interactionPage.route('**/__fixture/avatar.vrm', route => route.fulfill({ body: fs.readFileSync(models[0]), contentType: 'model/gltf-binary' }))
     await interactionPage.route('**/__fixture/idle.fbx', route => route.abort())
@@ -67,7 +182,7 @@ async function main() {
       const { default: VRMCanvas } = await import('/src/player/VRMCanvas.tsx')
       document.body.innerHTML = '<main id="test"></main>'
       const root = ReactDOM.createRoot(document.querySelector('#test'))
-      const baseProps = { emotion: 'idle', isSpeaking: false, nodTrigger: 0, customAnimationTrigger: null, lookTargetOffset: null, enablePointerTracking: false, modelUrl: '/__fixture/avatar.vrm', fallback: null, onError: () => { throw new Error('VRM failed') } }
+      const baseProps = { emotion: 'idle', isSpeaking: false, nodTrigger: 0, customAnimationTrigger: null, lookTargetOffset: null, enablePointerTracking: false, modelUrl: '/__fixture/avatar.vrm', onError: () => { throw new Error('VRM failed') } }
       window.__renderVrm = props => root.render(React.createElement(VRMCanvas, { ...baseProps, ...props }))
       window.__renderVrm({})
     })

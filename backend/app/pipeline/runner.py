@@ -110,14 +110,19 @@ def run_job(
                     config,
                 )
     except Exception as exc:
+        message = str(exc)
+        if storage_path.endswith(".photos.json") and (
+            "insufficient lesson context" in message or "Episode failed validation" in message
+        ):
+            message = "Photo text could not support a verified lesson. Submit clearer photos with more readable material."
         conn = connect_db(data_dir)
         try:
-            fail_job(conn, job_id, str(exc))
+            fail_job(conn, job_id, message)
             set_document_status(conn, document_id, "failed")
             job = get_job(conn, job_id)
         finally:
             conn.close()
-        return {"claimed": True, "job": job, "error": str(exc)}
+        return {"claimed": True, "job": job, "error": message}
 
     conn = connect_db(data_dir)
     try:

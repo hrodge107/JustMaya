@@ -1,9 +1,10 @@
 import { useSyncExternalStore } from 'react'
 
-// Single owner of the effective motion setting: the device media query unless
-// the learner forces a value from the episode menu. A forced value persists
-// on-device and is mirrored to <html data-motion> so CSS follows it too.
-export type MotionOverride = 'reduce' | 'full' | null
+// Single owner of the effective motion setting: full motion is the default so
+// the VRM is always the out-of-box experience. The menu can force 'reduce' or
+// follow the device ('device'); a chosen value persists on-device and is
+// mirrored to <html data-motion> so CSS follows it too.
+export type MotionOverride = 'reduce' | 'full' | 'device' | null
 
 const QUERY = '(prefers-reduced-motion: reduce)'
 const STORAGE_KEY = 'meet-mita:motion'
@@ -11,11 +12,11 @@ const media = matchMedia(QUERY)
 const listeners = new Set<() => void>()
 
 let override: MotionOverride = (() => {
-  try { const saved = localStorage.getItem(STORAGE_KEY); return saved === 'reduce' || saved === 'full' ? saved : null }
+  try { const saved = localStorage.getItem(STORAGE_KEY); return saved === 'reduce' || saved === 'full' || saved === 'device' ? saved : null }
   catch { return null }
 })()
 
-const effective = () => (override ? override === 'reduce' : media.matches)
+const effective = () => (override === 'device' ? media.matches : override === 'reduce')
 
 function notify() {
   document.documentElement.dataset.motion = effective() ? 'reduce' : 'full'

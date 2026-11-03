@@ -22,6 +22,11 @@ def _settings(**overrides):
     return Settings(meta_api_key="test", **overrides)
 
 
+def test_analysis_reasoning_null_environment_restores_provider_default(monkeypatch):
+    monkeypatch.setenv("ANALYSIS_REASONING_EFFORT", "null")
+    assert Settings(meta_api_key="test").analysis_reasoning_effort is None
+
+
 def _doc(*texts):
     return ExtractedDocument(
         document_id="d",
@@ -91,6 +96,47 @@ class FakeMeter:
         return self.payloads[min(len(self.calls), len(self.payloads)) - 1]
 
 
+@pytest.mark.anyio
+async def test_detail_window_setting_reduces_calls_and_keeps_explicit_override():
+    doc = _doc("heat " * 800)
+    for override, expected in ((None, 1), (1500, 3)):
+        meter = FakeMeter([_detail_payload()])
+        result = await detail_analysis(doc, _locked(), _survey_inventory(pages=1), {1},
+            meter, "job", settings=_settings(analysis_detail_max_chars=6000, analysis_reasoning_effort="low"), max_chars=override)
+        assert len(meter.calls) == expected
+        assert result.concepts[0].evidence[0].page_start == 1
+        assert all(call["reasoning_effort"] == "low" for call in meter.calls)
+        assert all(p["page"] == 1 for call in meter.calls
+                   for p in json.loads(call["user"])["untrusted_pages"])
+
+
+@pytest.mark.anyio
+async def test_analysis_reasoning_can_restore_unspecified_effort():
+    meter = FakeMeter()
+    await survey_document(_doc("heat"), meter, "job", settings=_settings(analysis_reasoning_effort=None))
+    assert meter.calls[0]["reasoning_effort"] is None
+
+
+@pytest.mark.anyio
+async def test_larger_detail_windows_preserve_section_seams():
+    from app.models.document import DocumentSection
+    doc = _doc("heat " * 200, "energy " * 200)
+    doc.sections = [DocumentSection(section_id=f"s{n}", title=f"Section {n}", page_start=n, page_end=n)
+                    for n in (1, 2)]
+    payloads = [_detail_payload(page=n) for n in (1, 2)]
+    for n, payload in enumerate(payloads, 1):
+        for item in payload["concepts"] + payload["learning_objectives"]:
+            item["evidence"][0]["section_id"] = f"s{n}"
+    meter = FakeMeter(payloads)
+    await detail_analysis(doc, _locked(), _survey_inventory(), {1, 2}, meter, "job",
+                          settings=_settings(analysis_detail_max_chars=6000))
+    assert len(meter.calls) == 2
+    for n, call in enumerate(meter.calls, 1):
+        request = json.loads(call["user"])
+        assert request["section_id"] == f"s{n}"
+        assert {p["page"] for p in request["untrusted_pages"]} == {n}
+
+
 # --- survey pass ---
 
 
@@ -146,6 +192,17 @@ async def test_survey_rejects_out_of_window_evidence():
 
 
 # --- detail pass ---
+
+
+@pytest.mark.anyio
+async def test_photo_detail_never_fetches_web_supplements(tmp_path, monkeypatch):
+    async def forbidden(*args, **kwargs):
+        pytest.fail("Photo OCR gaps must not trigger web supplementation")
+    monkeypatch.setattr("app.services.concept_analyzer.fetch_summary", forbidden)
+    doc = _doc("thin photo").model_copy(update={"source_kind": "photos"})
+    result = await detail_analysis(doc, _locked(), _survey_inventory(pages=1), {1},
+        FakeMeter([_detail_payload()]), "job", settings=_settings(), data_dir=tmp_path)
+    assert result.supplements == []
 
 
 @pytest.mark.anyio

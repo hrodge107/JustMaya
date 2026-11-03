@@ -8,8 +8,8 @@ body:has(.home) { margin: 0; overflow: hidden; background: #23233a; color-scheme
 .home {
   --ease: cubic-bezier(.22, 1, .36, 1);
   --ink: #30304c; --paper: #f7f7fa; --wash: #e9e9f1; --muted: #4a4a66;
-  --stage-a: #3a3a5c; --stage-b: #23233a; --focus: #005e56;
-  --mint-ink: #0b6e66; --mint-bright: #7fe5dc; --switch-on: var(--mint-ink);
+  --stage-a: #3a3a5c; --stage-b: #23233a; --focus: #064d8b;
+  --mint-ink: #075da7; --mint-bright: #70c9ff; --switch-on: var(--mint-ink);
   position: relative; height: 100dvh; min-height: 540px;
   display: grid; grid-template-rows: minmax(0, 1fr) auto;
   color: var(--ink); isolation: isolate;
@@ -25,9 +25,9 @@ body:has(.home) { margin: 0; overflow: hidden; background: #23233a; color-scheme
 .home .room { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
 .home .b-scene { position: absolute; inset: 0; background: radial-gradient(120% 90% at 30% 20%, var(--stage-a), var(--stage-b)); }
 .home .b-scene::after { content: ''; position: absolute; inset: 0; background:
-  radial-gradient(circle 3px at 12% 26%, #7fe5dc22, transparent 60%),
+  radial-gradient(circle 3px at 12% 26%, #70c9ff22, transparent 60%),
   radial-gradient(circle 2px at 84% 18%, #ffffff18, transparent 60%),
-  radial-gradient(circle 2.5px at 68% 38%, #7fe5dc1a, transparent 60%); }
+  radial-gradient(circle 2.5px at 68% 38%, #70c9ff1a, transparent 60%); }
 
 .stage { position: relative; min-height: 0; }
 .stage.ask-dim .maya-wrap { opacity: .35; }
@@ -45,8 +45,13 @@ body:has(.home) { margin: 0; overflow: hidden; background: #23233a; color-scheme
 /* ---------- dialogue + rail dock ----------
    Desktop: rail column beside the dialogue (foot is display:contents so its
    children join the row). Mobile: the dialogue sits above a bottom action
-   row — rail centred under it, Menu at the right end. */
-.dock { position: relative; display: flex; flex-direction: column; gap: 8px; padding: 0 clamp(10px, 3vw, 36px) calc(clamp(10px, 3vh, 26px) + env(safe-area-inset-bottom, 0px)); }
+   row — rail centred under it. Menu is app chrome in the header rail. */
+
+/* Same vn-menu-rail the player overlays on its header: pinned to the
+   study-header's right end (z-index above the header's own 10). */
+.home .vn-menu-rail { position: absolute; top: 0; right: max(16px, env(safe-area-inset-right)); z-index: 11; align-items: center; min-height: 64px; padding: 0; }
+@media (max-width: 719px) { .home .vn-menu-rail { right: 8px; } }
+.dock { position: relative; z-index: 2; display: flex; flex-direction: column; gap: 8px; padding: 0 clamp(10px, 3vw, 36px) calc(clamp(10px, 3vh, 26px) + env(safe-area-inset-bottom, 0px)); }
 .foot { display: contents; }
 
 .dlg { position: relative; min-height: clamp(140px, 24dvh, 210px); border-radius: 24px; background: #f7f7faf2; color: var(--ink); box-shadow: 0 -6px 30px #30304c26; cursor: pointer; }
@@ -79,7 +84,7 @@ body:has(.home) { margin: 0; overflow: hidden; background: #23233a; color-scheme
 .home .vn-ask-send { border: 1.5px solid var(--mint-ink); min-height: 36px; font-size: .78rem; font-weight: 900; }
 
 /* ---------- top-right upload progress chip ---------- */
-.upload-chip { position: fixed; top: 16px; right: 16px; z-index: 20; width: min(280px, 70vw); padding: 12px 16px 14px; border-radius: 14px; font-size: .82rem; font-weight: 800; background: var(--paper); color: var(--ink); box-shadow: 0 8px 24px #30304c40; }
+.upload-chip { position: fixed; top: 72px; right: 16px; z-index: 20; width: min(280px, 70vw); padding: 12px 16px 14px; border-radius: 14px; font-size: .82rem; font-weight: 800; background: var(--paper); color: var(--ink); box-shadow: 0 8px 24px #30304c40; }
 .upload-chip .up-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 8px; }
 .up-track { height: 8px; border-radius: 4px; overflow: hidden; background: #dedeea; }
 .up-fill { display: block; height: 100%; width: 0%; border-radius: 4px; background: var(--mint-ink); transition: width .3s linear; }
@@ -122,7 +127,7 @@ body:has(.home) { margin: 0; overflow: hidden; background: #23233a; color-scheme
 
 .dropzone { display: grid; place-items: center; gap: 8px; min-height: 120px; padding: 18px; border: 2px dashed #77778b; border-radius: 14px; text-align: center; font-weight: 800; background: var(--wash); color: var(--ink); cursor: pointer; }
 .dropzone small { font-weight: 700; opacity: .65; }
-.dropzone.drag-over { border-color: var(--mint-ink); background: #d8efec; }
+.dropzone.drag-over { border-color: var(--mint-ink); background: #dceeff; }
 
 /* Learn episode list — one group per document. Episode 1 is always visible;
    later outlines collapse behind the ep-more disclosure until clicked. */
@@ -130,7 +135,7 @@ body:has(.home) { margin: 0; overflow: hidden; background: #23233a; color-scheme
 .ep-group { display: grid; gap: 8px; }
 .ep-doc { padding: 6px 2px 0; font-size: .78rem; font-weight: 900; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ep-rows { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
-.ep { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 12px; font-weight: 800; background: var(--wash); }
+.ep { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 12px 14px; border-radius: 12px; font-weight: 800; background: var(--wash); }
 .ep.ready { box-shadow: inset 0 0 0 2px var(--mint-ink); }
 .ep .ep-meta { flex: 1; min-width: 0; }
 .ep .ep-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -144,6 +149,21 @@ body:has(.home) { margin: 0; overflow: hidden; background: #23233a; color-scheme
 .ep-more > summary:hover { color: var(--ink); }
 .ep-more .ep-rows { margin-top: 8px; }
 .ep-empty { padding: 14px; font-weight: 700; opacity: .8; }
+
+/* "On this browser" — the IndexedDB PoC shelf. Same ep row language as the
+   server list below it, separated by a hairline and its own section label.
+   The Remove affordance is the shared vn-quiet; its confirm dialog reuses
+   the player's bl-warn (player.css), so no parallel styles live here. */
+.shelf { margin: 0 0 16px; padding-bottom: 14px; border-bottom: 1px solid #77778b33; }
+.shelf-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.shelf-title { margin: 0; padding: 6px 2px 0; font-size: .78rem; font-weight: 900; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.shelf-clear { min-height: 36px; padding: 4px 12px; font-size: .78rem; }
+.shelf .ep-rows { margin-top: 8px; }
+.shelf .ep-status { overflow-wrap: anywhere; }
+.shelf-remove { min-height: 38px; padding: 6px 12px; }
+.shelf-note { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.shelf-note .vn-quiet { flex: none; min-height: 32px; padding: 2px 10px; font-size: .76rem; }
+.shelf-empty { margin: 8px 0 0; }
 .or { display: flex; align-items: center; gap: 12px; margin: 16px 0; font-size: .8rem; font-weight: 800; opacity: .65; }
 .or::before, .or::after { content: ''; flex: 1; height: 1px; background: currentColor; opacity: .4; }
 
@@ -177,3 +197,18 @@ body:has(.home) { margin: 0; overflow: hidden; background: #23233a; color-scheme
 }
 
 :root[data-motion='reduce'] .home * { transition: none !important; animation: none !important; }
+.home .photo-upload { margin-top: 16px; }
+.home .photo-guidance { padding-left: 1.25rem; }
+.home .source-choices { display: grid; gap: 10px; }
+.home .source-choices .vn-motion { width: 100%; display: flex; flex-direction: column; align-items: flex-start; text-align: left; gap: 2px; }
+.home .source-choices span { font-size: .9rem; font-weight: 600; }
+.home .source-submit, .home .photo-upload .dropzone { width: 100%; }
+.home .photo-upload .dropzone { min-height: 120px; border: 2px dashed #77778b; }
+.home .selected-pdf { overflow-wrap: anywhere; }
+.home .photo-upload .vn-button { width: 100%; }
+.home .photo-list { padding-left: 24px; list-style: decimal; }
+.home .photo-list li { padding-block: 4px; }
+.home .photo-list li::marker { font-weight: 800; }
+.home .photo-list li span { display: inline-block; max-width: 100%; overflow-wrap: anywhere; vertical-align: middle; margin-right: 8px; }
+.home .photo-upload .vn-quiet, .home .photo-upload .vn-button { min-height: 44px; }
+.home .photo-warning { margin: 8px 0 0; font-size: .85rem; overflow-wrap: anywhere; }

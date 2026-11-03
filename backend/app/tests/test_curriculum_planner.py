@@ -91,3 +91,57 @@ async def test_omission_reason_is_retained_for_known_concept():
     meter.response["omissions"] = [{"concept_id": "other", "reason": "Outside the lesson scope"}]
     result = await plan_curriculum(source, meter, "job", Settings(meta_api_key="test"))
     assert result.uncovered_reasons == {"other": "Outside the lesson scope"}
+
+
+@pytest.mark.anyio
+async def test_objective_dependencies_completed_once_in_inventory_order_for_all_outlines():
+    source = inventory()
+    for cid in ("second", "third"):
+        source.concepts.append(source.concepts[0].model_copy(update={"id": cid}))
+    source.learning_objectives[0].concept_ids = ["third", "second", "c"]
+    source.learning_objectives.append(source.learning_objectives[0].model_copy(update={"id": "o2"}))
+    meter = FakeMeter()
+    meter.response["episodes"][0]["objective_ids"] = ["o", "o2"]
+    meter.response["episodes"].append(dict(meter.response["episodes"][0]))
+    meter.response["omissions"] = [{"concept_id": "second", "reason": "Omitted"}]
+    result = await plan_curriculum(source, meter, "job", Settings(meta_api_key="test"))
+    assert len(meter.calls) == 1
+    assert result.uncovered_reasons == {}
+    for episode in result.episodes:
+        assert [c.concept_id for c in episode.concepts] == ["c", "second", "third"]
+        assert episode.objective_ids == ["o", "o2"]
+        assert episode.estimate_stale and episode.dialogue_words == 100
+        assert all(c.basis == "inferred" and c.uncertainty for c in episode.concepts[1:])
+        assert episode.status == "planned_only"
+    assert not result.confirmed
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("invalid", ["title", "concept", "objective", "omission", "duplicate_omission", "duplicate_concept", "duplicate_objective", "empty_dependency", "unknown_dependency", "user_order"])
+async def test_completion_rejects_invalid_generated_data(invalid):
+    source = inventory()
+    meter = FakeMeter()
+    episode = meter.response["episodes"][0]
+    if invalid == "title":
+        episode["title"] = ""
+    elif invalid == "concept":
+        episode["concepts"][0]["concept_id"] = "unknown"
+    elif invalid == "objective":
+        episode["objective_ids"] = ["unknown"]
+    elif invalid == "omission":
+        meter.response["omissions"] = [{"concept_id": "unknown", "reason": "Unknown"}]
+    elif invalid == "duplicate_omission":
+        meter.response["omissions"] = [{"concept_id": "c", "reason": "Omitted"}] * 2
+    elif invalid == "duplicate_concept":
+        episode["concepts"] *= 2
+    elif invalid == "duplicate_objective":
+        episode["objective_ids"] *= 2
+    elif invalid == "empty_dependency":
+        source.learning_objectives[0].concept_ids = []
+    elif invalid == "unknown_dependency":
+        source.learning_objectives[0].concept_ids = ["unknown"]
+    else:
+        episode["concepts"][0]["basis"] = "user"
+    with pytest.raises(ValueError, match="INVALID_GENERATED_PLAN"):
+        await plan_curriculum(source, meter, "job", Settings(meta_api_key="test"))
+    assert len(meter.calls) == 1

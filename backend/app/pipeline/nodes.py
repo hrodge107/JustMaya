@@ -41,7 +41,13 @@ TRANSIENT_ERRORS = (TransientStageError, sqlite3.OperationalError)
 def _extract(ctx: StageContext, state: PipelineState) -> dict:
     mark_stage(ctx.data_dir, state["job_id"], "extract")
     pdf_path = resolve_document_path(ctx.storage_dir, state["storage_path"])
-    extracted = ctx.services.extract_document(state["document_id"], pdf_path)
+    # ponytail: the private manifest keeps existing PDF rows and job checkpoints compatible.
+    if pdf_path.name.endswith(".photos.json"):
+        extracted = asyncio.run(ctx.services.extract_photos(
+            state["document_id"], pdf_path, ctx.provider, state["job_id"], ctx.settings,
+        ))
+    else:
+        extracted = ctx.services.extract_document(state["document_id"], pdf_path)
     artifact = ctx.artifacts.save(
         state["document_id"], "extracted", extracted.model_dump_json()
     )

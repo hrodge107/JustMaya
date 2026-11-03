@@ -2,7 +2,7 @@
 
 ![Mita in a study room](public/readme/mita-header.png)
 
-Meet Mita is an anime study companion that turns a student's PDF into a playable visual-novel episode. Mita presents the material through dialogue, illustrates selected ideas, pauses for recall questions, and answers questions when the learner raises a hand.
+Meet Mita is an anime study companion that turns a student's PDF or photos of notes into a playable visual-novel episode. Mita presents the material through dialogue, illustrates selected ideas, pauses for recall questions, and answers questions when the learner raises a hand.
 
 ## See the experience
 
@@ -22,11 +22,11 @@ These desktop captures show a saved lesson based on the included sample chapter,
 
 ## From notes to an episode
 
-1. Upload a PDF.
+1. Upload a PDF or up to five ordered photos of pages or notes.
 2. Meet Mita analyzes the material, plans a learning roadmap, and creates the first episode.
 3. Read the episode with Mita, answer recall checkpoints, and raise your hand to ask about the lesson.
 
-The episode is generated before playback, so each line does not require a new model call. The server stores generated episodes. The included sample chapter uses a simulated generation flow and should not be mistaken for a live model run.
+The episode is generated before playback, so each line does not require a new model call. A browser library keeps a local copy of the finished episode; playback and tutoring still require the server. The server also stores its own data. The included sample chapter uses a simulated generation flow and should not be mistaken for a live model run.
 
 ## What Meta models do
 
@@ -34,7 +34,7 @@ Meet Mita uses the Meta Model API throughout the experience. The defaults can be
 
 | Model | Contribution |
 | --- | --- |
-| Muse Spark (`muse-spark-1.3-contributor`) | Analyzes source material, plans the roadmap, writes and reviews the episode, and supports grounded in-scene questions. |
+| Muse Spark (`muse-spark-1.3-contributor`) | Reads text from page photos, analyzes source material, plans the roadmap, writes and reviews the episode, and supports grounded in-scene questions. |
 | Muse Image (`muse-image-1.0`) | Generates contextual picture cards for selected moments in the episode. Image generation is optional, so a lesson can continue if a picture cannot be created. |
 
 The pipeline combines structured model responses with source retrieval, validation, and token budgets. It creates a bounded lesson from the student's material, with tutoring available inside that lesson. The repository's implementation history begins on October 27, 2026, during the hackathon building period.
@@ -50,7 +50,8 @@ The intended audience already spends time in digital spaces: the [Philippine Sta
 You need Node.js and npm, Python, and a Meta Model API key. From the repository root, in PowerShell:
 
 ```powershell
-# Create a .env file at the repository root containing META_API_KEY=your-key.
+Copy-Item .env.example .env
+# Add your META_API_KEY to .env.
 python -m venv backend/.venv
 backend/.venv/Scripts/python.exe -m pip install -r backend/requirements.txt
 npm install

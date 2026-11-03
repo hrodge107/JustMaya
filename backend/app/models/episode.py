@@ -7,6 +7,7 @@ to the learner. `GeneratedEpisode` is the model-facing wire shape: scenes plus
 the refusal channel; envelope fields are filled by code, never by the model.
 """
 
+import random
 from collections import deque
 from typing import Literal
 
@@ -158,7 +159,10 @@ LEARNER_HIDDEN_QUESTION_FIELDS = frozenset(
 def learner_view(script: EpisodeScript) -> dict:
     """Learner-facing episode payload: everything except answer keys and
     grading explanations. Internal reads (inspection, grading) keep the
-    full persisted model."""
+    full persisted model. Options are projected in a deterministic
+    per-question shuffle: the stored order is biased (generators key the
+    first option), and seeding on the episode and question ids keeps each
+    question's decorrelated order stable across reads and reloads."""
     data = script.model_dump()
     for scene in data["scenes"]:
         question = scene.get("question")
@@ -166,8 +170,12 @@ def learner_view(script: EpisodeScript) -> dict:
             continue
         for field in LEARNER_HIDDEN_QUESTION_FIELDS:
             question.pop(field, None)
-        for option in question.get("options", []):
+        options = question.get("options", [])
+        for option in options:
             option.pop("mistakeResponse", None)
+        random.Random(
+            f"{script.episodeId}:{question['questionId']}"
+        ).shuffle(options)
     return data
 
 
@@ -246,6 +254,8 @@ def validate_script(
             violations.append(f"{scene.sceneId}: question on a non-checkpoint scene")
         for line in scene.dialogue:
             line_ids.append(line.lineId)
+            if line.speaker != "mascot":
+                violations.append(f"{line.lineId}: speaker must be mascot")
             _check_refs(line.sourceRefs, line.webRefs, known_chunks,
                         supplied_web_urls, line.lineId, script.documentId, violations)
         question = scene.question

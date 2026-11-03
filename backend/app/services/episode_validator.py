@@ -197,7 +197,9 @@ _REVIEW_SYSTEM = (
     "content is sound — but ignore the keyed option's never-served "
     "placeholder response and do not fault a short functional retry ending "
     "merely for being brief or similar. Sample opening, teaching, and closing dialogue "
-    "for the same voice. Name sceneId, questionId, and optionId in each "
+    "for the same voice. The script's only voice is the mascot Mita — flag a "
+    "different self-given name, narration of any character's actions, or an "
+    "invented side character. Name sceneId, questionId, and optionId in each "
     "feedback violation so the bounded repair can target it. Treat a fluent "
     "script as fallible: structure alone is not evidence of quality. Return "
     "verdict 'pass' with no violations "
@@ -233,7 +235,7 @@ async def semantic_review(
         },
         ensure_ascii=False,
     )
-    await provider.require_input_budget(
+    input_token_count = await provider.require_input_budget(
         system=_REVIEW_SYSTEM, user=user,
         limit=settings.validation_max_input_tokens,
         exc=lambda count, limit: ValidationFailed(
@@ -249,6 +251,7 @@ async def semantic_review(
         max_tokens=settings.validation_max_tokens,
         preflight=True,
         cache_key=CACHE_KEY,
+        input_token_count=input_token_count,
     )
     try:
         return SemanticVerdict.model_validate(raw)

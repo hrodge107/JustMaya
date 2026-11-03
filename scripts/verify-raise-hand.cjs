@@ -26,13 +26,17 @@ async function post(request, endpoint, body) {
   assert.equal(response.status(), 200, await response.text())
   return response.json()
 }
-async function parked(request, sceneId = 'scene-03-checkpoint-1') {
+// The published episode's checkpoint ids vary by document — take the first
+// checkpoint scene from the manifest instead of hardcoding one.
+const checkpointSceneId = episode.scenes.find(s => s.kind === 'checkpoint').sceneId
+async function parked(request, sceneId = checkpointSceneId) {
   let session = await post(request, `/api/episodes/${episode.episodeId}/sessions`)
   while (session.sceneId !== sceneId) session = await post(request, `/api/sessions/${session.sessionId}/advance`, { request_id: id(), expected_version: session.version })
   return session
 }
 async function fixture(browser, viewport = { width: 390, height: 844 }, reducedMotion = 'reduce', extra = {}) {
   const context = await browser.newContext({ viewport, reducedMotion, ...extra })
+  if (reducedMotion === 'reduce') await context.addInitScript(() => localStorage.setItem('meet-mita:motion', 'reduce'))
   const page = await context.newPage()
   page.on('pageerror', err => errors.push(err.message))
   await page.clock.install(); await page.clock.pauseAt(new Date())
@@ -117,7 +121,7 @@ async function coreFlow(browser) {
   await waitRaise
   await strip(f.page).waitFor()
   assert.equal(await raise(f.page).getAttribute('aria-label'), 'Resume the lesson')
-  assert.equal(await f.page.locator('.mascot').getAttribute('data-emotion'), 'listening')
+  assert.equal(await f.page.locator('.mascot:visible').getAttribute('data-emotion'), 'listening')
   assert.equal(await f.page.evaluate(() => document.activeElement === document.querySelector('.vn-ask-input')), true)
   await f.page.waitForFunction(() => document.querySelector('.vn-dialogue .sr-only[aria-live]')?.textContent === 'Mita: What would you like to ask?')
   assert.equal(await f.page.locator('.vn-ask-resume').count(), 1, 'Resume Lesson is offered from the start')
@@ -163,7 +167,7 @@ async function coreFlow(browser) {
   assert.ok(STRIP_LABEL.includes(stripLabel), 'resume strip label comes from the label pool')
   assert.equal(await input(f.page).inputValue(), '', 'closing beat lands an empty editable input')
   assert.equal(await f.page.evaluate(() => document.activeElement === document.querySelector('.vn-ask-input')), true, 'fresh input takes focus')
-  assert.equal(await f.page.locator('.vn-source-note').textContent(), 'Partly supported by retrieved PDF passages.')
+  assert.equal(await f.page.locator('.vn-source-note').textContent(), 'Partly supported by retrieved source passages.')
   await f.page.getByRole('button', { name: 'Sources', exact: true }).click()
   assert.deepEqual(await f.page.locator('.vn-source-badge').allTextContents(), ['Page 2–3'])
   assert.equal(await f.page.locator('.vn-ask-new').count(), 1, 'New question control appears once a flow turn anchors the thread')
@@ -192,7 +196,7 @@ async function coreFlow(browser) {
   await f.page.locator('.vn-choices .vn-choice').first().waitFor()
   const restored = await saved(f)
   assert.equal(restored.mode, 'checkpoint')
-  assert.equal(restored.sceneId, 'scene-03-checkpoint-1')
+  assert.equal(restored.sceneId, checkpointSceneId)
   assert.equal(restored.resumeSnapshot, null)
   // The transient return beat is client-only: the persisted session has no trace.
   assert.ok(restored.interactions.every(i => ![i.answer, ...(i.lines ?? [])].some(l => ALL_CUES.includes(l))), 'cue text never reaches persisted state')
@@ -215,9 +219,9 @@ async function pendingAndCancel(browser) {
   await send(f.page).click()
   await f.page.waitForFunction(() => document.querySelector('.vn-dialogue .sr-only[aria-live]')?.textContent === 'You: Held question')
   assert.equal(await f.page.locator('.vn-choices .vn-choice').count(), 0, 'every strip disappears while the question echoes')
-  assert.equal(await f.page.locator('.mascot').getAttribute('data-emotion'), 'listening', 'mascot listens while the echo types')
+  assert.equal(await f.page.locator('.mascot:visible').getAttribute('data-emotion'), 'listening', 'mascot listens while the echo types')
   await f.page.clock.runFor(500)
-  await f.page.waitForFunction(() => document.querySelector('.mascot')?.getAttribute('data-emotion') === 'thinking')
+  await f.page.waitForFunction(() => document.querySelector('.mascot:not([hidden])')?.getAttribute('data-emotion') === 'thinking')
   assert.equal(await liveText(f.page), 'You: Held question', 'the "You" turn stays up while the mascot thinks')
   assert.equal(await f.page.evaluate(() => document.querySelector('.vn-scene')?.className.includes('vn-undim')), true, 'stage undims for the thinking window')
   assert.equal(await f.page.locator('.vn-dialogue-target').getAttribute('aria-label'), 'Reveal your message')
@@ -288,7 +292,7 @@ async function faultsAndReload(browser) {
   await input(f.page).fill('unsubmitted draft')
   await f.page.reload()
   await strip(f.page).waitFor()
-  assert.equal(await f.page.locator('.mascot').getAttribute('data-emotion'), 'listening')
+  assert.equal(await f.page.locator('.mascot:visible').getAttribute('data-emotion'), 'listening')
   assert.equal(await f.page.evaluate(() => document.activeElement === document.querySelector('.vn-ask-input')), true)
   assert.equal(await input(f.page).inputValue(), '', 'unsubmitted draft does not survive reload')
   assert.equal((await saved(f)).mode, 'question')
@@ -458,7 +462,7 @@ async function helpModesAndFlow(browser) {
   await waitCue(f.page, BACK_TO_LESSON)
   const done = await saved(f)
   assert.equal(done.mode, 'checkpoint')
-  assert.equal(done.sceneId, 'scene-03-checkpoint-1')
+  assert.equal(done.sceneId, checkpointSceneId)
   assert.equal(done.tutorThreadId, null, 'resume closes the tutor thread')
   assert.equal(done.resumeSnapshot, null)
   evidence.push({ check: 'hint exit resumes the exact checkpoint and clears the thread', result: 'PASS' })
