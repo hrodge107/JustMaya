@@ -2,17 +2,38 @@
 
 ![Mita in a study room](public/readme/mita-header.png)
 
-Meet Mita turns the notes students already have into a visual-novel lesson they can play, question, and revisit.
+Meet Mita turns study material students already have into an anime-style interactive presentation guided by Mita, an expressive 3D learning companion.
 
-Upload a PDF or photos of notes, and Mita guides you through an episode shaped around that material. Muse Spark develops the lesson and responds to questions in the scene, while Muse Image creates visual aids that appear alongside the dialogue.
+Upload a PDF or one to five ordered photos of notes. Meet Mita uses that material to shape a lesson with dialogue, contextual picture cards, recall checkpoints, and questions the learner can ask while the lesson is open. The experience gives a chapter a clear route through its ideas, with Mita guiding the learner along the way.
 
-Course materials often arrive as static pages. Meet Mita gives students another way to approach them: a focused episode with an anime companion, visual explanations, and moments to recall what they have learned.
+## Why this format
 
-The demo creates a playable first episode and a roadmap for the remaining material. That roadmap gives Meet Mita a foundation for expanding a document into a longer series of lessons.
+Students often receive course material as static files. Meet Mita tests a focused design idea: a familiar, character-led presentation may make those materials easier to begin and easier to stay with. Audience research helps shape who the experience is for; the effect on study behavior remains a question for learner testing.
+
+The [Philippine Statistics Authority](https://psa.gov.ph/content/percentage-households-internet-connection-increased-488-percent-2024-two-every-three) reports that 98.8% of Filipino internet users aged 10 and older used a cellphone to access the internet in 2024. [Dentsu](https://insight.dentsu.com/sportsandentertainment/culture-commerce) reports that half of Gen Z worldwide watches anime at least weekly. These figures describe the intended audience's digital and media context; they do not measure Meet Mita's impact.
+
+## From study material to a guided lesson
+
+Meet Mita brings Meta models into a familiar learning task: understanding material a student has been assigned or saved. The uploaded source shapes the lesson. Muse Spark analyzes and organizes its ideas, develops the first episode, checks the generated lesson, and answers questions in context. Muse Image creates picture cards tied to the material being discussed. During playback, the learner can pause to recall an idea or raise a hand for an explanation or hint grounded in the source.
+
+```mermaid
+flowchart LR
+  A[PDF or ordered page photos] --> B[Extract and index source material]
+  B --> C[Muse Spark surveys concepts]
+  C --> D[Muse Spark plans the roadmap]
+  D --> E[Muse Spark develops Episode 1 context]
+  E --> F[Muse Spark generates and validates the lesson]
+  F --> G[Muse Image creates contextual picture cards]
+  G --> H[Guided lesson with recall and in-scene questions]
+```
+
+The project fits the event's Build for Your World track by bringing Meta's models to a familiar study task: turning a student's own course material into a guided lesson. The models contribute across a multi-stage workflow, with distinct roles in planning, generation, review, visual explanation, and tutoring.
+
+The submitted implementation was built during the hackathon. Repository history begins on October 27, 2026.
 
 ## See the experience
 
-These desktop captures show the development interface and a saved lesson about digital logic.
+These desktop captures show the current development interface and a saved digital-logic lesson.
 
 **Lobby**
 
@@ -26,15 +47,23 @@ These desktop captures show the development interface and a saved lesson about d
 
 ![A question entered in the Raise Hand interface](public/readme/raise-hand.png)
 
-## How Meta models bring the lesson to life
+## How Meta models shape the lesson
 
-Muse Spark analyzes the source, plans the lesson, writes Mita's dialogue, and reviews the episode before playback. It also supports questions asked during the lesson. Muse Image creates picture cards for selected moments, putting a visual beside the concept Mita is explaining.
+### Muse Spark: from source to tutor
 
-The pipeline combines structured model responses with source retrieval, validation, and token budgets. The default models are `muse-spark-1.3-contributor` and `muse-image-1.0`, configured through the Meta Model API. The episode is generated before playback, so each line does not require a new model call. This implementation was built during the hackathon; the repository's history begins on October 27, 2026.
+Meet Mita uses `muse-spark-1.3-contributor` through Meta's Model API for the text workflow. The backend extracts and indexes the uploaded material, then Muse Spark surveys its concepts and helps plan the lesson. It develops context for the first-episode scope, generates the lesson dialogue and checkpoints, and reviews the draft before the app publishes it. During the lesson, Muse Spark also responds to questions using retrieved passages from the same source.
 
-## Designed for the way students already use media
+The generation flow combines model output with application steps for source retrieval, structured responses, validation, and token budgets. The lesson is prepared before playback, so each line of dialogue does not trigger a separate model request.
 
-Meet Mita draws on familiar character-driven media to make a study session inviting. In 2024, 98.8% of Philippine internet users aged 10 and older used a cellphone to access the internet, according to the [Philippine Statistics Authority](https://psa.gov.ph/content/percentage-households-internet-connection-increased-488-percent-2024-two-every-three). [Dentsu](https://insight.dentsu.com/sportsandentertainment/culture-commerce) reports that half of Gen Z globally watches anime at least weekly. These figures inform the audience and format; the project's effect on engagement remains a question to test.
+### Muse Image: concepts made visible
+
+Meet Mita uses `muse-image-1.0` to create picture cards for selected concepts in the lesson. The cards appear beside the relevant dialogue so a learner can see a visual explanation while Mita discusses the idea. This gives Muse Image a specific role in the learning experience, alongside Muse Spark's planning and tutoring work.
+
+## Current scope and future potential
+
+The current proof of concept generates one playable first episode from a source. Later episodes appear as roadmap outlines. This gives the project a clear next direction: make more of the roadmap playable, then study whether learners choose to start, finish, and return to these sessions. Those are future questions to measure, not results claimed by the current build.
+
+Meet Mita runs locally for one learner at a time. Uploaded material is processed by the backend, and relevant content is sent to the configured Meta API. The browser keeps a local copy of a finished lesson, but playback and tutoring still require the server. The included sample chapter simulates the generation steps in the interface and uses an existing ready lesson when one is available; it does not create a new episode from a fresh upload.
 
 ## Run locally
 
@@ -49,8 +78,8 @@ npm install
 npm run dev
 ```
 
-Open the local URL printed by Vite. The development server starts the FastAPI backend when the virtual environment is present. Keep the API key in the root `.env`, never in a `VITE_` variable or a commit. Uploaded material is processed by the backend and relevant content is sent to Meta's API. The app is a local, single-user proof of concept.
+Open the local URL printed by Vite. When the virtual environment is present, the development server starts the FastAPI backend. Keep the API key in the root `.env` file, never in a `VITE_` variable or a commit.
 
-Upload a PDF or up to five ordered photos, then open the generated episode. During playback, answer recall checkpoints or raise your hand to ask Mita a question. The browser library keeps a local copy of the finished episode; playback and tutoring still require the server. The included sample chapter simulates generation and is useful for exploring the interface.
+## Implementation
 
-React and TypeScript provide the interface, Three.js and VRM render Mita, and a FastAPI backend runs the LangGraph workflow. A stand-in appears when the configured mascot cannot run.
+React, TypeScript, and Vite provide the interface. FastAPI runs the backend, and LangGraph coordinates the document-to-lesson workflow. Three.js and VRM render Mita, with a stand-in when the configured mascot cannot load. SQLite stores application records, while Chroma supports retrieval from uploaded material.
