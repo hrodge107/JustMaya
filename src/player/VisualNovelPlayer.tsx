@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { api, ApiError, type AnswerRequest, type AwaitingKind, type Emotion, type Episode, type HelpMode, type PictureCard, type Scene, type Session } from '../learnerApi'
 import { useReducedMotion } from '../motionPreference'
+import StudyHeader, { type Background } from '../StudyHeader'
 import BacklogPanel, { type BacklogEntry } from './BacklogPanel'
 import MascotStage from './MascotStage'
 import MotionToggle from './MotionToggle'
@@ -137,8 +138,17 @@ function DialogueText({ id, text, revealed, onRevealed, onRevealProgress }: { id
   const revealBoundaryRef = useRef<HTMLSpanElement>(null)
   useEffect(() => {
     if (revealed) return
-    const timer = window.setInterval(() => setCount(c => Math.min(c + 1, text.length)), REVEAL_MS)
-    return () => window.clearInterval(timer)
+    // Reveal by elapsed time on the frame clock: at most one update per paint,
+    // and slow devices get multi-char chunks instead of a queued backlog.
+    let frame = 0
+    let start: number | null = null
+    const tick = (now: number) => {
+      start ??= now
+      setCount(Math.min(text.length, Math.floor((now - start) / REVEAL_MS)))
+      if (now - start < text.length * REVEAL_MS) frame = requestAnimationFrame(tick)
+    }
+    frame = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(frame)
   }, [revealed, text])
   useLayoutEffect(() => { if (!revealed) onRevealProgress(revealBoundaryRef.current) }, [count, onRevealProgress, revealed])
   useEffect(() => { if (!revealed && count >= text.length) onRevealed(id) }, [count, revealed, text, id, onRevealed])
@@ -147,7 +157,7 @@ function DialogueText({ id, text, revealed, onRevealed, onRevealProgress }: { id
   return <span className="vn-text" aria-hidden="true">{shown}<span ref={revealBoundaryRef} className="vn-reveal-boundary" /><span className="vn-text-rest">{revealed ? '' : text.slice(count)}</span></span>
 }
 
-export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: string; onExit(): void }) {
+export default function VisualNovelPlayer({ sessionId, onExit, onReady, background, onBackground }: { sessionId: string; onExit(): void; onReady?(): void; background: Background; onBackground(): void }) {
   const [session, setSession] = useState<Session | null>(null)
   const [episode, setEpisode] = useState<Episode | null>(null)
   const [loadError, setLoadError] = useState<{ message: string; notFound: boolean } | null>(null)
@@ -238,13 +248,17 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
             else setDismissedPictures(liveCards(initialScene, s.dialogueIndex).map(card => cardKey(initialScene.sceneId, card)))
           }
           setSession(s); setEpisode(e)
+          onReady?.()
         }
       } catch (err) {
-        if (active) setLoadError({ message: err instanceof Error ? err.message : 'Could not load this lesson.', notFound: err instanceof ApiError && err.status === 404 })
+        if (active) {
+          setLoadError({ message: err instanceof Error ? err.message : 'Could not load this lesson.', notFound: err instanceof ApiError && err.status === 404 })
+          onReady?.()
+        }
       }
     })()
     return () => { active = false; alive.current = false }
-  }, [sessionId])
+  }, [sessionId, onReady])
 
   useLayoutEffect(() => {
     if (!pictureView) return
@@ -313,16 +327,27 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
     }
   }, [turnId])
 
+  // The speaker nameplate is queried once per scroll container and cached —
+  // never once per revealed character.
+  const speakerCache = useRef<{ host: Element; el: HTMLElement | null } | null>(null)
+  const nameplateBottom = useCallback((target: Element, viewTop: number) => {
+    if (speakerCache.current?.host !== target || !speakerCache.current.el?.isConnected)
+      speakerCache.current = { host: target, el: target.closest('.vn-dialogue')?.querySelector<HTMLElement>('.dlg-name') ?? null }
+    return speakerCache.current.el?.getBoundingClientRect().bottom ?? viewTop
+  }, [])
+
   const onRevealProgress = useCallback((marker: HTMLSpanElement | null) => {
     revealBoundaryRef.current = marker
     if (!marker || !followLatestRef.current) return
     const target = dialogueScrollRef.current
     if (!target) return
+    // One layout read; lines that fit never pay for rect math or scroll writes.
+    if (target.scrollHeight <= target.clientHeight + 1) return
 
     const targetRect = target.getBoundingClientRect()
     const viewTop = targetRect.top + target.clientTop
-    const nameplateBottom = target.querySelector<HTMLElement>('.vn-speaker')?.getBoundingClientRect().bottom ?? viewTop
-    const readingTop = Math.max(viewTop, nameplateBottom + 8)
+    const nameplate = nameplateBottom(target, viewTop)
+    const readingTop = Math.max(viewTop, nameplate + 8)
     const readingBottom = viewTop + target.clientHeight - 8
     const markerRect = marker.getBoundingClientRect()
     let nextScrollTop = target.scrollTop
@@ -334,7 +359,7 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
       autoScrollTopRef.current = nextScrollTop
       target.scrollTop = nextScrollTop
     }
-  }, [])
+  }, [nameplateBottom])
 
   function handleDialogueScroll(target: HTMLSpanElement, fromUserInput = false) {
     const expectedAutoScrollTop = autoScrollTopRef.current
@@ -349,8 +374,8 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
     if (!marker) return
     const targetRect = target.getBoundingClientRect()
     const viewTop = targetRect.top + target.clientTop
-    const nameplateBottom = target.querySelector<HTMLElement>('.vn-speaker')?.getBoundingClientRect().bottom ?? viewTop
-    const readingTop = Math.max(viewTop, nameplateBottom + 8)
+    const nameplate = nameplateBottom(target, viewTop)
+    const readingTop = Math.max(viewTop, nameplate + 8)
     const readingBottom = viewTop + target.clientHeight - 8
     const markerRect = marker.getBoundingClientRect()
     followLatestRef.current = markerRect.top >= readingTop - 1 && markerRect.bottom <= readingBottom + 1
@@ -655,24 +680,27 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
   const canJump = mode === 'playing' || mode === 'checkpoint'
   const mascot = <MascotStage emotion={emotion} isSpeaking={isSpeaking} nodTrigger={nodTrigger} customAnimationTrigger={null} lookTargetOffset={null} enablePointerTracking />
 
-  return <main className="player">
+  return <main className="player" data-background={background}>
     <div className={`vn-frame mode-${mode}`}>
-      <header className="player-header">
-        <span className="brand">Meet Mita</span><h1 className="player-title">{episode.title}</h1>
+      <StudyHeader background={background} onBackground={onBackground}>
+        <h1 className="player-title">{episode.title}</h1>
         <div className="vn-progress">
           <span>Scene {sceneNumber} of {order.length}</span>
           <ol aria-hidden="true">{order.map((s, i) => <li key={s.sceneId} className={i + 1 < sceneNumber ? 'done' : i + 1 === sceneNumber ? 'current' : ''} />)}</ol>
         </div>
-      </header>
+      </StudyHeader>
       <section className={`vn-scene${question || inQuestion ? ' vn-checkpoint-scene' : ''}${inQuestion && askPhase !== 'compose' ? ' vn-undim' : ''}`} aria-label="Scene">
         <div className="vn-stage">
           {mascot}
-          {mode === 'playing' && liveCards(scene, session.dialogueIndex).filter(card => !dismissedPictures.includes(cardKey(scene.sceneId, card))).map(card => {
+          {mode === 'playing' && (() => {
+            const card = liveCards(scene, session.dialogueIndex).at(-1)
+            if (!card) return null
             const key = cardKey(scene.sceneId, card)
+            if (dismissedPictures.includes(key)) return null
             return <PictureCardView key={key} note={{ key, sceneId: scene.sceneId, card }}
               onOpen={trigger => openPictureDetail({ key, sceneId: scene.sceneId, card }, false, trigger)}
               onDismiss={() => setDismissedPictures(current => current.includes(key) ? current : [...current, key])} />
-          })}
+          })()}
           {mode === 'completed' && <div className="vn-prompt"><p className="vn-prompt-label">Episode complete</p><p className="vn-prompt-text">{episode.title}</p></div>}
         </div>
         {question && <RecallCheckpoint key={scene.sceneId} question={question} state={checkpoint ?? null} pending={pending}
@@ -685,6 +713,7 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
           onNewTopic={() => { setDraft(''); setNewTopic(true); setHelpMode('explain') }} />}
       </section>
       <section className="vn-dialogue" aria-label="Dialogue">
+        {speaker && <span className="dlg-name">{speaker}</span>}
         <button ref={backlogCueRef} type="button" className="vn-backlog-cue" aria-label="Open the dialogue backlog" aria-haspopup="dialog"
           onClick={() => openBacklog(backlogCueRef.current)}>
           <span aria-hidden="true">^</span>
@@ -727,7 +756,6 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
             }
           }}>
             <span ref={dialogueScrollRef} className="vn-dialogue-scroll-area" onScroll={event => handleDialogueScroll(event.currentTarget)} onWheel={event => handleManualScrollIntent(event.currentTarget)} onTouchMove={event => handleManualScrollIntent(event.currentTarget)} onPointerDown={event => handleManualScrollIntent(event.currentTarget, false)}>
-              <span className="vn-speaker">{speaker}</span>
               <DialogueText key={turnId} id={turnId} text={text} revealed={revealed} onRevealed={markRevealed} onRevealProgress={onRevealProgress} />
               {dialogueError && <span className="vn-error" role="alert">{dialogueError} Activate the dialogue to try again.</span>}
             </span>
@@ -747,7 +775,7 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
           <p className="sr-only" aria-live="polite" aria-atomic="true">{speaker}: {text}</p>
           {pending && <p className="sr-only" role="status">Saving your progress…</p>}
         </> : <>
-          {line && <><p className="vn-speaker">{speaker}</p><p className="vn-text">{line.text}</p></>}
+          {line && <p className="vn-text">{line.text}</p>}
           <div className="vn-controls">
             {mode === 'completed' && <button className="vn-button" onClick={onExit}>Back to your lesson</button>}
             {mode !== 'checkpoint' && mode !== 'completed' && <p className="vn-note">This session is in {mode} mode, which this player cannot show yet.</p>}
@@ -778,7 +806,7 @@ export default function VisualNovelPlayer({ sessionId, onExit }: { sessionId: st
         onClick={() => { const from = menuRef.current; dialogRef.current?.close(); openBacklog(from) }}>
         <span>Backlog</span><span aria-hidden="true">^</span>
       </button>
-      <button type="button" className="vn-button vn-menu-leave" onClick={onExit}>Leave episode</button>
+      <button type="button" className="vn-button vn-menu-leave" onClick={() => { dialogRef.current?.close(); onExit() }}>Leave episode</button>
     </dialog>
     <PictureNotesDialog dialogRef={pictureDialogRef} title={selectedPicture?.card.title ?? 'Gallery'} view={pictureView} notes={pictureNotes}
       selected={selectedPicture} fromGallery={pictureFromGallery} onClose={handlePictureNotesClose} closeRef={pictureCloseRef}

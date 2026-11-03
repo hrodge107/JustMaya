@@ -47,6 +47,7 @@ function baseSession() {
 
 async function fixture(browser, options = {}) {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce', ...options.context })
+  if ((options.context?.reducedMotion ?? 'reduce') === 'reduce') await context.addInitScript(() => localStorage.setItem('meet-mita:motion', 'reduce'))
   const page = await context.newPage()
   page.on('pageerror', error => errors.push(error.message))
   page.on('console', message => { if (message.type() === 'error' && !message.text().includes('Failed to load resource')) errors.push(message.text()) })
@@ -151,7 +152,7 @@ async function main() {
     {
       const { context, page, go } = await fixture(browser)
       await go()
-      await page.locator('.vn-menu-trigger').click()
+      await page.getByRole('button', { name: 'Menu', exact: true }).click()
       await page.locator('.vn-menu-dialog[open]').waitFor()
       await page.locator('.vn-menu-backlog').click()
       await page.locator('.bl-dialog[open]').waitFor()

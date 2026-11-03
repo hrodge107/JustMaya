@@ -125,7 +125,10 @@ async function main() {
     for (const model of models) {
       const context = await browser.newContext({ viewport: { width: 1000, height: 800 }, reducedMotion: 'no-preference' })
       const page = await context.newPage()
+      // 'device' keeps the mid-session emulateMedia flip reaching the app —
+      // motion now defaults to full unless a stored choice says otherwise.
       await page.addInitScript(() => {
+        localStorage.setItem('meet-mita:motion', 'device')
         window.__vrmDraws = 0
         window.__vrmDeletes = 0
         for (const Context of [window.WebGLRenderingContext, window.WebGL2RenderingContext]) {
@@ -179,7 +182,7 @@ async function main() {
       const { default: VRMCanvas } = await import('/src/player/VRMCanvas.tsx')
       document.body.innerHTML = '<main id="test"></main>'
       const root = ReactDOM.createRoot(document.querySelector('#test'))
-      const baseProps = { emotion: 'idle', isSpeaking: false, nodTrigger: 0, customAnimationTrigger: null, lookTargetOffset: null, enablePointerTracking: false, modelUrl: '/__fixture/avatar.vrm', fallback: null, onError: () => { throw new Error('VRM failed') } }
+      const baseProps = { emotion: 'idle', isSpeaking: false, nodTrigger: 0, customAnimationTrigger: null, lookTargetOffset: null, enablePointerTracking: false, modelUrl: '/__fixture/avatar.vrm', onError: () => { throw new Error('VRM failed') } }
       window.__renderVrm = props => root.render(React.createElement(VRMCanvas, { ...baseProps, ...props }))
       window.__renderVrm({})
     })

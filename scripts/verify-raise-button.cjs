@@ -25,6 +25,7 @@ const episode = {
 
 async function fixture(browser, mode, viewport) {
   const context = await browser.newContext({ viewport, reducedMotion: 'reduce' })
+  await context.addInitScript(() => localStorage.setItem('meet-mita:motion', 'reduce'))
   const page = await context.newPage()
   page.on('pageerror', err => errors.push(err.message))
   const session = {

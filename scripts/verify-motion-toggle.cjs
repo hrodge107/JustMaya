@@ -52,40 +52,46 @@ async function openMenu(page) {
 async function main() {
   const browser = await chromium.launch({ channel: process.env.PLAYER_VERIFY_BROWSER || 'msedge', headless: true })
   try {
-    // Device asks for reduced motion: the switch follows it and typing is skipped.
+    // Device asks for reduced motion but nothing is stored: the app default
+    // is full motion — the VRM stays the out-of-box experience and typing runs.
     const reduced = await fixture(browser, 'reduce')
-    assert.equal(await dataMotion(reduced.page), 'reduce')
-    assert.equal(await rest(reduced.page), '', 'Device-reduced session must skip the typewriter')
-    let toggle = await openMenu(reduced.page)
-    assert.equal(await toggle.getAttribute('aria-checked'), 'true')
-    assert.equal(await reduced.page.getByRole('button', { name: 'Use device setting' }).count(), 0, 'Reset only appears once a value is forced')
-    // Forcing motion on overrides the device setting: typing begins.
-    await toggle.click()
-    assert.equal(await toggle.getAttribute('aria-checked'), 'false')
     assert.equal(await dataMotion(reduced.page), 'full')
-    assert.equal(await stored(reduced.page), 'full')
+    await reduced.page.waitForFunction(() => (document.querySelector('.vn-text-rest')?.textContent ?? '').length > 0)
+    assert.ok(await rest(reduced.page), 'Default session must run the typewriter even under device-reduce')
+    let toggle = await openMenu(reduced.page)
+    assert.equal(await toggle.getAttribute('aria-checked'), 'false')
+    assert.equal(await reduced.page.getByRole('button', { name: 'Use device setting' }).count(), 0, 'Reset only appears once a value is forced')
+    // Forcing reduce overrides the default: the line completes at once.
+    await toggle.click()
+    assert.equal(await toggle.getAttribute('aria-checked'), 'true')
+    assert.equal(await dataMotion(reduced.page), 'reduce')
+    assert.equal(await stored(reduced.page), 'reduce')
     await reduced.page.keyboard.press('Escape')
-    assert.ok(await rest(reduced.page), 'Forced-full session must run the typewriter')
+    await reduced.page.waitForFunction(() => document.querySelector('.vn-text-rest')?.textContent === '')
+    assert.equal(await rest(reduced.page), '', 'Forced-reduce session must skip the typewriter')
     // The forced value survives reload.
     await reduced.page.reload()
     await reduced.page.locator('.vn-frame').waitFor()
-    assert.equal(await dataMotion(reduced.page), 'full')
+    assert.equal(await dataMotion(reduced.page), 'reduce')
     toggle = await openMenu(reduced.page)
-    assert.equal(await toggle.getAttribute('aria-checked'), 'false')
-    // Resetting returns control to the device setting and clears storage.
+    assert.equal(await toggle.getAttribute('aria-checked'), 'true')
+    // Resetting hands control to the device setting and persists that choice.
     const reset = reduced.page.getByRole('button', { name: 'Use device setting' })
     assert.equal(await reset.count(), 1)
     await reset.click()
     assert.equal(await toggle.getAttribute('aria-checked'), 'true')
     assert.equal(await dataMotion(reduced.page), 'reduce')
-    assert.equal(await stored(reduced.page), null)
+    assert.equal(await stored(reduced.page), 'device')
     assert.equal(await reset.count(), 0, 'Reset disappears when following the device')
     await reduced.page.keyboard.press('Escape')
-    assert.equal(await rest(reduced.page), '', 'Reset must restore the device-reduced skip')
-    evidence.push({ check: 'device-reduce: follow, force full (types), persist across reload, reset to device', result: 'PASS' })
+    assert.equal(await rest(reduced.page), '', 'Device-follow restores the reduced skip')
+    await reduced.page.reload()
+    await reduced.page.locator('.vn-frame').waitFor()
+    assert.equal(await dataMotion(reduced.page), 'reduce', 'device choice persists across reload')
+    evidence.push({ check: 'device-reduce: default stays full, force reduce (skips), reset persists device-follow', result: 'PASS' })
     await reduced.context.close()
 
-    // Device has no preference: forcing reduce on skips typing and CSS motion.
+    // Device has no preference: default full motion; forcing reduce skips typing and CSS motion.
     const full = await fixture(browser, 'no-preference')
     assert.equal(await dataMotion(full.page), 'full')
     assert.ok(await rest(full.page), 'No-preference session must run the typewriter')

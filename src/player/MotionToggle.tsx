@@ -10,6 +10,6 @@ export default function MotionToggle() {
       <span>Reduce motion</span>
       <span className="vn-switch" aria-hidden="true"><span className="vn-switch-thumb" /></span>
     </button>
-    {override !== null && <button type="button" className="vn-motion-reset" onClick={() => setMotionOverride(null)}>Use device setting</button>}
+    {(override === 'reduce' || override === 'full') && <button type="button" className="vn-motion-reset" onClick={() => setMotionOverride('device')}>Use device setting</button>}
   </div>
 }

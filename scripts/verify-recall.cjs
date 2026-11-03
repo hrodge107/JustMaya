@@ -24,6 +24,7 @@ async function parked(request, sceneId = 's3-check1') {
 }
 async function fixture(browser, viewport = { width: 390, height: 844 }, reducedMotion = 'reduce', extra = {}) {
   const context = await browser.newContext({ viewport, reducedMotion, ...extra })
+  if (reducedMotion === 'reduce') await context.addInitScript(() => localStorage.setItem('meet-mita:motion', 'reduce'))
   const page = await context.newPage()
   page.on('pageerror', err => errors.push(err.message))
   await page.clock.install(); await page.clock.pauseAt(new Date())

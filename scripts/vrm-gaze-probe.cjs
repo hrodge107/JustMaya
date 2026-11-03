@@ -13,6 +13,9 @@ const fs = require('node:fs')
 const path = require('node:path')
 const os = require('node:os')
 
+const modelId = process.env.VRM_PROBE_MODEL || 'cyber'
+if (!['cyber', 'meta_chan'].includes(modelId)) throw new Error('VRM_PROBE_MODEL must be cyber or meta_chan')
+const armsDown = s => s.armDrops?.length === 4 && s.armDrops[0] > 0 && s.armDrops[1] > .5 && s.armDrops[2] > 0 && s.armDrops[3] > .5
 const base = process.env.VRM_VERIFY_URL || 'http://127.0.0.1:5198'
 const out = path.join(os.tmpdir(), 'mita-vrm-gaze-probe')
 fs.mkdirSync(out, { recursive: true })
@@ -62,7 +65,7 @@ async function gaze(page, settleMs = 1200, { stable = false } = {}) {
       eyeYaw: d.eyeYaw, eyePitch: d.eyePitch,
       lookX: d.lookX, lookY: d.lookY,
       gazeYaw: d.gazeYaw, gazePitch: d.gazePitch,
-      armZ: d.armZ, idleOn: d.idleOn, ready: d.ready, gestureW: d.gestureW,
+      armZ: d.armZ, armDrops: d.armDrops, idleOn: d.idleOn, ready: d.ready, gestureW: d.gestureW,
       frames: d.frames, elapsed: d.elapsed,
       softwareRenderer: d.softwareRenderer, pixelRatio: d.pixelRatio,
       bufferWidth: d.bufferWidth, bufferHeight: d.bufferHeight,
@@ -91,14 +94,14 @@ async function mountCanvas(page, { idle = true, tracking = true, idleDelay = 0 }
       const baseProps = {
         emotion: 'idle', isSpeaking: false, nodTrigger: 0, customAnimationTrigger: null,
         lookTargetOffset: null, enablePointerTracking: opts.tracking,
-        modelUrl: '/vroid_models/cyber.vrm', idleUrl: opts.idle !== false ? '/vroid_models/cyber-idle.fbx' : undefined,
+        modelUrl: `/vroid_models/${opts.modelId}.vrm`, idleUrl: opts.idle !== false ? '/vroid_models/cyber-idle.fbx' : undefined,
         fallback: null, onError: () => reject(new Error('VRM failed')),
       }
       window.__renderVrm = props => root.render(React.createElement(VRMCanvas, { ...baseProps, ...props }))
       window.__renderVrm({})
       resolve()
     }).catch(reject)
-  }), { idle, tracking })
+  }), { idle, tracking, modelId })
   await page.locator('.vrm-mascot:visible canvas').waitFor({ timeout: 60000 })
   await waitVrm(page)
 }
@@ -143,10 +146,10 @@ async function lifecycleChecks(browser) {
     await mountCanvas(page, { idle: true, idleDelay: 3000 })
     const first = await gaze(page, 0)
     await page.screenshot({ path: path.join(out, 'firstpose-delayed-fbx.png') })
-    check('firstpose: first visible pose is arms-down, not bind pose', () => assert.ok(Math.abs(first.armZ) > .5, `armZ=${first.armZ.toFixed(3)}`))
+    check('firstpose: first visible pose is arms-down, not bind pose', () => assert.ok(armsDown(first), `armZ=${first.armZ.toFixed(3)}`))
     await page.waitForFunction(() => window.__mitaVrm?.idleOn, null, { timeout: 30000 })
     const after = await gaze(page, 0)
-    check('firstpose: idle blends in without pose snap', () => assert.ok(after.idleOn === true && Math.abs(after.armZ) > .5, `idleOn=${after.idleOn} armZ=${after.armZ.toFixed(3)}`))
+    check('firstpose: idle blends in without pose snap', () => assert.ok(after.idleOn === true && armsDown(after), `idleOn=${after.idleOn} armZ=${after.armZ.toFixed(3)}`))
     await page.close()
   }
 
@@ -157,7 +160,7 @@ async function lifecycleChecks(browser) {
     page.on('pageerror', e => errors.push(`failedfbx: ${e.message}`))
     await mountCanvas(page, { idle: 'fail' })
     const s0 = await gaze(page, 0)
-    check('failedfbx: ready on rest pose without renderer failure', () => assert.ok(s0.ready && Math.abs(s0.armZ) > .5 && s0.idleOn === false, `ready=${s0.ready} armZ=${s0.armZ.toFixed(3)} idleOn=${s0.idleOn}`))
+    check('failedfbx: ready on rest pose without renderer failure', () => assert.ok(s0.ready && armsDown(s0) && s0.idleOn === false, `ready=${s0.ready} armZ=${s0.armZ.toFixed(3)} idleOn=${s0.idleOn}`))
     const s1 = await gaze(page, 800)
     check('failedfbx: render loop continues (procedural breath/pose)', () => assert.ok(s1.frames > s0.frames, `frames ${s0.frames} -> ${s1.frames}`))
     await page.close()
@@ -183,7 +186,7 @@ async function lifecycleChecks(browser) {
     await page.evaluate(() => window.__setHidden(false))
     await page.waitForFunction(f => window.__mitaVrm?.frames > f + 5, f2, { timeout: 30000 })
     const after = await gaze(page, 0)
-    check('hidden: resumes with no pose/physics burst', () => assert.ok(Math.abs(after.fx - before.fx) < .05 && Math.abs(after.armZ) > .5, `fx ${before.fx.toFixed(3)} -> ${after.fx.toFixed(3)} armZ=${after.armZ.toFixed(3)}`))
+    check('hidden: resumes with no pose/physics burst', () => assert.ok(Math.abs(after.fx - before.fx) < .05 && armsDown(after), `fx ${before.fx.toFixed(3)} -> ${after.fx.toFixed(3)} armZ=${after.armZ.toFixed(3)}`))
     await page.close()
   }
 
@@ -220,7 +223,7 @@ async function lifecycleChecks(browser) {
     check('gesture: hand rises while speaking', () => assert.ok(rise.gestureW > .4, `gestureW=${rise.gestureW.toFixed(2)}`))
     await page.waitForFunction(() => (window.__mitaVrm?.gestureW ?? 1) < .1, null, { timeout: 30000 })
     const rest = await gaze(page, 0)
-    check('gesture: releases back to rest', () => assert.ok(rest.gestureW < .1 && Math.abs(rest.armZ - 1.25) < .2, `gestureW=${rest.gestureW.toFixed(2)} armZ=${rest.armZ.toFixed(2)}`))
+    check('gesture: releases back to rest', () => assert.ok(rest.gestureW < .1 && armsDown(rest), `gestureW=${rest.gestureW.toFixed(2)} armZ=${rest.armZ.toFixed(2)}`))
     await page.close()
   }
 

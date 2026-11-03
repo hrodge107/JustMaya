@@ -26,6 +26,8 @@ const episode = {
 
 async function fixture(browser, options = {}) {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce', ...options.context })
+  // Motion defaults to full; a stored 'reduce' is what requests reduced motion now.
+  if ((options.context?.reducedMotion ?? 'reduce') === 'reduce') await context.addInitScript(() => localStorage.setItem('meet-mita:motion', 'reduce'))
   const page = await context.newPage()
   page.on('pageerror', error => errors.push(error.message))
   page.on('console', message => { if (message.type() === 'error' && !message.text().includes('Failed to load resource')) errors.push(message.text()) })
@@ -96,7 +98,7 @@ async function layout(page) {
 
 function assertMenuPlacement(layout) {
   assert.ok(layout.gallery.x + layout.gallery.width <= layout.menu.x, 'Gallery is immediately before Menu')
-  if (layout.width < 1000) return assert.ok(layout.dialogue.bottom <= layout.rail.y + 1)
+  if (layout.width < 800) return assert.ok(layout.dialogue.bottom <= layout.rail.y + 1)
   assert.ok(layout.rail.y - layout.frame.y <= 1, 'desktop Menu is at frame top')
   assert.ok(Math.abs(layout.rail.right - layout.frame.right) <= 1, 'desktop Menu is at frame right')
   assert.ok(layout.frame.bottom - layout.dialogue.bottom <= 21, 'desktop has no reserved bottom Menu space')
@@ -106,13 +108,13 @@ async function revealBoundary(page) {
   return page.evaluate(() => {
     const target = document.querySelector('.vn-dialogue-scroll-area')
     const marker = document.querySelector('.vn-reveal-boundary')
-    const speaker = target?.querySelector('.vn-speaker')
+    const speaker = target?.closest('.vn-dialogue')?.querySelector('.dlg-name')
     if (!target || !marker || !speaker) return null
     const targetRect = target.getBoundingClientRect()
     const markerRect = marker.getBoundingClientRect()
     const speakerRect = speaker.getBoundingClientRect()
     const viewTop = targetRect.top + target.clientTop
-    const readingTop = speakerRect.bottom + 8
+    const readingTop = Math.max(viewTop, speakerRect.bottom + 8)
     const readingBottom = viewTop + target.clientHeight - 8
     return {
       scrollTop: target.scrollTop,
@@ -132,7 +134,7 @@ async function contrastCheck(page) {
     return {
       text: style('.vn-text').color, dialogue: style('.vn-dialogue').backgroundColor,
       scrollbar: style('.vn-dialogue-scroll-area').scrollbarColor,
-      speaker: style('.vn-speaker').color, nameplate: style('.vn-speaker').backgroundColor,
+      speaker: style('.vn-dialogue > .dlg-name').color, nameplate: style('.vn-dialogue > .dlg-name').backgroundColor,
       headerText: style('.player-title').color, header: style('.player-header').backgroundColor,
       menuText: style('.vn-menu-trigger').color, menu: style('.vn-menu-trigger').backgroundColor,
       modalText: style('.vn-menu-dialog').color, modal: style('.vn-menu-dialog').backgroundColor,
@@ -287,12 +289,12 @@ async function main() {
       const viewport = f.page.locator('.vn-dialogue-scroll-area')
       await viewport.evaluate(target => { target.scrollTop = target.scrollHeight })
       const pinned = await viewport.evaluate(target => {
-        const speaker = target.querySelector('.vn-speaker').getBoundingClientRect()
+        const speaker = target.closest('.vn-dialogue').querySelector('.dlg-name').getBoundingClientRect()
         const button = target.closest('.vn-dialogue-target')
         const cue = button.querySelector('.vn-advance-cue').getBoundingClientRect()
-        const box = target.getBoundingClientRect()
+        const box = target.closest('.vn-dialogue').getBoundingClientRect()
         const buttonBox = button.getBoundingClientRect()
-        return { atEnd: target.scrollTop + target.clientHeight >= target.scrollHeight - 1, speakerInside: speaker.top >= box.top - 1 && speaker.bottom <= box.bottom + 1, cueInside: cue.top >= buttonBox.top - 1 && cue.bottom <= buttonBox.bottom + 1 }
+        return { atEnd: target.scrollTop + target.clientHeight >= target.scrollHeight - 1, speakerInside: speaker.top < box.top && speaker.bottom > box.top && speaker.left >= box.left && speaker.right <= box.right, cueInside: cue.top >= buttonBox.top - 1 && cue.bottom <= buttonBox.bottom + 1 }
       })
       assert.deepEqual(pinned, { atEnd: true, speakerInside: true, cueInside: true })
       const button = f.page.getByRole('button', { name: 'Menu', exact: true })
@@ -505,7 +507,7 @@ async function main() {
 
     const sweep = await fixture(browser)
     await sweep.go()
-    for (const width of [360, 639, 640, 768, 999, 1000, 1024]) {
+    for (const width of [360, 639, 640, 768, 799, 800, 999, 1000, 1024]) {
       await sweep.page.setViewportSize({ width, height: 800 })
       const current = await layout(sweep.page)
       assert.ok(current.scrollWidth <= width + 1)
@@ -513,15 +515,15 @@ async function main() {
       assert.equal(current.frame.right, width)
       assertMenuPlacement(current)
     }
-    evidence.push({ check: 'width sweep including 639/640 and 999/1000 breakpoints', result: 'PASS' })
+    evidence.push({ check: 'width sweep including 639/640, 799/800 and 999/1000 breakpoints', result: 'PASS' })
     await sweep.context.close()
 
     for (const viewport of [{width: 320, height: 568}, {width: 390, height: 844}, {width: 800, height: 1024}, {width: 1280, height: 800}, {width: 844, height: 390}]) {
       const f = await fixture(browser, { context: { viewport }, long: true })
       await f.go()
-      const tag = f.page.locator('.vn-speaker')
+      const tag = f.page.locator('.vn-dialogue > .dlg-name')
       const short = await tag.boundingBox(), panel = await f.page.locator('.vn-dialogue').boundingBox()
-      assert.ok(short.x >= panel.x && short.x < panel.x + 45 && short.y >= panel.y && short.y < panel.y + 35)
+      assert.ok(short.x >= panel.x && short.x < panel.x + 45 && short.y < panel.y && short.y + short.height > panel.y)
       assert.ok(short.width < panel.width * .8, 'short name must not stretch')
       await tag.evaluate(el => { el.textContent = 'Verification instructor with a long display name' })
       const before = await tag.boundingBox()

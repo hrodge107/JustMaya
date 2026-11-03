@@ -25,6 +25,10 @@ export type HomeSnap = {
   mode: HomeMode
 }
 
+/** Everything except the per-character text: Home subscribes here so typing
+ *  ticks re-render only the dialogue dock, not the whole page. */
+export type HomeCoarseSnap = Pick<HomeSnap, 'emotion' | 'speaking' | 'dimmed' | 'askOpen' | 'offerOpen' | 'mode'>
+
 const wait = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
 
 export default class HomeDialogue {
@@ -32,7 +36,7 @@ export default class HomeDialogue {
   private snap: HomeSnap = { speaker: 'Mita', line: '', text: '', typing: false, cue: false, emotion: 'idle', speaking: false, dimmed: false, askOpen: false, offerOpen: false, mode: 'greet' }
   private listeners = new Set<() => void>()
   private typing = false
-  private typer: ReturnType<typeof setInterval> | null = null
+  private typer: number | null = null
   private fullText = ''
   private sayResolve: (() => void) | null = null
   private holdRelease: (() => void) | null = null
@@ -46,6 +50,12 @@ export default class HomeDialogue {
     return () => { this.listeners.delete(listener) }
   }
   getSnap = () => this.snap
+  private coarse: HomeCoarseSnap = { emotion: 'idle', speaking: false, dimmed: false, askOpen: false, offerOpen: false, mode: 'greet' }
+  getCoarse = () => {
+    const s = this.snap, c = this.coarse
+    if (s.emotion === c.emotion && s.speaking === c.speaking && s.dimmed === c.dimmed && s.askOpen === c.askOpen && s.offerOpen === c.offerOpen && s.mode === c.mode) return c
+    return this.coarse = { emotion: s.emotion, speaking: s.speaking, dimmed: s.dimmed, askOpen: s.askOpen, offerOpen: s.offerOpen, mode: s.mode }
+  }
 
   private set(patch: Partial<HomeSnap>) {
     this.snap = { ...this.snap, ...patch }
@@ -54,7 +64,7 @@ export default class HomeDialogue {
 
   dispose() {
     this.seq++
-    if (this.typer) clearInterval(this.typer)
+    if (this.typer !== null) cancelAnimationFrame(this.typer)
     this.typing = false
     this.sayResolve?.()
     this.holdRelease?.()
@@ -100,7 +110,6 @@ export default class HomeDialogue {
     if (this.snap.mode === 'read' || this.snap.mode === 'offer') return
     this.seq++
     const t = this.seq
-    this.misses = 0
     this.set({ mode: 'talk' })
     await this.say(pick(TALK_INTRO), 'listening')
     if (t !== this.seq) return
@@ -265,7 +274,7 @@ export default class HomeDialogue {
 
   private finishType() {
     if (!this.typing) return
-    if (this.typer) clearInterval(this.typer)
+    if (this.typer !== null) cancelAnimationFrame(this.typer)
     this.typing = false
     this.typer = null
     this.set({ text: this.fullText, typing: false, speaking: false })
@@ -290,21 +299,26 @@ export default class HomeDialogue {
       this.typing = true
       this.sayResolve = () => res(t)
       this.set({ text: '', typing: true, speaking: true })
-      let i = 0
-      this.typer = setInterval(() => {
+      // Reveal by elapsed time on the frame clock, not per-char setInterval:
+      // work stays at paint rate and slow devices get chunks, not backlog.
+      let start: number | null = null
+      let shown = 0
+      const tick = (now: number) => {
+        this.typer = null
         if (t !== this.seq) {
-          if (this.typer) clearInterval(this.typer)
           this.typing = false
-          this.typer = null
           this.sayResolve = null
           this.set({ speaking: false })
           res(t)
           return
         }
-        i++
-        this.set({ text: text.slice(0, i) })
-        if (i >= text.length) this.finishType()
-      }, 26)
+        start ??= now
+        const i = Math.min(text.length, Math.floor((now - start) / 26))
+        if (i > shown) { shown = i; this.set({ text: text.slice(0, i) }) }
+        if (i >= text.length) { this.finishType(); return }
+        this.typer = requestAnimationFrame(tick)
+      }
+      this.typer = requestAnimationFrame(tick)
     })
   }
 

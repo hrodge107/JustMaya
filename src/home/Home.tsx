@@ -3,6 +3,7 @@ import { api, ApiError, type Job } from '../learnerApi'
 import { putShelf, listShelf, removeShelf, clearShelf, type ShelfRecord } from './browserShelf'
 import MascotStage from '../player/MascotStage'
 import MotionToggle from '../player/MotionToggle'
+import StudyHeader, { type Background } from '../StudyHeader'
 import HomeDialogue from './dialogueEngine'
 import { readDoneTurns, readFailTurn } from './script'
 import './home.css'
@@ -42,11 +43,28 @@ function clearJobParam() {
   window.history.replaceState({}, '', url)
 }
 
-export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
+/* The dialogue dock owns the per-character snapshot: while Mita types, only
+   this subtree re-renders per frame — the rest of Home follows getCoarse. */
+function DialogueDock({ engine }: { engine: HomeDialogue }) {
+  const snap = useSyncExternalStore(engine.subscribe, engine.getSnap)
+  return <div className="dlg" role="button" tabIndex={0} aria-label="Dialogue, click to advance"
+    onClick={() => engine.activate()}
+    onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); engine.activate() } }}>
+    <span className="dlg-name">{snap.speaker}</span>
+    <div className="dlg-body">
+      <p className="dlg-text"><span aria-hidden="true">{snap.text}</span><span className="sr-only" aria-live="polite">{snap.line}</span></p>
+    </div>
+    <span className="dlg-cue" aria-hidden="true" hidden={!snap.cue}>▾</span>
+  </div>
+}
+
+export default function Home({ onPlay, background, onBackground }: { onPlay(sessionId: string): void; background: Background; onBackground(): void }) {
   const engineRef = useRef<HomeDialogue | null>(null)
   if (!engineRef.current) engineRef.current = new HomeDialogue()
   const engine = engineRef.current
-  const snap = useSyncExternalStore(engine.subscribe, engine.getSnap)
+  // Coarse snapshot: typing ticks only move `text` inside the dock's own
+  // subscription, so a reveal re-renders one line of copy, not the page.
+  const snap = useSyncExternalStore(engine.subscribe, engine.getCoarse)
   const [chip, setChip] = useState<Chip>({ visible: false, name: '', stage: '', pct: 0, error: '', jobId: '' })
   const [askText, setAskText] = useState('')
   const [uploadErr, setUploadErr] = useState('')
@@ -427,6 +445,7 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
     setLearnErr('')
     try {
       const session = await api.createSession(episodeId)
+      learnDlg.current?.close()
       onPlay(session.sessionId)
     } catch (err) {
       setLearnErr(err instanceof Error ? err.message : 'Could not start the episode.')
@@ -487,9 +506,16 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
     else if (!e.shiftKey && (active === last || !dlg.contains(active))) { e.preventDefault(); first.focus() }
   }
 
-  return <main className="home">
+  return <main className="home" data-background={background}>
     <h1 className="sr-only">Meet Mita</h1>
     <div className="room" aria-hidden="true"><div className="b-scene" /></div>
+    <StudyHeader background={background} onBackground={onBackground} />
+    <div className="vn-menu-rail">
+      <button type="button" data-act="menu" ref={menuTrigger} className="vn-menu-trigger" aria-haspopup="dialog" aria-controls="menuDlg" onClick={() => openDialog(menuDlg)}>
+        <span className="vn-menu-icon" aria-hidden="true"><span /><span /><span /></span>
+        Menu
+      </button>
+    </div>
 
     <div className={`stage${snap.dimmed ? ' ask-dim' : ''}`}>
       {snap.askOpen && <div className="ask-overlay vn-ask-overlay">
@@ -524,29 +550,17 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
     </div>
 
     <div className="dock">
-      <div className="dlg" role="button" tabIndex={0} aria-label="Dialogue, click to advance"
-        onClick={() => engine.activate()}
-        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); engine.activate() } }}>
-        <span className="dlg-name">{snap.speaker}</span>
-        <div className="dlg-body">
-          <p className="dlg-text"><span aria-hidden="true">{snap.text}</span><span className="sr-only" aria-live="polite">{snap.line}</span></p>
-        </div>
-        <span className="dlg-cue" aria-hidden="true" hidden={!snap.cue}>▾</span>
-      </div>
+      <DialogueDock engine={engine} />
       <div className="foot">
         <nav className="rail" aria-label="Home actions">
           <button type="button" data-act="talk" aria-disabled={reading || snap.mode === 'offer' || undefined} onClick={() => void engine.startTalk()}>
             <svg className="bi" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg><span>Talk</span>
           </button>
-          <button type="button" data-act="upload" aria-disabled={reading || uploadBusy || snap.mode === 'offer' || undefined} onClick={() => { if (reading || uploadBusy || snap.mode === 'offer') return; setUploadErr(''); openDialog(uploadDlg) }}>
+          <button type="button" data-act="upload" className="vn-menu-trigger" aria-disabled={reading || uploadBusy || snap.mode === 'offer' || undefined} onClick={() => { if (reading || uploadBusy || snap.mode === 'offer') return; setUploadErr(''); openDialog(uploadDlg) }}>
             <svg className="bi" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M17 8l-5-5-5 5" /><path d="M12 3v12" /></svg><span>Upload</span>
           </button>
-          <button type="button" data-act="learn" onClick={() => { openDialog(learnDlg); void loadEpisodes() }}>
+          <button type="button" data-act="learn" className="vn-menu-trigger" onClick={() => { openDialog(learnDlg); void loadEpisodes() }}>
             <svg className="bi" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" /><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" /></svg><span>Learn</span>
-          </button>
-          <button type="button" data-act="menu" ref={menuTrigger} className="vn-menu-trigger" aria-haspopup="dialog" aria-controls="menuDlg" onClick={() => openDialog(menuDlg)}>
-            <span className="vn-menu-icon" aria-hidden="true"><span /><span /><span /></span>
-            Menu
           </button>
         </nav>
       </div>
@@ -617,7 +631,11 @@ export default function Home({ onPlay }: { onPlay(sessionId: string): void }) {
             onDrop={e => { e.preventDefault(); setDragOver(false); addPhotos(Array.from(e.dataTransfer.files)) }}>Drop photos here, or choose photos</button>
           <input ref={photoPick} id="photoPick" type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" multiple hidden
             onChange={e => { addPhotos(Array.from(e.target.files ?? [])); e.target.value = '' }} />
-          <p className="sub">JPEG, PNG, or static WebP. 10 MiB each, 20 MiB total. Selection order becomes page order.</p>
+          <ul className="sub photo-guidance">
+            <li>JPEG, PNG, or static WebP</li>
+            <li>Up to 10 MiB per photo, 20 MiB total</li>
+            <li>Selection order sets page order</li>
+          </ul>
           {photos.length > 0 && <>
             <ol className="photo-list" aria-label="Selected photo pages">
               {photos.map((photo, index) => <li key={`${index}-${photo.name}`}><span>{photo.name}</span>

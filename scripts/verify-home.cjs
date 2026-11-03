@@ -162,7 +162,7 @@ async function run() {
 
   await track('chrome: rail with icon+text locked, mascot', async () => {
     const buttons = page.locator('.rail button')
-    await assert.deepEqual(await buttons.allInnerTexts().then(t => t.map(x => x.trim())), ['Talk', 'Upload', 'Learn', 'Menu'])
+    await assert.deepEqual(await buttons.allInnerTexts().then(t => t.map(x => x.trim())), ['Talk', 'Upload', 'Learn'])
     assert.equal(await page.locator('.rail button .bi').count(), 3, 'Talk/Upload/Learn keep SVG icons')
     assert.equal(await page.locator('.rail button .bi:visible').count(), 3, 'icons always shown')
     assert.equal(await page.locator('#iconToggle').count(), 0, 'no display toggle')
@@ -171,13 +171,16 @@ async function run() {
     assert.match(await dlgText(page), /\S/)
   })
 
-  await track('shared chrome: Menu uses the player vn-menu identity', async () => {
-    const trigger = page.locator('.rail .vn-menu-trigger')
-    assert.equal(await trigger.count(), 1, 'menu trigger is vn-menu-trigger')
-    assert.equal(await page.locator('.rail .vn-menu-icon > span').count(), 3, 'CSS hamburger has three bars')
-    const skin = await trigger.evaluate(el => { const c = getComputedStyle(el); return { bg: c.backgroundColor, fg: c.color } })
-    assert.equal(skin.bg, 'rgb(247, 247, 250)', 'trigger is the paper pill')
-    assert.equal(skin.fg, 'rgb(48, 48, 76)', 'trigger label is ink')
+  await track('shared chrome: Upload/Learn/Menu use the player vn-menu identity', async () => {
+    const triggers = page.locator('.home .vn-menu-trigger')
+    assert.equal(await triggers.count(), 3, 'Upload, Learn and Menu are vn-menu-trigger pills')
+    assert.equal(await page.locator('.home .vn-menu-rail .vn-menu-icon > span').count(), 3, 'CSS hamburger has three bars')
+    for (const trigger of await triggers.all()) {
+      const skin = await trigger.evaluate(el => { const c = getComputedStyle(el); return { bg: c.backgroundColor, fg: c.color, ring: c.boxShadow } })
+      assert.equal(skin.bg, 'rgb(52, 64, 94)', 'trigger uses the shared navy rail')
+      assert.equal(skin.fg, 'rgb(255, 255, 255)', 'trigger label is white')
+      assert.notEqual(skin.ring, 'none', 'rail buttons have a visible outline')
+    }
   })
 
   await track('idle dialogue auto-advances after 10s', async () => {
@@ -489,7 +492,8 @@ async function run() {
   await pageResume.goto(`${base}/?job=job-2`)
   await track('reload with ?job= resumes the read narration', async () => {
     await pageResume.locator('.upload-chip').waitFor()
-    await pageResume.locator('.mascot[data-emotion="reading"]:visible').waitFor()
+    // Resume can finish before GPU preparation reveals the avatar.
+    await pageResume.locator('.mascot[data-emotion="reading"]').waitFor({ state: 'attached' })
     await pageResume.waitForFunction(() => {
       const el = document.querySelector('.up-fill')
       return el && parseFloat(el.style.width) >= 100
@@ -501,6 +505,7 @@ async function run() {
     assert.equal(rec.docName, 'your document')
     assert.equal(rec.pdfSize, null, 'resume caches no PDF bytes')
     assert.equal(rec.episodeId, EP_ID)
+    await pageResume.locator('.mascot:visible').waitFor()
   })
 
   // ---------- degraded storage: IndexedDB deleted before the app boots ----------
@@ -669,7 +674,7 @@ async function run() {
     const railBox = await pageMobile.locator('.rail').boundingBox()
     assert.ok(railBox.y >= dlgBox.y + dlgBox.height - 1, 'rail sits below the dialogue')
     const widths = await pageMobile.locator('.rail button').evaluateAll(els => els.map(e => e.getBoundingClientRect().width))
-    assert.equal(widths.length, 4)
+    assert.equal(widths.length, 3)
     assert.ok(Math.max(...widths) - Math.min(...widths) < 8, `rail buttons share the row: ${widths}`)
     const overflow = await pageMobile.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
     assert.ok(overflow <= 1, `horizontal overflow: ${overflow}px`)
@@ -678,6 +683,7 @@ async function run() {
   // ---------- reduced motion ----------
   await ctxMobile.close()
   const ctxReduce = await browser.newContext({ viewport: { width: 1280, height: 800 }, reducedMotion: 'reduce' })
+  await ctxReduce.addInitScript(() => localStorage.setItem('meet-mita:motion', 'reduce'))
   const pageReduce = await ctxReduce.newPage()
   pageReduce.on('pageerror', e => errors.push(`pageerror(reduce): ${e.message}`))
   await stub(pageReduce)

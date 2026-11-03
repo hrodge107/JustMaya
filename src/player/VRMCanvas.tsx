@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { VRMLoaderPlugin, VRMUtils, type VRM } from '@pixiv/three-vrm'
@@ -14,7 +14,6 @@ type Props = MascotStageProps & {
   expressions?: MascotModel['expressions']
   outlineFactor?: number
   restPose?: boolean
-  fallback: ReactNode
   onError: () => void
 }
 
@@ -92,6 +91,7 @@ type VrmDebug = {
   softwareRenderer: boolean
   /** Left upper-arm local Z — ~1.25 resting, ~0 is a bind-pose T-pose. */
   armZ: number
+  armDrops: number[]
   /** Conversational gesture blend weight, 0..1 (ease in, release). */
   gestureW: number
   /** Test hook: set true to trigger a gesture on the next frame. */
@@ -140,6 +140,10 @@ export default function VRMCanvas(props: Props) {
     let headBone: THREE.Object3D | null | undefined
     let headParent: THREE.Object3D | null | undefined
     const poseBones: Partial<Record<VRMHumanBoneName, THREE.Object3D | null>> = {}
+    let restEntries = REST_POSE_ENTRIES
+    let gesturePose = GESTURE_POSE
+    const armBones: (THREE.Object3D | null)[][] = []
+    const armPoints = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()]
     let chestBone: THREE.Object3D | null | undefined
     let idleClip = false
     let gestureAt = 7 + Math.random() * 8
@@ -161,7 +165,7 @@ export default function VRMCanvas(props: Props) {
       gazeYaw: 0, gazePitch: 0,
       camX: 0, camY: 0, camZ: 0, elapsed: 0,
       pixelRatio: 0, bufferWidth: 0, bufferHeight: 0, softwareRenderer: false,
-      armZ: 0, gestureW: 0, idleOn: false,
+      armZ: 0, armDrops: [], gestureW: 0, idleOn: false,
     }
     window.__mitaVrm = debug
     const probePos = new THREE.Vector3()
@@ -176,18 +180,20 @@ export default function VRMCanvas(props: Props) {
     const camera = new THREE.PerspectiveCamera(30, 1, .01, 100)
     camera.position.set(0, 1.3, 3.2)
     camera.lookAt(0, 1.2, 0)
-    // Locked framing is recomputed on load and resize from the model bounds —
-    // the upper-body crop (crown ~10% below the canvas top, chest centered)
-    // stays fixed no matter how the viewport changes.
+    // Locked framing is recomputed on load and resize from the model bounds.
+    // Desktop uses a wider crop to carry more of the torso behind the dialogue
+    // while anchoring the crown near its existing position.
     let frameAimY = 0, frameHeight = 0
     const applyFraming = () => {
       if (!frameHeight) return
       // Short screens (landscape phones) get a wider crop so the crown and
       // face keep breathing room instead of filling the frame edge-to-edge.
       const width = Math.max(container.clientWidth, 1), height = Math.max(container.clientHeight, 1)
+      const desktop = width >= 1000
       // ponytail: interpolate the two supplied portrait/landscape crops; add another point only with a new reference.
       const aspectScale = height < 520 ? 1 : THREE.MathUtils.clamp(1.28 - (width / height - .55) * .33, .88, 1.35)
-      const span = frameHeight * .62 * THREE.MathUtils.clamp(520 / height, 1, 1.6) * aspectScale
+      const span = frameHeight * .62 * THREE.MathUtils.clamp(520 / height, 1, 1.6) * aspectScale * (desktop ? 1.15 : 1)
+      frameAimY = crownPosition.y - frameHeight * (desktop ? .25: .26)
       camera.position.set(0, frameAimY, span / 2 / Math.tan(THREE.MathUtils.degToRad(camera.fov * .5)))
       camera.lookAt(0, frameAimY, 0)
     }
@@ -258,6 +264,10 @@ export default function VRMCanvas(props: Props) {
     const tick = (now: number) => {
       frame = 0
       if (stopped() || !prepared || document.hidden || !renderer || !vrm) return
+      // ~30fps ceiling — halves the always-on GPU/main-thread tax on every
+      // surface. 31ms keeps a 60Hz vsync slot (33.4ms renders, 16.7ms skips)
+      // without jitter stalls; devices already slower are untouched.
+      if (last && now - last < 31) { frame = requestAnimationFrame(tick); return }
       const wallDt = last ? Math.max((now - last) / 1000, 0) : 0
       const dt = Math.min(wallDt, .05)
       // Gaze follows elapsed time; physics, gestures, and animation keep the 50ms clamp.
@@ -319,15 +329,15 @@ export default function VRMCanvas(props: Props) {
       if (gestureStart >= 0 && elapsed - gestureStart >= GESTURE_SECONDS) gestureStart = -1
       gestureW = THREE.MathUtils.damp(gestureW, gestureStart >= 0 ? 1 : 0, 6, dt)
       debug.gestureW = gestureW
-      for (const [name, rest] of REST_POSE_ENTRIES) {
+      for (const [name, rest] of restEntries) {
         const bone = poseBones[name]
         if (!bone) continue
-        const g = GESTURE_POSE[name]
+        const g = gesturePose[name]
         bone.rotation.x = THREE.MathUtils.damp(bone.rotation.x, rest[0] + (g ? (g[0] - rest[0]) * gestureW : 0), 8, dt)
         bone.rotation.y = THREE.MathUtils.damp(bone.rotation.y, rest[1] + (g ? (g[1] - rest[1]) * gestureW : 0), 8, dt)
         bone.rotation.z = THREE.MathUtils.damp(bone.rotation.z, rest[2] + (g ? (g[2] - rest[2]) * gestureW : 0), 8, dt)
       }
-      const hand = poseBones.rightHand, gh = GESTURE_POSE.rightHand
+      const hand = poseBones.rightHand, gh = gesturePose.rightHand
       if (hand && gh) {
         hand.rotation.x = THREE.MathUtils.damp(hand.rotation.x, gh[0] * gestureW, 8, dt)
         hand.rotation.y = THREE.MathUtils.damp(hand.rotation.y, gh[1] * gestureW, 8, dt)
@@ -342,6 +352,15 @@ export default function VRMCanvas(props: Props) {
         vrm.lookAt.pitch = THREE.MathUtils.damp(vrm.lookAt.pitch, lookY * 8 + saccadeY * 35, 6, wallDt)
       }
       vrm.update(dt)
+      if (import.meta.env.DEV) {
+        vrm.scene.updateMatrixWorld(true)
+        debug.armDrops = armBones.flatMap(bones => {
+          if (bones.some(bone => !bone)) return [0, 0]
+          bones.forEach((bone, i) => bone!.getWorldPosition(armPoints[i]))
+          const length = armPoints[0].distanceTo(armPoints[1]) + armPoints[1].distanceTo(armPoints[2])
+          return [(armPoints[0].y - armPoints[1].y) / length, (armPoints[0].y - armPoints[2].y) / length]
+        })
+      }
       try { renderer.render(scene, camera) }
       catch {
         contextLost = true
@@ -417,6 +436,11 @@ export default function VRMCanvas(props: Props) {
         if (!loaded) { VRMUtils.deepDispose(gltf.scene); throw new Error('Model is not a VRM') }
         if (stopped()) { VRMUtils.deepDispose(loaded.scene); return }
         vrm = loaded
+        if (vrm.meta.metaVersion === '1') {
+          const convert = ([x, y, z]: [number, number, number]): [number, number, number] => [-x, y, -z]
+          restEntries = REST_POSE_ENTRIES.map(([name, pose]) => [name, convert(pose)])
+          gesturePose = Object.fromEntries(Object.entries(GESTURE_POSE).map(([name, pose]) => [name, convert(pose)]))
+        }
         debug.modelParsedAt = performance.now()
         VRMUtils.rotateVRM0(vrm)
         scene.add(vrm.scene)
@@ -437,7 +461,6 @@ export default function VRMCanvas(props: Props) {
         })
         frameHeight = bounds.max.y - bounds.min.y
         crownPosition.set((bounds.min.x + bounds.max.x) / 2, bounds.max.y, (bounds.min.z + bounds.max.z) / 2)
-        frameAimY = bounds.max.y - frameHeight * .26
         applyFraming()
         headBone = vrm.humanoid.getNormalizedBoneNode('head')
         headParent = headBone?.parent
@@ -445,24 +468,28 @@ export default function VRMCanvas(props: Props) {
         chestBone = vrm.humanoid.getNormalizedBoneNode('chest')
         // Rest stance lands BEFORE the first visible frame — a VRM0 bind pose
         // is a T-pose and must never flash while the optional idle loads.
-        for (const [name, rest] of REST_POSE_ENTRIES) {
+        for (const [name, rest] of restEntries) {
           poseBones[name] = vrm.humanoid.getNormalizedBoneNode(name)
           if (initialProps.restPose !== false) poseBones[name]?.rotation.set(...rest)
         }
         poseBones.rightHand = vrm.humanoid.getNormalizedBoneNode('rightHand')
+        for (const side of ['left', 'right'] as const) {
+          armBones.push(['UpperArm', 'LowerArm', 'Hand'].map(part => vrm!.humanoid.getRawBoneNode(`${side}${part}` as VRMHumanBoneName)))
+        }
         // Morph-driven meshes must not be culled against their bind-pose bounds.
         // outlineFactor (per model spec) converts authored world-space MToon
-        // outlines to a constant screen-space width.
+        // outlines to a constant screen-space width. Software GL skips the
+        // outline pass entirely — same degraded-quality tier as the pixel budget.
         const outlineFactor = initialProps.outlineFactor
         vrm.scene.traverse(obj => {
           obj.frustumCulled = false
-          if (outlineFactor && (obj as THREE.Mesh).isMesh) {
-            const mats = Array.isArray((obj as THREE.Mesh).material) ? (obj as THREE.Mesh).material : [(obj as THREE.Mesh).material]
-            for (const m of mats as { isMToonMaterial?: boolean; outlineWidthFactor?: number; outlineWidthMode?: string; needsUpdate?: boolean }[]) {
-              if (m?.isMToonMaterial && m.outlineWidthFactor && m.outlineWidthMode !== 'none') {
-                m.outlineWidthMode = 'screenCoordinates'; m.outlineWidthFactor = outlineFactor; m.needsUpdate = true
-              }
-            }
+          if (!(obj as THREE.Mesh).isMesh) return
+          const mats = Array.isArray((obj as THREE.Mesh).material) ? (obj as THREE.Mesh).material : [(obj as THREE.Mesh).material]
+          for (const m of mats as { isMToonMaterial?: boolean; outlineWidthFactor?: number; outlineWidthMode?: string; needsUpdate?: boolean }[]) {
+            if (!m?.isMToonMaterial || !m.outlineWidthFactor || m.outlineWidthMode === 'none') continue
+            if (softwareRenderer) { m.outlineWidthMode = 'none'; m.needsUpdate = true; continue }
+            if (!outlineFactor) continue
+            m.outlineWidthMode = 'screenCoordinates'; m.outlineWidthFactor = outlineFactor; m.needsUpdate = true
           }
         })
         // Resolve logical emotion keys to names this model actually registers
@@ -574,7 +601,6 @@ export default function VRMCanvas(props: Props) {
   }, [props.modelUrl, props.idleUrl])
 
   return <>
-    {!ready && props.fallback}
     <figure className="mascot vrm-mascot" data-emotion={props.emotion} data-speaking={props.isSpeaking || undefined} data-nod-trigger={props.nodTrigger} data-idle-playing={idlePlaying || undefined} style={{ visibility: ready ? 'visible' : 'hidden' }} aria-hidden={!ready} aria-label={`Mita, ${props.emotion}${props.isSpeaking ? ', speaking' : ''}`}>
       <div className="vrm-viewport" ref={host} />
     </figure>
