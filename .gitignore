@@ -68,3 +68,6 @@ prototype/homepage/live2d/
 prototype/homepage/vendor/
 prototype/homepage/player.bundle.*
 prototype/homepage/*.woff2
+
+# Local chat references.
+.codex-remote-attachments/
