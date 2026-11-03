@@ -72,3 +72,6 @@ prototype/homepage/*.woff2
 
 # Local experiments.
 prototype/
+
+# Optional agent skills are installed locally.
+.agents/skills/
