@@ -69,7 +69,8 @@ export const MASCOT_MODELS: Record<string, MascotModel> = {
   meta_chan: {
     id: 'meta_chan',
     url: assetUrl('meta_chan.vrm'),
-    idleUrl: MODEL_ASSETS['meta_chan-idle.fbx'],
+    // Shares cyber's Mixamo idle until a dedicated meta_chan-idle.fbx lands.
+    idleUrl: MODEL_ASSETS['meta_chan-idle.fbx'] ?? MODEL_ASSETS['cyber-idle.fbx'],
     outlineFactor: 0.004,
   },
   // The VRoid sample used by the prototype lab (formerly 'sample'). Its custom
