@@ -48,3 +48,7 @@ backend/data-verify/
 
 # Staged real PDF fixtures (seeded locally, never committed)
 backend/tests/fixtures/
+
+# Local chat references and experiments.
+.codex-remote-attachments/
+prototype/
