@@ -6,19 +6,19 @@ Meet Mita is an anime study companion that turns a student's PDF or photos of no
 
 ## See the experience
 
-These desktop captures show a saved lesson based on the included sample chapter, using the current development interface. The Raise Hand response was generated during a real session.
+These desktop captures show the current development interface and a saved lesson about digital logic.
 
-**Episode**
+**Lobby**
 
-![Mita presents the sample lesson](public/readme/episode.png)
+![Mita welcomes the learner in the lobby](public/readme/lobby.png)
 
-**Recall checkpoint**
+**Episode with a visual aid**
 
-![A recall question about river settlements](public/readme/recall.png)
+![Mita explains analog circuits beside a generated picture card](public/readme/episode.png)
 
-**Raise Hand answer**
+**Raise Hand input**
 
-![Mita answers a question about rivers](public/readme/raise-hand.png)
+![A question entered in the Raise Hand interface](public/readme/raise-hand.png)
 
 ## From notes to an episode
 
