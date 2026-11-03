@@ -1,6 +1,6 @@
 // Viewport-matrix framing verification for the production VRM stage.
 // Run against a Vite dev server serving the real backend + sample model:
-//   VITE_MASCOT_MODEL=sample npm run dev -- --host 127.0.0.1 --port 5198
+//   VITE_MASCOT_MODEL=cyber npm run dev -- --host 127.0.0.1 --port 5198
 //   node scripts/vrm-framing.cjs
 //
 // Covers task 3.3: Home + Episode screenshots at the reference sizes,

@@ -1,6 +1,6 @@
 // Deterministic directional gaze probe for the production VRM renderer.
-// Run against a Vite dev server started with VITE_MASCOT_MODEL=sample:
-//   VITE_MASCOT_MODEL=sample npm run dev -- --host 127.0.0.1 --port 5198
+// Run against a Vite dev server started with VITE_MASCOT_MODEL=cyber:
+//   VITE_MASCOT_MODEL=cyber npm run dev -- --host 127.0.0.1 --port 5198
 //   node scripts/vrm-gaze-probe.cjs
 //
 // Asserts screen-space gaze direction via window.__mitaVrm (faceNdc relative
@@ -75,8 +75,8 @@ async function mountCanvas(page, { idle = true, tracking = true, idleDelay = 0 }
   await page.addInitScript(() => localStorage.setItem('meet-mita:motion', 'reduce'))
   // idle: true loads the clip, 'fail' requests it but aborts (failure path),
   // false configures no clip at all.
-  if (idle === false || idle === 'fail') await page.route('**/mascot/sample-idle.fbx', route => route.abort())
-  else if (idleDelay) await page.route('**/mascot/sample-idle.fbx', async route => { await new Promise(r => setTimeout(r, idleDelay)); route.continue() })
+  if (idle === false || idle === 'fail') await page.route('**/vroid_models/cyber-idle.fbx', route => route.abort())
+  else if (idleDelay) await page.route('**/vroid_models/cyber-idle.fbx', async route => { await new Promise(r => setTimeout(r, idleDelay)); route.continue() })
   await page.goto(base)
   await page.evaluate(opts => new Promise((resolve, reject) => {
     Promise.all([
@@ -91,7 +91,7 @@ async function mountCanvas(page, { idle = true, tracking = true, idleDelay = 0 }
       const baseProps = {
         emotion: 'idle', isSpeaking: false, nodTrigger: 0, customAnimationTrigger: null,
         lookTargetOffset: null, enablePointerTracking: opts.tracking,
-        modelUrl: '/mascot/sample.vrm', idleUrl: opts.idle !== false ? '/mascot/sample-idle.fbx' : undefined,
+        modelUrl: '/vroid_models/cyber.vrm', idleUrl: opts.idle !== false ? '/vroid_models/cyber-idle.fbx' : undefined,
         fallback: null, onError: () => reject(new Error('VRM failed')),
       }
       window.__renderVrm = props => root.render(React.createElement(VRMCanvas, { ...baseProps, ...props }))

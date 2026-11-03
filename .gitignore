@@ -57,9 +57,9 @@ prototype/vrm/model.js
 prototype/vrm/anim-*.js
 prototype/vrm/anims/
 
-# Swappable mascot binaries — drop assets in public/mascot/ locally or at deploy
-public/mascot/*.vrm
-public/mascot/*.fbx
+# Swappable mascot binaries — drop assets in vroid_models/ locally or at deploy
+vroid_models/*
+!vroid_models/README.md
 
 # Staged Live2D player (prototype/homepage/player.html): copied SEKAI game
 # assets, vendor scripts, esbuild output, and emitted fonts — regen via

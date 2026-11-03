@@ -1,5 +1,5 @@
 // Baseline capture for the stabilize-production-vrm-avatar revision.
-// Run against production preview built with VITE_MASCOT_MODEL=sample.
+// Run against production preview built with VITE_MASCOT_MODEL=cyber.
 // VRM_SOFTWARE=1 forces SwiftShader; VRM_NO_PARALLEL=1 tests its absence.
 // VRM_HOME_ONLY=1 skips backend-dependent paths.
 //   node scripts/vrm-baseline.cjs
@@ -130,7 +130,7 @@ async function main() {
     record.meta.softwareRequested = process.env.VRM_SOFTWARE === '1'
     record.meta.noParallelRequested = process.env.VRM_NO_PARALLEL === '1'
     record.meta.emptyPageCadence = await measureRun(probe, 2)
-    record.meta.model = 'sample (public/mascot/sample.vrm, VRM 0.0, VRoid) + sample-idle.fbx'
+    record.meta.model = 'cyber (vroid_models/cyber.vrm, VRM 0.0, VRoid) + cyber-idle.fbx'
     record.meta.devicePixelRatio = await probe.evaluate(() => window.devicePixelRatio)
     record.meta.fixtures = {
       vrm1: fs.existsSync('C:/Users/User/AppData/Local/Temp/justmaya-vrm-test.vrm') ? 'C:/Users/User/AppData/Local/Temp/justmaya-vrm-test.vrm' : 'MISSING',

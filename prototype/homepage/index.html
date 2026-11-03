@@ -1417,7 +1417,7 @@ const labSub = $('#labSub'), labErr = $('#labErr'), labEmo = $('#labEmo'),
       labSpeak = $('#labSpeak'), labGaze = $('#labGaze'), labForce = $('#labForce'),
       labExpr = $('#labExpr'), labRead = $('#labRead'), labFile = $('#labFile');
 let vrm = null, labMode = false, forceVrm = false, tourTimer = 0;
-let modelName = window.MITA_VRM_NAME || 'sample.vrm';
+let modelName = window.MITA_VRM_NAME || 'cyber.vrm';
 
 const vrmProps = () => ({
   emotion: maya.dataset.state,
@@ -1436,7 +1436,7 @@ async function modelBuffer(file) {
   if (file) return file.arrayBuffer();
   // fetch of local files is blocked on file:// — skip straight to the embed.
   if (location.protocol !== 'file:') {
-    try { const r = await fetch('../1754622352515258289.vrm'); if (r.ok) return await r.arrayBuffer(); } catch { /* fall through */ }
+    try { const r = await fetch('../../vroid_models/cyber.vrm'); if (r.ok) return await r.arrayBuffer(); } catch { /* fall through */ }
   }
   if (window.MITA_VRM_B64) return b64buf(window.MITA_VRM_B64);
   throw new Error('no model source (run pack-model.cjs)');
