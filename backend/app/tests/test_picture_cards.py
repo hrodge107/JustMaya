@@ -169,9 +169,12 @@ def test_get_picture_route_serves_and_blocks_traversal(tmp_path):
     folder = tmp_path / "pictures" / "ep-1"
     folder.mkdir(parents=True)
     (folder / "s1-l1.webp").write_bytes(WEBP)
+    (tmp_path / "private.webp").write_bytes(WEBP)
     with TestClient(create_app(data_dir=tmp_path)) as client:
         ok = client.get("/api/episodes/ep-1/pictures/s1-l1.webp")
         assert ok.status_code == 200 and ok.content == WEBP
         assert client.get("/api/episodes/ep-1/pictures/nope.webp").status_code == 404
         bad = client.get("/api/episodes/ep-1/pictures/..%2F..%2Fapp.db")
         assert bad.status_code == 404
+        for episode in ("..", "..%5C..", "..%5C", "C:%5Cprivate"):
+            assert client.get(f"/api/episodes/{episode}/pictures/private.webp").status_code == 404
