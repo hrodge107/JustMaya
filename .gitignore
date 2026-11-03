@@ -69,3 +69,6 @@ prototype/homepage/*.woff2
 
 # Local chat references.
 .codex-remote-attachments/
+
+# Local experiments.
+prototype/
