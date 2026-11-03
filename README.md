@@ -4,6 +4,14 @@
 
 Meet Mita is an anime study companion that turns a student's PDF or photos of notes into a playable visual-novel episode. Mita presents the material through dialogue, illustrates selected ideas, pauses for recall questions, and answers questions when the learner raises a hand.
 
+## See the experience
+
+These captures show a saved lesson based on the included sample chapter, using the current development interface. The Raise Hand response was generated during a real session.
+
+| Episode | Recall checkpoint | Raise Hand answer |
+| --- | --- | --- |
+| ![Mita presents the sample lesson](public/readme/episode.png) | ![A recall question about river settlements](public/readme/recall.png) | ![Mita answers a question about rivers](public/readme/raise-hand.png) |
+
 ## From notes to an episode
 
 1. Upload a PDF or up to five ordered photos of pages or notes.
