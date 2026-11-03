@@ -33,4 +33,4 @@ See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rule
 
 ### Optional 3D mascot
 
-Set `VITE_MASCOT_VRM_URL` to a URL for a VRM 0 or VRM 1 file you are licensed to use. Set `VITE_MASCOT_IDLE_URL` to a licensed Mixamo FBX idle animation to add a body idle. These Vite variables are read when the frontend is built. With no model, reduced motion, or an unavailable model/WebGL context, Mita uses the built-in stand-in. Only use models and animations whose terms permit your intended use.
+The project mascot VRM in `vroid_models/meta_chan.vrm` loads by default. Set `VITE_MASCOT_VRM_URL` to override it with a URL for another VRM 0 or VRM 1 file you are licensed to use. Set `VITE_MASCOT_IDLE_URL` to a licensed Mixamo FBX idle animation to add a body idle. These Vite variables are read when the frontend is built. With reduced motion or an unavailable model/WebGL context, Mita uses the built-in stand-in. See `vroid_models/README.md` for the mascot's separate license terms.

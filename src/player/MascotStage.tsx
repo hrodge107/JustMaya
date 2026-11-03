@@ -1,4 +1,5 @@
 import { Component, lazy, Suspense, useState, type ReactNode } from 'react'
+import defaultModelUrl from '../../vroid_models/meta_chan.vrm?url'
 import { useReducedMotion } from '../motionPreference'
 import MascotPlaceholder from './MascotPlaceholder'
 import type { MascotStageProps } from './MascotPlaceholder'
@@ -11,7 +12,7 @@ class RenderBoundary extends Component<{ fallback: ReactNode; children: ReactNod
 
 export type { MascotStageProps } from './MascotPlaceholder'
 const VRMCanvas = lazy(() => import('./VRMCanvas'))
-const modelUrl = import.meta.env.VITE_MASCOT_VRM_URL?.trim()
+const modelUrl = import.meta.env.VITE_MASCOT_VRM_URL?.trim() || defaultModelUrl
 const idleUrl = import.meta.env.VITE_MASCOT_IDLE_URL?.trim()
 
 export default function MascotStage(props: MascotStageProps) {

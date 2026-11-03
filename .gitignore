@@ -52,3 +52,8 @@ backend/tests/fixtures/
 # Local chat references and experiments.
 .codex-remote-attachments/
 prototype/
+
+# Local VRM variants are excluded; the licensed project mascot is included.
+vroid_models/*
+!vroid_models/README.md
+!vroid_models/meta_chan.vrm
