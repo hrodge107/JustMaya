@@ -165,6 +165,7 @@ body:has(.home) { margin: 0; overflow: hidden; background: #23233a; color-scheme
   .rail button { min-width: 148px; }
   .dlg { flex: 1; }
 }
+@media (min-width: 800px) { .dlg { min-height: clamp(105px, 18dvh, 158px); } }
 @media (max-width: 719px) {
   .foot { display: flex; }
   .rail { flex: 1; gap: 5px; }
