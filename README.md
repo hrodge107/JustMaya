@@ -33,7 +33,7 @@ The submitted implementation was built during the hackathon. Repository history 
 
 ## See the experience
 
-These desktop captures show the current development interface and a saved digital-logic lesson.
+These desktop captures show the development interface and saved lessons. The recall checkpoint capture uses an earlier interface and a history lesson.
 
 **Lobby**
 
@@ -42,6 +42,10 @@ These desktop captures show the current development interface and a saved digita
 **Episode with a visual aid**
 
 ![Mita explains analog circuits beside a generated picture card](public/readme/episode.png)
+
+**Recall checkpoint**
+
+![Mita asks a multiple-choice question about early settlements](public/readme/recall.png)
 
 **Raise Hand input**
 
