@@ -1,4 +1,13 @@
-# React + TypeScript + Vite
+# Meet Mita
+
+Hackathon POC for local, single-user study sessions. Copy `.env.example` to
+`.env` at the repository root and set `META_API_KEY`. Keep `.env` and private
+documents out of Git. The application is not configured for public hosting.
+
+Original project code is MIT licensed. Dependencies and third-party assets
+retain their own terms; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+## Frontend tooling
 
 This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
 
