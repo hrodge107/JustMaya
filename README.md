@@ -6,11 +6,19 @@ Meet Mita is an anime study companion that turns a student's PDF into a playable
 
 ## See the experience
 
-These captures show a saved lesson based on the included sample chapter, using the current development interface. The Raise Hand response was generated during a real session.
+These desktop captures show a saved lesson based on the included sample chapter, using the current development interface. The Raise Hand response was generated during a real session.
 
-| Episode | Recall checkpoint | Raise Hand answer |
-| --- | --- | --- |
-| ![Mita presents the sample lesson](public/readme/episode.png) | ![A recall question about river settlements](public/readme/recall.png) | ![Mita answers a question about rivers](public/readme/raise-hand.png) |
+**Episode**
+
+![Mita presents the sample lesson](public/readme/episode.png)
+
+**Recall checkpoint**
+
+![A recall question about river settlements](public/readme/recall.png)
+
+**Raise Hand answer**
+
+![Mita answers a question about rivers](public/readme/raise-hand.png)
 
 ## From notes to an episode
 
