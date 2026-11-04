@@ -248,7 +248,7 @@ body:has(.player) { margin: 0; background: #23233a; color: #30304c; color-scheme
 @media (max-height: 500px) { .mode-checkpoint { min-height: 480px; } .mode-checkpoint .vn-menu-rail { min-height: 64px; padding-block: 8px; } }
 
 @media (min-width: 800px) {
-  .vn-frame { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(180px, 1fr) auto; padding-bottom: 48px; }
+  .vn-frame { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(180px, 1fr) auto; padding-bottom: 20px; }
   .vn-dialogue { block-size: clamp(108px, 21dvh, 168px); }
   .vn-frame > .player-header { grid-area: 1 / 1; min-height: 84px; padding-right: 226px; }
   .vn-frame > .vn-scene { grid-area: 2 / 1; }
