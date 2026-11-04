@@ -12,6 +12,18 @@ Students often receive course material as static files. Meet Mita tests a focuse
 
 The [Philippine Statistics Authority](https://psa.gov.ph/content/percentage-households-internet-connection-increased-488-percent-2024-two-every-three) reports that 98.8% of Filipino internet users aged 10 and older used a cellphone to access the internet in 2024. [Dentsu](https://insight.dentsu.com/sportsandentertainment/culture-commerce) reports that half of Gen Z worldwide watches anime at least weekly. These figures describe the intended audience's digital and media context; they do not measure Meet Mita's impact.
 
+## How Mita supports a learner
+
+Mita is designed to be a warm, curious guide who explains unfamiliar terms in everyday language before using the formal vocabulary. Her playful side serves the explanation, and she treats a mistake as something to work through. When a correction matters, her guidance stays direct and respectful.
+
+Each lesson begins with a relevant hook, builds the foundations, and moves into application and a recap. Checkpoints ask about ideas already introduced, giving the learner a chance to retrieve and use them. Research by [Karpicke and Roediger](https://doi.org/10.1126/science.1152408) found benefits from retrieval practice in a vocabulary learning experiment. Meet Mita's multiple-choice checkpoints draw on that principle; the study does not measure this app's results.
+
+When a learner chooses an incorrect answer, Mita's feedback is written for that choice. It identifies the mix-up and offers a next step without revealing the correct option, leaving the learner room to reason and try again. A correct answer comes with an explanation of why it fits.
+
+Raise Hand lets the learner pause at a specific point, ask for an explanation or hint, and return to the lesson. Tutor responses can show supporting document references or indicate when an answer goes beyond the source. The learner can challenge an answer and examine the evidence behind it. Relevant picture cards put a visual beside an explanation; [Mayer's research on multimedia learning](https://eric.ed.gov/?id=EJ456638) examines how words and pictures can support understanding. These are design choices to investigate with learners, rather than measured gains for Meet Mita.
+
+The player also supports keyboard and touch interaction, with a reduced-motion setting, so learners have more than one way to move through the experience.
+
 ## From study material to a guided lesson
 
 Meet Mita brings Meta models into a familiar learning task: understanding material a student has been assigned or saved. The uploaded source shapes the lesson. Muse Spark analyzes and organizes its ideas, develops the first episode, checks the generated lesson, and answers questions in context. Muse Image creates picture cards tied to the material being discussed. During playback, the learner can pause to recall an idea or raise a hand for an explanation or hint grounded in the source.
