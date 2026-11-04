@@ -192,8 +192,8 @@ export default function VRMCanvas(props: Props) {
       const desktop = width >= 1000
       // ponytail: interpolate the two supplied portrait/landscape crops; add another point only with a new reference.
       const aspectScale = height < 520 ? 1 : THREE.MathUtils.clamp(1.28 - (width / height - .55) * .33, .88, 1.35)
-      const span = frameHeight * .62 * THREE.MathUtils.clamp(520 / height, 1, 1.6) * aspectScale * (desktop ? 1.15 : 1)
-      frameAimY = crownPosition.y - frameHeight * (desktop ? .25: .26)
+      const span = frameHeight * .62 * THREE.MathUtils.clamp(520 / height, 1, 1.6) * aspectScale * (desktop ? 1.14 : 1)
+      frameAimY = crownPosition.y - frameHeight * (desktop ? .20: .26)
       camera.position.set(0, frameAimY, span / 2 / Math.tan(THREE.MathUtils.degToRad(camera.fov * .5)))
       camera.lookAt(0, frameAimY, 0)
     }
