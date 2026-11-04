@@ -1,3 +1,13 @@
+> **IMPORTANT: Demo Video Narration Disclosure**
+>
+> ElevenLabs was used **exclusively to generate the prerecorded voiceover narration for the demo video**.
+>
+> **ElevenLabs is NOT used in the application's runtime, agent pipeline, backend, or any project functionality.** It is not a runtime dependency or part of the submitted application's AI architecture.
+>
+> The ElevenLabs-generated audio is solely a presentation asset used to explain and demonstrate the project.
+>
+> This distinction follows the hackathon organizer's clarification that text-to-speech is an exception to the Meta-only restriction, including narration used in demo videos.
+
 # Meet Mita
 
 ![Mita in a study room](public/readme/mita-header.png)
